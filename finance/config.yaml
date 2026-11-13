@@ -1,5 +1,5 @@
 name: Finance
-version: "0.2.2"
+version: "0.2.3"
 slug: finance
 description: Personal finance tracker (Plaid and YNAB), served at its own address through a Cloudflare Tunnel
 arch:

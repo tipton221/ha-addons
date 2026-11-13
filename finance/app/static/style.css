@@ -126,8 +126,9 @@ a.button {
 }
 select {
   font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--bg); color: var(--text); max-width: 55%;
+  background: var(--bg); color: var(--text); width: 100%;
 }
+.selects { display: flex; flex-direction: column; gap: 6px; width: 55%; flex-shrink: 0; }
 .link-row label { margin: 0; color: var(--text); font-size: 1rem; }
 .link-row label .small { display: block; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0; text-align: center; }

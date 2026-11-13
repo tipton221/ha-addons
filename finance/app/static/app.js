@@ -151,7 +151,10 @@ const pages = {
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const links = {};
-      form.querySelectorAll("select").forEach((sel) => { links[sel.name] = sel.value; });
+      form.querySelectorAll("select[data-plaid]").forEach((sel) => {
+        const list = (links[sel.dataset.plaid] ||= []);
+        if (sel.value) list.push(sel.value);
+      });
       try { await api("/api/links", { links }); location.reload(); } catch (e) { say(e.message, true); }
     });
   },
