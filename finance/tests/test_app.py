@@ -267,3 +267,12 @@ def test_links_api_and_compare_page(tmp_path, monkeypatch):
         assert c.post("/api/links", json={"links": {"p1": ""}}, headers=H).status_code == 200
         with db.connect() as conn:
             assert conn.execute("SELECT COUNT(*) FROM account_links").fetchone()[0] == 0
+
+
+def test_shortdate_shows_year_outside_current_year():
+    from datetime import datetime as dt
+    from app.main import shortdate
+    now = dt(2026, 11, 13)
+    assert shortdate("2026-11-12", now) == "Nov 12"
+    assert shortdate("2024-11-15", now) == "Nov 15, 2024"
+    assert shortdate(None, now) == ""
