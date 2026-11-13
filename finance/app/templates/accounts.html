@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block page %}dashboard{% endblock %}
+{% set nav = "accounts" %}
+{% block title %}Accounts{% endblock %}
+{% block page %}accounts{% endblock %}
 {% block head %}{% if plaid_ready %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>{% endif %}{% endblock %}
 {% block content %}
 <header class="top">
-  <h1>Finance</h1>
+  <h1>Accounts</h1>
   <div class="actions">
     {% if plaid_ready %}<button id="sync" class="ghost">Sync now</button>{% endif %}
     <button id="logout" class="ghost">Sign out</button>
@@ -67,29 +69,5 @@
 </section>
 {% endif %}
 
-<section class="card">
-  <div class="card-head">
-    <h2>Recent transactions</h2>
-    <span class="muted small">{{ total }} stored</span>
-  </div>
-  {% if txns %}
-  <ul class="list txns">
-    {% for t in txns %}
-    <li class="{% if t.reviewed %}reviewed{% endif %}">
-      <label class="check">
-        <input type="checkbox" class="review" data-source="{{ t.source }}" data-id="{{ t.id }}" {% if t.reviewed %}checked{% endif %} aria-label="Reviewed">
-      </label>
-      <div class="grow">
-        <strong>{{ t.merchant or t.name }}</strong>
-        {% if t.pending %}<span class="pill">Pending</span>{% endif %}
-        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ category(t) }}{% endif %}</span>
-      </div>
-      <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">No transactions yet.</p>
-  {% endif %}
-</section>
+<p class="muted small">{{ total }} transactions stored from Plaid.</p>
 {% endblock %}

@@ -107,7 +107,7 @@ def page(added=(), modified=(), removed=(), cursor="c1", more=False):
 
 def seed_item(db):
     with db.connect() as conn:
-        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1', 'tok', 'Amex')")
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1', 'tok', 'Acme')")
 
 
 def test_sync_pages_pending_to_posted_and_cursor(tmp_path):
@@ -152,7 +152,7 @@ def test_sync_marks_login_required(tmp_path):
     with db.connect() as conn:
         item = dict(conn.execute("SELECT * FROM plaid_items").fetchone())
     assert item["status"] == "login_required"
-    assert result["Amex"] == {"error": "ITEM_LOGIN_REQUIRED"}
+    assert result["Acme"] == {"error": "ITEM_LOGIN_REQUIRED"}
 
 
 # ---------------------------------------------------------------- YNAB and comparison
@@ -184,7 +184,7 @@ def ytxn(tid, milli, d="2026-11-10", acct="y1", deleted=False, payee="Shop"):
 
 def test_ynab_import_signs_and_delta(tmp_path):
     db = Database(tmp_path / "f.db")
-    ynab = FakeYNAB([{"id": "y1", "name": "AMEX Gold Card", "type": "creditCard", "balance": -187990,
+    ynab = FakeYNAB([{"id": "y1", "name": "ACME Gold Card", "type": "creditCard", "balance": -50000,
                       "closed": False, "deleted": False}],
                     [([ytxn("a", -12500), ytxn("b", 500000)], 10),
                      ([ytxn("a", -12500, deleted=True)], 11)])
@@ -197,23 +197,23 @@ def test_ynab_import_signs_and_delta(tmp_path):
     with db.connect() as conn:
         assert [r["id"] for r in conn.execute("SELECT id FROM transactions WHERE source='ynab'")] == ["b"]
         acct = dict(conn.execute("SELECT * FROM accounts WHERE source='ynab'").fetchone())
-    assert acct["account_id"] == "ynab:y1" and acct["current_balance"] == -187.99
+    assert acct["account_id"] == "ynab:y1" and acct["current_balance"] == -50.0
 
 
 def test_suggest_links():
-    plaid = [{"account_id": "p1", "name": "American Express Gold Card", "mask": "1003"},
-             {"account_id": "p2", "name": "Blue Business Cash(TM)", "mask": "1008"},
-             {"account_id": "p3", "name": "Blue Cash Preferred®", "mask": "5003"},
-             {"account_id": "p4", "name": "Hilton Honors Card", "mask": "1004"},
-             {"account_id": "p5", "name": "Platinum Card®", "mask": "1000"},
+    plaid = [{"account_id": "p1", "name": "Acme Gold Card", "mask": "1111"},
+             {"account_id": "p2", "name": "Acme Business Cash(TM)", "mask": "2222"},
+             {"account_id": "p3", "name": "Acme Cash Preferred®", "mask": "3333"},
+             {"account_id": "p4", "name": "Acme Hotel Card", "mask": "4444"},
+             {"account_id": "p5", "name": "Acme Platinum Card®", "mask": "5555"},
              {"account_id": "p6", "name": "Some Other Card", "mask": "9"}]
-    ynab = [{"account_id": "ynab:g", "name": "AMEX Gold Card", "subtype": "open"},
-            {"account_id": "ynab:gold", "name": "Amex Gold Card old", "subtype": "closed"},
-            {"account_id": "ynab:bbc", "name": "AMEX Business Cash", "subtype": "open"},
-            {"account_id": "ynab:bcp", "name": "AMEX Blue Cash Preferred", "subtype": "open"},
-            {"account_id": "ynab:h", "name": "AMEX Hilton Honors", "subtype": "open"},
-            {"account_id": "ynab:p", "name": "AMEX Platinum Card", "subtype": "open"},
-            {"account_id": "ynab:wf", "name": "Wealthfront", "subtype": "open"}]
+    ynab = [{"account_id": "ynab:g", "name": "ACME Gold Card", "subtype": "open"},
+            {"account_id": "ynab:gold", "name": "Acme Gold Card old", "subtype": "closed"},
+            {"account_id": "ynab:bbc", "name": "ACME Business Cash", "subtype": "open"},
+            {"account_id": "ynab:bcp", "name": "ACME Cash Preferred", "subtype": "open"},
+            {"account_id": "ynab:h", "name": "ACME Hotel", "subtype": "open"},
+            {"account_id": "ynab:p", "name": "ACME Platinum Card", "subtype": "open"},
+            {"account_id": "ynab:wf", "name": "Savings Bank", "subtype": "open"}]
     assert suggest_links(plaid, ynab) == {"p1": "ynab:g", "p2": "ynab:bbc", "p3": "ynab:bcp",
                                           "p4": "ynab:h", "p5": "ynab:p"}
 
@@ -247,9 +247,9 @@ def test_links_api_and_compare_page(tmp_path, monkeypatch):
     app = create_app(settings, background_sync=False)
     db = Database(tmp_path / "finance.db")
     with db.connect() as conn:
-        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Amex')")
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
         conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Gold Card')")
-        conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES ('ynab:y1','ynab','AMEX Gold Card','open')")
+        conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES ('ynab:y1','ynab','ACME Gold Card','open')")
         conn.execute("INSERT INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')",
                      (__import__("hashlib").sha256(b"tok").hexdigest(),))
         for i, (src, acct, d) in enumerate([("plaid", "p1", "2026-11-01"), ("ynab", "ynab:y1", "2026-11-02")]):
@@ -282,8 +282,8 @@ def test_compare_flags_transactions_in_other_ynab_account(tmp_path):
     from datetime import date as _date
     db = Database(tmp_path / "f.db")
     with db.connect() as conn:
-        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Amex')")
-        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Blue Cash')")
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Card Two')")
         conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES "
                      "('ynab:new','ynab','BCP','open'), ('ynab:old','ynab','BCP old','closed')")
         conn.execute("INSERT INTO account_links VALUES ('p1', 'ynab:new')")
@@ -325,7 +325,7 @@ def test_ynab_client_requests_full_history_first(tmp_path, monkeypatch):
 
 def test_clean_account_names():
     from app.sync import _clean
-    assert _clean("WELLS FARGO AUTOGRAPH VISA�� CARD ...5998") == "WELLS FARGO AUTOGRAPH VISA CARD ...5998"
+    assert _clean("EXAMPLE BANK VISA�� CARD ...0000") == "EXAMPLE BANK VISA CARD ...0000"
 
 
 def test_compare_uses_purchase_date():
@@ -343,20 +343,20 @@ def test_multiple_ynab_accounts_per_plaid_account(tmp_path, monkeypatch):
     app = create_app(settings, background_sync=False)
     db = Database(tmp_path / "finance.db")
     with db.connect() as conn:
-        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Wells Fargo')")
-        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Autograph')")
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Example Bank')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','New Card')")
         conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES "
-                     "('ynab:bilt','ynab','Bilt Rewards','open'), ('ynab:auto','ynab','Wells Fargo Autograph Visa','open')")
+                     "('ynab:old','ynab','Old Card Rewards','open'), ('ynab:new','ynab','New Card Visa','open')")
         conn.execute("INSERT INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')", (hashlib.sha256(b"tok").hexdigest(),))
         rows = [("plaid", "a", "p1", "2025-01-05", 10.0), ("plaid", "b", "p1", "2026-10-26", 20.0),
-                ("ynab", "y1", "ynab:bilt", "2025-01-05", 10.0), ("ynab", "y2", "ynab:auto", "2026-10-26", 20.0)]
+                ("ynab", "y1", "ynab:old", "2025-01-05", 10.0), ("ynab", "y2", "ynab:new", "2026-10-26", 20.0)]
         conn.executemany("INSERT INTO transactions (source, id, account_id, date, name, amount) "
                          "VALUES (?, ?, ?, ?, 'Shop', ?)", rows)
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
-        c.post("/api/links", json={"links": {"p1": ["ynab:auto", "ynab:bilt", "ynab:auto", "bogus"]}}, headers=H)
+        c.post("/api/links", json={"links": {"p1": ["ynab:new", "ynab:old", "ynab:new", "bogus"]}}, headers=H)
         page = c.get("/compare").text
-    assert "Wells Fargo Autograph Visa + Bilt Rewards" in page
+    assert "New Card Visa + Old Card Rewards" in page
     r = compare_all(db, today=_date(2026, 11, 13))["pairs"][0]
     assert r.matched == 2 and not r.only_plaid and r.ynab_count == 2
 
@@ -374,3 +374,158 @@ def test_links_table_migrates_from_single_link(tmp_path):
         conn.execute("INSERT INTO account_links VALUES ('p1', 'ynab:y2')")
         rows = sorted(tuple(r) for r in conn.execute("SELECT * FROM account_links"))
     assert rows == [("p1", "ynab:y1"), ("p1", "ynab:y2")]
+
+
+# ---------------------------------------------------------------- 0.3.0: inbox, bills, search
+
+from datetime import date as D  # noqa: E402
+
+from app.bills import add_months, bill_status, coverage, detect, next_payday, save_detected  # noqa: E402
+
+
+def seed(db, rows, accounts=None):
+    import hashlib
+    with db.connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Bank')")
+        for a in accounts or []:
+            conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance, available_balance) "
+                         "VALUES (?, 'plaid', 'i1', ?, ?, ?, ?)", a)
+        for r in rows:
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, merchant, amount, pending, "
+                         "category, category_detail, reviewed) VALUES ('plaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", r)
+        conn.execute("INSERT OR IGNORE INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')",
+                     (hashlib.sha256(b"tok").hexdigest(),))
+
+
+def monthly(prefix, merchant, amount, day, months, category="RENT_AND_UTILITIES", acct="card"):
+    out = []
+    for i, m in enumerate(months):
+        out.append((f"{prefix}{i}", acct, f"2026-{m:02d}-{day:02d}", merchant.upper(), merchant, amount, 0,
+                    category, category + "_X", 1))
+    return out
+
+
+def test_detect_recurring_bills(tmp_path):
+    db = Database(tmp_path / "f.db")
+    rows = (monthly("tm", "Phone Co", 99.10, 11, [7, 8, 9, 10, 11])
+            + monthly("rent", "Rent Co", 2000.0, 1, [8, 9, 10, 11])
+            + monthly("qfc", "QFC", 40.0, 3, [8, 9, 10, 11], category="FOOD_AND_DRINK")
+            + monthly("pay", "Card Payment", 900.0, 20, [8, 9, 10], category="LOAN_PAYMENTS")
+            + monthly("old", "Gym", 30.0, 5, [1, 2, 3, 4]))
+    rows = [r if r[0][:3] != "pay" else r[:7] + ("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 1) for r in rows]
+    rows += [("ins1", "card", "2025-10-19", "INSURER", "Insurer", 500.0, 0, "GENERAL_SERVICES", "X", 1),
+             ("ins2", "card", "2026-04-18", "INSURER", "Insurer", 500.0, 0, "GENERAL_SERVICES", "X", 1),
+             ("ins3", "card", "2026-10-19", "INSURER", "Insurer", 525.0, 0, "GENERAL_SERVICES", "X", 1)]
+    seed(db, rows)
+    found = {c.name: c for c in detect(db, D(2026, 11, 13))}
+    assert set(found) == {"Phone Co", "Rent Co", "Insurer"}  # not groceries, card payments, or the old gym
+    assert found["Phone Co"].cadence == "monthly" and found["Phone Co"].amount == 99.10
+    assert found["Insurer"].cadence == "semiannual"
+    assert save_detected(db, list(found.values())) == 3
+    assert save_detected(db, list(found.values())) == 0  # not added twice
+    bills = {b["name"]: b for b in bill_status(db, D(2026, 11, 13))}
+    assert bills["Phone Co"]["next_due"] == D(2026, 12, 11)
+    assert bills["Rent Co"]["next_due"] == D(2026, 12, 1)
+    assert bills["Insurer"]["next_due"] == D(2027, 4, 19)
+
+
+def test_paydays():
+    semi = {"kind": "semimonthly", "days": [10, 25]}
+    assert next_payday(semi, D(2026, 11, 13)) == D(2026, 11, 25)
+    assert next_payday(semi, D(2026, 11, 26)) == D(2026, 12, 10)
+    assert next_payday(semi, D(2027, 4, 1)) == D(2027, 4, 9)  # April 10, 2027 is a Saturday
+    assert next_payday({"kind": "biweekly", "anchor": "2026-11-20"}, D(2026, 11, 21)) == D(2026, 12, 4)
+    assert next_payday({"kind": "biweekly", "anchor": "2026-11-20"}, D(2026, 11, 13)) == D(2026, 11, 20)
+    assert add_months(D(2026, 1, 31), 1) == D(2026, 2, 28)
+
+
+def test_coverage(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed(db, [("p1", "card", "2026-11-12", "X", "X", 50.0, 1, "FOOD_AND_DRINK", "X", 0)],
+         accounts=[("cash", "Cash", "depository", 6000.0, 5900.0), ("card", "Gold", "credit", 1200.0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES "
+                     "('Phone Co', 'phone co', 200, 'monthly', 20), ('Rent', 'rent co', 2000, 'monthly', 1), "
+                     "('Gold fee', 'membership fee', 325, 'yearly', 25)")
+        conn.execute("UPDATE bills SET next_due_override='2027-06-25' WHERE name='Gold fee'")
+    c = coverage(db, {"kind": "semimonthly", "days": [10, 25]}, D(2026, 11, 13))
+    assert c["payday"] == D(2026, 11, 25)
+    assert [b["name"] for b in c["due"]] == ["Phone Co"]
+    assert c["left"] == 5900 - 1200 - 50 - 200
+    assert round(c["annual_reserve"], 2) == round(325 / 12, 2)
+
+
+def test_inbox_pages_and_review_all(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    db = Database(tmp_path / "finance.db")
+    db.set_kv("inbox_initialized", "1")
+    seed(db, [("n1", "card", D.today().isoformat(), "NEW", "New Shop", 12.0, 1, "FOOD_AND_DRINK", "X", 0),
+              ("n2", "card", D.today().isoformat(), "OTHER", "Other", 3.0, 0, "FOOD_AND_DRINK", "X", 0),
+              ("o1", "card", "2025-01-01", "OLD", "Old Shop", 9.0, 0, "FOOD_AND_DRINK", "X", 1)],
+         accounts=[("card", "Gold", "credit", 100.0, None)])
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/").text
+        assert "New Shop" in page and "Pending" in page and "Old Shop" not in page
+        assert c.post("/api/inbox/review-all", json={"ids": ["n1", "n2"]}, headers=H).json()["count"] == 2
+        assert "All caught up" in c.get("/").text
+        for path in ("/bills", "/search", "/accounts", "/search?q=old&min=1"):
+            assert c.get(path).status_code == 200, path
+        assert "Old Shop" in c.get("/search?q=old").text
+
+
+def test_inbox_migration_marks_old_history_reviewed(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    db = Database(tmp_path / "finance.db")
+    seed(db, [("old", "card", "2025-01-01", "OLD", "Old", 9.0, 0, None, None, 0),
+              ("new", "card", D.today().isoformat(), "NEW", "New", 9.0, 0, None, None, 0)])
+    create_app(settings, background_sync=False)
+    with db.connect() as conn:
+        assert {r["id"]: r["reviewed"] for r in conn.execute("SELECT id, reviewed FROM transactions")} == {"old": 1, "new": 0}
+
+
+def test_bills_api_and_export(tmp_path, monkeypatch):
+    import csv as _csv
+    import io as _io
+    settings = make_settings(tmp_path, monkeypatch)
+    db = Database(tmp_path / "finance.db")
+    seed(db, [("a", "card", "2026-10-01", "AMAZON MKTPLACE", "Amazon", 25.5, 0, "GENERAL_MERCHANDISE", "X", 1),
+              ("b", "card", "2026-10-02", "PAYMENT THANK YOU", None, -100.0, 0, "LOAN_PAYMENTS", "X", 1)],
+         accounts=[("card", "Gold", "credit", 100.0, None)])
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/bills", json={"name": "City Power", "amount": "85", "cadence": "monthly",
+                                          "due_day": "18"}, headers=H).status_code == 200
+        assert c.post("/api/bills", json={"name": "", "amount": "x"}, headers=H).status_code == 400
+        with db.connect() as conn:
+            bill = dict(conn.execute("SELECT * FROM bills").fetchone())
+        assert bill["match"] == "city power" and bill["due_day"] == 18
+        c.post(f"/api/bills/{bill['id']}/delete", headers=H)
+        assert c.post("/api/paydays", json={"kind": "biweekly", "anchor": "2026-11-20"}, headers=H).status_code == 200
+        assert c.post("/api/paydays", json={"kind": "semimonthly", "days": [40]}, headers=H).status_code == 400
+        r = c.get("/export.csv?q=amazon")
+        assert r.headers["content-type"].startswith("text/csv")
+        rows = list(_csv.reader(_io.StringIO(r.text)))
+        assert rows[0][0] == "date" and len(rows) == 2 and rows[1][7] == "-25.50"
+
+
+def test_stale_bill_is_flagged_and_not_counted(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed(db, monthly("ag", "Old Lease Co", 1500.0, 1, [6, 7, 8, 9]),
+         accounts=[("cash", "Cash", "depository", 5000.0, 5000.0)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Old Lease Co', 'old lease co', 1500, 'monthly')")
+    b = bill_status(db, D(2026, 11, 13))[0]
+    assert b["stale"]
+    c = coverage(db, {"kind": "semimonthly", "days": [10, 25]}, D(2026, 11, 28))
+    assert c["due"] == [] and c["left"] == 5000
+
+
+def test_bill_matches_similar_amount_only(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed(db, [("p1", "card", "2026-03-18", "AMAZON PRIME", "Amazon", 147.34, 0, "GENERAL_SERVICES", "X", 1),
+              ("o1", "card", "2026-11-10", "AMAZON MKTPLACE", "Amazon", 13.22, 0, "GENERAL_MERCHANDISE", "X", 1)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Amazon Prime', 'amazon', 147.34, 'yearly')")
+    b = bill_status(db, D(2026, 11, 13))[0]
+    assert b["last_date"] == "2026-03-18" and b["next_due"] == D(2027, 3, 18) and not b["stale"]

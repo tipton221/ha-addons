@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+import csv
+import io
+import json
+from datetime import date, datetime
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -19,6 +23,7 @@ from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
+from .bills import CADENCE_MONTHS, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
 from .sync import sync_all, sync_ynab
 from .ynab import YNAB
@@ -62,11 +67,20 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     ynab = ynab or YNAB(settings)
     sync_lock = asyncio.Lock()
 
+    if db.get_kv("inbox_initialized") != "1":
+        # Before 0.3.0 every transaction started unreviewed; start the inbox with the last week only.
+        with db.connect() as conn:
+            conn.execute("UPDATE transactions SET reviewed=1 WHERE date < date('now', '-7 day')")
+        db.set_kv("inbox_initialized", "1")
+
     async def run_sync() -> dict:
         results: dict = {}
         async with sync_lock:
             if plaid is not None:
                 results["plaid"] = await sync_all(db, plaid)
+                if db.get_kv("bills_detected") != "1":
+                    results["bills_added"] = save_detected(db, detect(db, datetime.now(PACIFIC).date()))
+                    db.set_kv("bills_detected", "1")
             if ynab.configured:
                 try:
                     results["ynab"] = await sync_ynab(db, ynab)
@@ -235,8 +249,33 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     # ---------- app pages ----------
 
+    def schedule() -> dict:
+        raw = db.get_kv("payday_schedule")
+        return json.loads(raw) if raw else {"kind": "semimonthly", "days": [10, 25]}
+
+    def txn_query(where: str = "", params: tuple = (), limit: int | None = None, order: str = "t.date DESC, t.first_seen_at DESC"):
+        sql = ("SELECT t.*, a.name AS account_name, a.mask, a.type AS account_type, p.institution "
+               "FROM transactions t LEFT JOIN accounts a ON a.account_id = t.account_id "
+               "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE t.source='plaid' "
+               + (f"AND {where} " if where else "") + f"ORDER BY {order}")
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        with db.connect() as conn:
+            return [dict(r) for r in conn.execute(sql, params)]
+
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard(request: Request):
+    async def home(request: Request):
+        inbox = txn_query("t.reviewed = 0", limit=300)
+        cov = coverage(db, schedule(), datetime.now(PACIFIC).date())
+        with db.connect() as conn:
+            attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
+        return templates.TemplateResponse(request, "home.html", {
+            "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
+            "attention": attention, "last_sync": db.get_kv("last_sync_at"),
+        })
+
+    @app.get("/accounts", response_class=HTMLResponse)
+    async def accounts_page(request: Request):
         with db.connect() as conn:
             items = [dict(r) for r in conn.execute(
                 "SELECT item_id, institution, status, error_code, update_status, last_sync_at "
@@ -244,21 +283,164 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             accounts = [dict(r) for r in conn.execute(
                 "SELECT a.*, p.institution FROM accounts a LEFT JOIN plaid_items p "
                 "ON a.item_id = p.item_id WHERE a.source='plaid' ORDER BY p.institution, a.type, a.name")]
-            txns = [dict(r) for r in conn.execute(
-                "SELECT t.*, a.name AS account_name, a.mask FROM transactions t "
-                "LEFT JOIN accounts a ON a.account_id = t.account_id WHERE t.source='plaid' "
-                "ORDER BY t.date DESC, t.first_seen_at DESC LIMIT 50")]
             total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid'").fetchone()["n"]
             ynab_total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='ynab'").fetchone()["n"]
         ynab_status = None
         if ynab.configured:
             ynab_status = {"last_sync": db.get_kv("ynab_last_sync_at"), "error": db.get_kv("ynab_error"),
                            "count": ynab_total}
-        return templates.TemplateResponse(request, "dashboard.html", {
+        return templates.TemplateResponse(request, "accounts.html", {
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
-            "accounts": accounts, "txns": txns, "total": total, "ynab": ynab_status,
-            "last_sync": db.get_kv("last_sync_at"),
+            "accounts": accounts, "total": total, "ynab": ynab_status,
         })
+
+    @app.post("/api/inbox/review-all")
+    async def review_all(request: Request):
+        body = await request.json()
+        ids = [str(i) for i in body.get("ids", [])][:1000]
+        with db.connect() as conn:
+            conn.executemany("UPDATE transactions SET reviewed=1 WHERE source='plaid' AND id=?", [(i,) for i in ids])
+        return {"ok": True, "count": len(ids)}
+
+    # ---------- bills ----------
+
+    @app.get("/bills", response_class=HTMLResponse)
+    async def bills_page(request: Request):
+        today = datetime.now(PACIFIC).date()
+        bills = bill_status(db, today)
+        return templates.TemplateResponse(request, "bills.html", {
+            "bills": bills, "schedule": schedule(), "cov": coverage(db, schedule(), today),
+            "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
+        })
+
+    def bill_fields(body: dict) -> dict:
+        try:
+            out = {
+                "name": str(body["name"]).strip()[:80],
+                "match": normalize(str(body.get("match") or body["name"])),
+                "amount": round(abs(float(body["amount"])), 2),
+                "cadence": body.get("cadence") if body.get("cadence") in CADENCE_MONTHS else "monthly",
+                "due_day": int(body["due_day"]) if body.get("due_day") else None,
+                "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
+                "active": 1 if body.get("active", True) else 0,
+            }
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
+        if not out["name"] or not out["match"] or (out["due_day"] is not None and not 1 <= out["due_day"] <= 31):
+            raise HTTPException(400, "Check the name and day of month")
+        return out
+
+    @app.post("/api/bills")
+    async def save_bill(request: Request):
+        body = await request.json()
+        f = bill_fields(body)
+        with db.connect() as conn:
+            if body.get("id"):
+                conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
+                             "active=? WHERE id=?", (*f.values(), int(body["id"])))
+            else:
+                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
+        return {"ok": True}
+
+    @app.post("/api/bills/{bill_id}/delete")
+    async def delete_bill(bill_id: int):
+        with db.connect() as conn:
+            row = conn.execute("SELECT match, source FROM bills WHERE id=?", (bill_id,)).fetchone()
+            if row and row["source"] == "detected":
+                conn.execute("INSERT OR IGNORE INTO bills_dismissed VALUES (?)", (row["match"],))
+            conn.execute("DELETE FROM bills WHERE id=?", (bill_id,))
+        return {"ok": True}
+
+    @app.post("/api/bills/detect")
+    async def detect_bills():
+        return {"added": save_detected(db, detect(db, datetime.now(PACIFIC).date()))}
+
+    @app.post("/api/paydays")
+    async def save_paydays(request: Request):
+        body = await request.json()
+        if body.get("kind") == "biweekly":
+            try:
+                anchor = date.fromisoformat(body["anchor"]).isoformat()
+            except (KeyError, ValueError):
+                raise HTTPException(400, "Pick a recent payday date")
+            sched = {"kind": "biweekly", "anchor": anchor}
+        else:
+            try:
+                days = sorted({int(d) for d in body.get("days", [])})
+            except ValueError:
+                raise HTTPException(400, "Paydays must be days of the month")
+            if not days or any(not 1 <= d <= 31 for d in days):
+                raise HTTPException(400, "Paydays must be days of the month")
+            sched = {"kind": "semimonthly", "days": days}
+        db.set_kv("payday_schedule", json.dumps(sched))
+        return {"ok": True}
+
+    # ---------- search and export ----------
+
+    def search_filter(q: dict) -> tuple[str, tuple]:
+        where, params = [], []
+        if q.get("q"):
+            where.append("(lower(coalesce(t.merchant,'')) LIKE ? OR lower(t.name) LIKE ?)")
+            params += [f"%{q['q'].lower()}%"] * 2
+        if q.get("account"):
+            where.append("t.account_id = ?")
+            params.append(q["account"])
+        if q.get("category"):
+            where.append("t.category = ?")
+            params.append(q["category"])
+        if q.get("start"):
+            where.append("t.date >= ?")
+            params.append(q["start"])
+        if q.get("end"):
+            where.append("t.date <= ?")
+            params.append(q["end"])
+        for key, op in (("min", ">="), ("max", "<=")):
+            if q.get(key):
+                try:
+                    params.append(abs(float(q[key])))
+                    where.append(f"ABS(t.amount) {op} ?")
+                except ValueError:
+                    pass
+        return " AND ".join(where), tuple(params)
+
+    @app.get("/search", response_class=HTMLResponse)
+    async def search_page(request: Request):
+        q = dict(request.query_params)
+        where, params = search_filter(q)
+        rows = txn_query(where, params, limit=1001) if any(q.values()) else txn_query(limit=100)
+        more = len(rows) > 1000
+        rows = rows[:1000]
+        with db.connect() as conn:
+            accts = [dict(r) for r in conn.execute(
+                "SELECT a.account_id, a.name, a.mask, p.institution FROM accounts a "
+                "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE a.source='plaid' ORDER BY p.institution, a.name")]
+            cats = [r["category"] for r in conn.execute(
+                "SELECT DISTINCT category FROM transactions WHERE source='plaid' AND category IS NOT NULL ORDER BY 1")]
+        out = sum(t["amount"] for t in rows if t["amount"] > 0)
+        inflow = -sum(t["amount"] for t in rows if t["amount"] < 0)
+        return templates.TemplateResponse(request, "search.html", {
+            "q": q, "rows": rows, "more": more, "accounts": accts, "categories": cats,
+            "searched": any(q.values()), "total_out": out, "total_in": inflow,
+            "export_query": urlencode({k: v for k, v in q.items() if v}),
+        })
+
+    @app.get("/export.csv")
+    async def export_csv(request: Request):
+        where, params = search_filter(dict(request.query_params))
+        rows = txn_query(where, params, order="t.date, t.first_seen_at")
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["date", "authorized_date", "institution", "account", "mask", "merchant", "description",
+                    "amount", "category", "category_detail", "pending", "reviewed"])
+        for t in rows:
+            w.writerow([t["date"], t["authorized_date"] or "", t["institution"] or "", t["account_name"] or "",
+                        t["mask"] or "", t["merchant"] or "", t["name"], f"{-t['amount']:.2f}",
+                        t["category"] or "", t["category_detail"] or "", "yes" if t["pending"] else "no",
+                        "yes" if t["reviewed"] else "no"])
+        stamp = datetime.now(PACIFIC).strftime("%Y-%m-%d")
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="transactions-{stamp}.csv"'})
 
     @app.get("/compare", response_class=HTMLResponse)
     async def compare_page(request: Request):

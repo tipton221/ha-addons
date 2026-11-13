@@ -79,6 +79,24 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS transactions_date ON transactions (date DESC);
 CREATE INDEX IF NOT EXISTS transactions_account ON transactions (account_id, date);
 
+CREATE TABLE IF NOT EXISTS bills (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    match           TEXT NOT NULL,          -- lowercase text found in the merchant or name
+    amount          REAL NOT NULL,          -- expected charge
+    cadence         TEXT NOT NULL DEFAULT 'monthly',
+    due_day         INTEGER,                -- day of month it usually charges
+    next_due_override TEXT,                 -- for yearly bills with a known date
+    active          INTEGER NOT NULL DEFAULT 1,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Detected bills the user removed, so detection does not add them back.
+CREATE TABLE IF NOT EXISTS bills_dismissed (
+    match           TEXT PRIMARY KEY
+);
+
 -- Which YNAB accounts track the same card or bank account as a Plaid account.
 -- More than one is allowed, e.g. when a card was converted and YNAB kept the old account.
 CREATE TABLE IF NOT EXISTS account_links (

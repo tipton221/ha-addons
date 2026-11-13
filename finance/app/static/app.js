@@ -114,6 +114,12 @@ async function openLink(itemId) {
   } catch (e) { say(e.message, true); }
 }
 
+async function syncNow(ev) {
+  ev.target.disabled = true;
+  say("Syncing");
+  try { await api("/api/sync"); location.reload(); } catch (e) { say(e.message, true); ev.target.disabled = false; }
+}
+
 // ---------- pages ----------
 
 const pages = {
@@ -159,26 +165,86 @@ const pages = {
     });
   },
 
-  dashboard() {
+  accounts() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
     on("logout", async () => { await api("/api/logout"); location.href = "/login"; });
-    on("sync", async (ev) => {
-      ev.target.disabled = true;
-      say("Syncing");
-      try { await api("/api/sync"); location.reload(); } catch (e) { say(e.message, true); ev.target.disabled = false; }
-    });
+    on("sync", syncNow);
     document.querySelectorAll(".reconnect").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item)));
-    document.querySelectorAll(".review").forEach((box) =>
-      box.addEventListener("change", async () => {
-        const li = box.closest("li");
+  },
+
+  home() {
+    const sync = document.getElementById("sync");
+    if (sync) sync.addEventListener("click", syncNow);
+    const list = document.getElementById("inbox");
+    const count = document.getElementById("inbox-count");
+    const refresh = () => {
+      const n = list ? list.querySelectorAll("li").length : 0;
+      if (count) count.textContent = n;
+      if (!n) {
+        document.getElementById("inbox-empty").hidden = false;
+        const all = document.getElementById("review-all");
+        if (all) all.hidden = true;
+      }
+    };
+    document.querySelectorAll(".tick").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const li = btn.closest("li");
+        li.classList.add("leaving");
         try {
-          await api(`/api/transactions/${box.dataset.source}/${encodeURIComponent(box.dataset.id)}/review`,
-            { reviewed: box.checked });
-          li.classList.toggle("reviewed", box.checked);
-        } catch (e) { box.checked = !box.checked; say(e.message, true); }
+          await api(`/api/transactions/${btn.dataset.source}/${encodeURIComponent(btn.dataset.id)}/review`, { reviewed: true });
+          setTimeout(() => { li.remove(); refresh(); }, 180);
+        } catch (e) { li.classList.remove("leaving"); say(e.message, true); }
       }));
+    const all = document.getElementById("review-all");
+    if (all) all.addEventListener("click", async () => {
+      const ids = [...list.querySelectorAll("li")].map((li) => li.dataset.id);
+      if (!ids.length || !confirm(`Mark all ${ids.length} as reviewed?`)) return;
+      try { await api("/api/inbox/review-all", { ids }); list.innerHTML = ""; refresh(); }
+      catch (e) { say(e.message, true); }
+    });
+  },
+
+  bills() {
+    document.querySelectorAll(".bill-form").forEach((form) =>
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const f = form.elements;
+        try {
+          await api("/api/bills", {
+            id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
+            cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
+            next_due: f.next_due.value, active: f.active.checked,
+          });
+          location.reload();
+        } catch (e) { say(e.message, true); window.scrollTo(0, 0); }
+      }));
+    document.querySelectorAll(".delete-bill").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("Remove this bill?")) return;
+        try { await api(`/api/bills/${b.dataset.id}/delete`); location.reload(); } catch (e) { say(e.message, true); }
+      }));
+    const detect = document.getElementById("detect");
+    if (detect) detect.addEventListener("click", async () => {
+      try {
+        const r = await api("/api/bills/detect");
+        say(r.added ? `Added ${r.added} bill${r.added > 1 ? "s" : ""}.` : "No new recurring charges found.");
+        if (r.added) setTimeout(() => location.reload(), 900);
+      } catch (e) { say(e.message, true); }
+    });
+    const pay = document.getElementById("payday-form");
+    if (pay) pay.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const f = pay.elements;
+      const kind = f.kind.value;
+      try {
+        await api("/api/paydays", kind === "biweekly"
+          ? { kind, anchor: f.anchor.value }
+          : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean) });
+        location.reload();
+      } catch (e) { say(e.message, true); }
+    });
   },
 };
 

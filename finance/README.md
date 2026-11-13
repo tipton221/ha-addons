@@ -43,4 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 0.2.0: passkey login, Cloudflare Access check, Plaid Link with OAuth return, Plaid transaction and balance sync, a review checkbox per transaction, YNAB account and transaction import (delta sync), and a Plaid versus YNAB comparison page with account linking. The daily inbox, bills coverage, search, and export come next.
+Version 0.3.0:
+
+- Inbox home page: unreviewed transactions (pending included), one-tap review, mark all reviewed. History older than a week arrives already reviewed.
+- Bills: recurring charges detected from Plaid history and editable (amount, cadence, day, match text, next due date). Bills that stop charging are flagged and left out.
+- Coverage: cash minus card balances, pending card charges, and bills due before the next payday (twice-monthly days or every two weeks).
+- Search by merchant, dates, amounts, account, and category, with CSV export of the results.
+- Accounts page with Plaid connections, YNAB import status, and the Plaid versus YNAB comparison.

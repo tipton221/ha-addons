@@ -12,6 +12,14 @@
 </head>
 <body data-page="{% block page %}{% endblock %}">
   <main class="wrap">
+    {% if nav is defined %}
+    <nav class="tabs" aria-label="Sections">
+      <a href="/" {% if nav == "inbox" %}aria-current="page"{% endif %}>Inbox</a>
+      <a href="/bills" {% if nav == "bills" %}aria-current="page"{% endif %}>Bills</a>
+      <a href="/search" {% if nav == "search" %}aria-current="page"{% endif %}>Search</a>
+      <a href="/accounts" {% if nav == "accounts" %}aria-current="page"{% endif %}>Accounts</a>
+    </nav>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

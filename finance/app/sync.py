@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .db import Database
 from .plaid import Plaid, PlaidError
 
 log = logging.getLogger("finance.sync")
+
+INBOX_DAYS = 7
 
 LOGIN_ERRORS = {"ITEM_LOGIN_REQUIRED", "PENDING_EXPIRATION", "PENDING_DISCONNECT"}
 
@@ -36,13 +38,16 @@ def _txn_row(t: dict) -> tuple:
         pfc.get("primary"),
         pfc.get("detailed"),
         json.dumps(t),
+        # History older than a week (first sync of a new connection) arrives already reviewed,
+        # so the inbox only holds recent activity.
+        1 if t["date"] < (date.today() - timedelta(days=INBOX_DAYS)).isoformat() else 0,
     )
 
 
 UPSERT = """
 INSERT INTO transactions (source, id, account_id, date, authorized_date, name, merchant,
-    amount, currency, pending, pending_id, category, category_detail, raw)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    amount, currency, pending, pending_id, category, category_detail, raw, reviewed)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source, id) DO UPDATE SET
     account_id = excluded.account_id, date = excluded.date,
     authorized_date = excluded.authorized_date, name = excluded.name,
@@ -184,7 +189,7 @@ async def sync_ynab(db: Database, ynab) -> dict:
             payee = t.get("payee_name") or ""
             conn.execute(UPSERT, (
                 "ynab", t["id"], YNAB_PREFIX + t["account_id"], t["date"], None, payee, payee or None,
-                -t["amount"] / 1000, "USD", 0, None, t.get("category_name"), None, json.dumps(t),
+                -t["amount"] / 1000, "USD", 0, None, t.get("category_name"), None, json.dumps(t), 1,
             ))
             changed += 1
     db.set_kv("ynab_server_knowledge", str(new_knowledge))

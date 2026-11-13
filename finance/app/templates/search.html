@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% set nav = "search" %}
+{% block title %}Search{% endblock %}
+{% block page %}search{% endblock %}
+{% block content %}
+<header class="top"><h1>Search</h1></header>
+
+<form class="card search" method="get" action="/search">
+  <label class="wide">Merchant or description<input name="q" type="search" value="{{ q.q or '' }}" placeholder="Amazon"></label>
+  <div class="grid2">
+    <label>From<input name="start" type="date" value="{{ q.start or '' }}"></label>
+    <label>To<input name="end" type="date" value="{{ q.end or '' }}"></label>
+    <label>Min amount<input name="min" type="number" step="0.01" min="0" value="{{ q.min or '' }}"></label>
+    <label>Max amount<input name="max" type="number" step="0.01" min="0" value="{{ q.max or '' }}"></label>
+    <label>Account
+      <select name="account">
+        <option value="">All accounts</option>
+        {% for a in accounts %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        <option value="">All categories</option>
+        {% for c in categories %}<option value="{{ c }}" {% if q.category == c %}selected{% endif %}>{{ c | replace("_", " ") | capitalize }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="row-actions">
+    <button type="submit" class="primary">Search</button>
+    <a class="button ghost" href="/search">Clear</a>
+    <a class="button ghost" href="/export.csv{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>
+  </div>
+</form>
+
+<section class="card">
+  <div class="card-head">
+    <h2>{% if searched %}{{ rows | length }}{% if more %}+{% endif %} results{% else %}Latest transactions{% endif %}</h2>
+    {% if searched %}<span class="muted small">out {{ total_out | money }} · in {{ total_in | money }}</span>{% endif %}
+  </div>
+  {% if more %}<p class="muted small">Showing the first 1,000. Narrow the search, or export to get everything.</p>{% endif %}
+  {% if rows %}
+  <ul class="list txns">
+    {% for t in rows %}
+    <li>
+      <div class="grow">
+        <strong>{{ t.merchant or t.name }}</strong>
+        {% if t.pending %}<span class="pill">Pending</span>{% endif %}
+        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ category(t) }}{% endif %}{% if t.merchant and t.name | lower != t.merchant | lower %} · {{ t.name }}{% endif %}</span>
+      </div>
+      <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nothing found.</p>
+  {% endif %}
+</section>
+{% endblock %}
