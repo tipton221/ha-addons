@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Plaid vs YNAB{% endblock %}
+{% block page %}compare{% endblock %}
+{% macro row(t) %}
+<li>
+  <div class="grow">
+    <strong>{{ t.merchant or t.name or "(no payee)" }}</strong>
+    <span class="muted small">{{ t.date | shortdate }}{% if t.category %} · {{ t.category | replace("_", " ") | capitalize }}{% endif %}</span>
+  </div>
+  <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
+</li>
+{% endmacro %}
+{% block content %}
+<header class="top">
+  <h1>Plaid vs YNAB</h1>
+  <div class="actions"><a class="button ghost" href="/">Back</a></div>
+</header>
+<p id="msg" class="msg" role="status"></p>
+
+<section class="card">
+  <h2>Linked accounts</h2>
+  <p class="muted small">Pick the YNAB account that tracks each card or bank account. Suggestions are preselected; save to use them.</p>
+  {% if c.plaid_accounts %}
+  <form id="links-form">
+    <ul class="list">
+      {% for p in c.plaid_accounts %}
+      {% set current = c.links.get(p.account_id) or c.suggested.get(p.account_id) %}
+      <li class="link-row">
+        <label for="l-{{ loop.index }}"><strong>{{ p.name }}</strong>{% if p.mask %} <span class="muted">••{{ p.mask }}</span>{% endif %}
+          <span class="muted small">{{ p.institution }}</span></label>
+        <select id="l-{{ loop.index }}" name="{{ p.account_id }}">
+          <option value="">Not linked</option>
+          {% for y in c.ynab_accounts %}
+          <option value="{{ y.account_id }}" {% if y.account_id == current %}selected{% endif %}>{{ y.name }}{% if y.subtype == "closed" %} (closed){% endif %}</option>
+          {% endfor %}
+        </select>
+      </li>
+      {% endfor %}
+    </ul>
+    <button type="submit" class="primary">Save links</button>
+  </form>
+  {% else %}
+  <p class="muted">No Plaid accounts yet.</p>
+  {% endif %}
+</section>
+
+{% if c.pairs %}
+<p class="muted small">Compared from each account's first Plaid transaction through {{ c.end | shortdate }}. The last few days are left out because either source may not have them yet. Pending charges are not compared.</p>
+{% endif %}
+
+{% for r in c.pairs %}
+<section class="card">
+  <div class="card-head">
+    <h2>{{ r.plaid_account.name }}</h2>
+    <span class="muted small">YNAB: {{ r.ynab_account.name }}</span>
+  </div>
+  <div class="stats">
+    <div><span class="stat">{{ r.matched }}</span><span class="muted small">matched</span></div>
+    <div><span class="stat {% if r.only_plaid %}warn-text{% endif %}">{{ r.only_plaid | length }}</span><span class="muted small">only in Plaid</span></div>
+    <div><span class="stat {% if r.only_ynab %}warn-text{% endif %}">{{ r.only_ynab | length }}</span><span class="muted small">only in YNAB</span></div>
+    <div><span class="stat {% if r.amount_differs %}warn-text{% endif %}">{{ r.amount_differs | length }}</span><span class="muted small">amount differs</span></div>
+  </div>
+  <p class="muted small">From {{ r.start | shortdate }}</p>
+  {% if r.only_plaid %}
+  <details><summary>Only in Plaid</summary><ul class="list">{% for t in r.only_plaid[:100] %}{{ row(t) }}{% endfor %}</ul></details>
+  {% endif %}
+  {% if r.only_ynab %}
+  <details><summary>Only in YNAB</summary><ul class="list">{% for t in r.only_ynab[:100] %}{{ row(t) }}{% endfor %}</ul></details>
+  {% endif %}
+  {% if r.amount_differs %}
+  <details><summary>Amount differs</summary><ul class="list">
+    {% for p, y in r.amount_differs[:100] %}
+    <li>
+      <div class="grow"><strong>{{ p.merchant or p.name }}</strong>
+        <span class="muted small">Plaid {{ p.date | shortdate }} {{ (0 - p.amount) | money }} · YNAB {{ y.date | shortdate }} {{ (0 - y.amount) | money }}</span></div>
+    </li>
+    {% endfor %}
+  </ul></details>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

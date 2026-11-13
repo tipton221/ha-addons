@@ -44,8 +44,9 @@
   {% endif %}
   <p class="muted small">YNAB:
     {% if ynab is none %}not set up
-    {% elif ynab.ok %}connected ({{ ynab.budgets | join(", ") }})
-    {% else %}connection failed ({{ ynab.error }}){% endif %}
+    {% elif ynab.error %}last sync failed ({{ ynab.error }})
+    {% elif ynab.last_sync %}{{ ynab.count }} transactions imported, synced {{ ynab.last_sync | local }} · <a href="/compare">Compare with Plaid</a>
+    {% else %}waiting for the first sync{% endif %}
   </p>
 </section>
 
@@ -81,7 +82,7 @@
       <div class="grow">
         <strong>{{ t.merchant or t.name }}</strong>
         {% if t.pending %}<span class="pill">Pending</span>{% endif %}
-        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ t.category | replace("_", " ") | title }}{% endif %}</span>
+        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ category(t) }}{% endif %}</span>
       </div>
       <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
     </li>

@@ -145,6 +145,17 @@ const pages = {
     plaidHandler(state.token, { receivedRedirectUri: window.location.href }).open();
   },
 
+  compare() {
+    const form = document.getElementById("links-form");
+    if (!form) return;
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const links = {};
+      form.querySelectorAll("select").forEach((sel) => { links[sel.name] = sel.value; });
+      try { await api("/api/links", { links }); location.reload(); } catch (e) { say(e.message, true); }
+    });
+  },
+
   dashboard() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));

@@ -137,3 +137,48 @@ async def sync_all(db: Database, plaid: Plaid) -> dict:
             results[name] = {"error": e.error_code}
     db.set_kv("last_sync_at", datetime.now(timezone.utc).isoformat())
     return results
+
+
+# ---------------------------------------------------------------- YNAB
+
+YNAB_PREFIX = "ynab:"
+
+
+async def sync_ynab(db: Database, ynab) -> dict:
+    """Import YNAB accounts and transactions. Uses YNAB's delta requests after the first run.
+
+    Amounts are stored with Plaid's sign convention (positive = money out),
+    so the two sources compare directly. YNAB stores milliunits.
+    """
+    accounts = await ynab.accounts()
+    knowledge = db.get_kv("ynab_server_knowledge")
+    txns, new_knowledge = await ynab.transactions(int(knowledge) if knowledge else None)
+    changed = deleted = 0
+    with db.connect() as conn:
+        for a in accounts:
+            if a.get("deleted"):
+                continue
+            conn.execute(
+                """INSERT INTO accounts (account_id, source, name, type, subtype,
+                       current_balance, currency, updated_at)
+                   VALUES (?, 'ynab', ?, ?, ?, ?, 'USD', datetime('now'))
+                   ON CONFLICT(account_id) DO UPDATE SET name=excluded.name, type=excluded.type,
+                       subtype=excluded.subtype, current_balance=excluded.current_balance,
+                       updated_at=excluded.updated_at""",
+                (YNAB_PREFIX + a["id"], a["name"], a.get("type"),
+                 "closed" if a.get("closed") else "open", a["balance"] / 1000),
+            )
+        for t in txns:
+            if t.get("deleted"):
+                conn.execute("DELETE FROM transactions WHERE source='ynab' AND id=?", (t["id"],))
+                deleted += 1
+                continue
+            payee = t.get("payee_name") or ""
+            conn.execute(UPSERT, (
+                "ynab", t["id"], YNAB_PREFIX + t["account_id"], t["date"], None, payee, payee or None,
+                -t["amount"] / 1000, "USD", 0, None, t.get("category_name"), None, json.dumps(t),
+            ))
+            changed += 1
+    db.set_kv("ynab_server_knowledge", str(new_knowledge))
+    db.set_kv("ynab_last_sync_at", datetime.now(timezone.utc).isoformat())
+    return {"changed": changed, "deleted": deleted}
