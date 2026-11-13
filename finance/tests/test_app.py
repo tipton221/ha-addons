@@ -276,3 +276,22 @@ def test_shortdate_shows_year_outside_current_year():
     assert shortdate("2026-11-12", now) == "Nov 12"
     assert shortdate("2024-11-15", now) == "Nov 15, 2024"
     assert shortdate(None, now) == ""
+
+
+def test_compare_flags_transactions_in_other_ynab_account(tmp_path):
+    from datetime import date as _date
+    db = Database(tmp_path / "f.db")
+    with db.connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Amex')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Blue Cash')")
+        conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES "
+                     "('ynab:new','ynab','BCP','open'), ('ynab:old','ynab','BCP old','closed')")
+        conn.execute("INSERT INTO account_links VALUES ('p1', 'ynab:new')")
+        rows = [("plaid", "a", "p1", "2026-01-05", 10.0), ("plaid", "b", "p1", "2026-03-05", 20.0),
+                ("ynab", "y1", "ynab:old", "2026-01-06", 10.0), ("ynab", "y2", "ynab:new", "2026-03-05", 20.0)]
+        conn.executemany("INSERT INTO transactions (source, id, account_id, date, name, amount) "
+                         "VALUES (?, ?, ?, ?, 'Shop', ?)", rows)
+    r = compare_all(db, today=_date(2026, 11, 13))["pairs"][0]
+    assert r.matched == 1 and [t["id"] for t in r.only_plaid] == ["a"]
+    assert r.elsewhere == {"a": "BCP old"}
+    assert r.ynab_count == 1 and r.ynab_first == "2026-03-05"

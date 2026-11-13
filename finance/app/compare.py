@@ -55,6 +55,10 @@ class PairResult:
     only_plaid: list[dict] = field(default_factory=list)
     only_ynab: list[dict] = field(default_factory=list)
     amount_differs: list[tuple[dict, dict]] = field(default_factory=list)
+    ynab_count: int = 0
+    ynab_first: str | None = None
+    # Plaid-only transactions that do appear in YNAB, but under a different YNAB account.
+    elsewhere: dict[str, str] = field(default_factory=dict)
 
 
 def _d(s: str) -> date:
@@ -130,6 +134,18 @@ def compare_all(db: Database, today: date | None = None) -> dict:
                 f"SELECT {cols} FROM transactions WHERE source='ynab' AND account_id=?", (yid,))]
             r = compare_lists(pt, yt, first, end)
             r.plaid_account, r.ynab_account = p, ynab_by_id[yid]
+            r.ynab_count = len(yt)
+            r.ynab_first = min((t["date"] for t in yt), default=None)
+            tol = timedelta(days=DATE_TOLERANCE)
+            for t in r.only_plaid:
+                d0 = _d(t["date"])
+                hit = conn.execute(
+                    "SELECT a.name FROM transactions t JOIN accounts a ON a.account_id = t.account_id "
+                    "WHERE t.source='ynab' AND t.account_id != ? AND ABS(t.amount - ?) < 0.005 "
+                    "AND t.date BETWEEN ? AND ? LIMIT 1",
+                    (yid, t["amount"], (d0 - tol).isoformat(), (d0 + tol).isoformat())).fetchone()
+                if hit:
+                    r.elsewhere[t["id"]] = hit["name"]
             pairs.append(r)
     return {
         "plaid_accounts": plaid_accounts,
