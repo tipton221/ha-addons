@@ -19,7 +19,8 @@ from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
-from .sync import sync_all
+from .compare import compare_all
+from .sync import sync_all, sync_ynab
 from .ynab import YNAB
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,10 +54,19 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     sync_lock = asyncio.Lock()
 
     async def run_sync() -> dict:
-        if plaid is None:
-            return {}
+        results: dict = {}
         async with sync_lock:
-            return await sync_all(db, plaid)
+            if plaid is not None:
+                results["plaid"] = await sync_all(db, plaid)
+            if ynab.configured:
+                try:
+                    results["ynab"] = await sync_ynab(db, ynab)
+                    db.set_kv("ynab_error", "")
+                except Exception as e:
+                    log.warning("YNAB sync failed: %s", e)
+                    db.set_kv("ynab_error", type(e).__name__)
+                    results["ynab"] = {"error": type(e).__name__}
+        return results
 
     async def sync_loop():
         await asyncio.sleep(60)
@@ -94,6 +104,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     templates.env.filters["money"] = money
     templates.env.filters["local"] = local_time
+
+    def category(t) -> str:
+        """Plaid's detailed category without its group prefix, e.g. FOOD_AND_DRINK_GROCERIES -> Groceries."""
+        primary, detail = t.get("category") or "", t.get("category_detail") or ""
+        label = detail[len(primary) + 1:] if primary and detail.startswith(primary + "_") else (detail or primary)
+        return label.replace("_", " ").capitalize()
+
+    templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = lambda d: datetime.fromisoformat(d).strftime("%b %-d") if d else ""
 
     @app.middleware("http")
@@ -216,24 +234,43 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "FROM plaid_items ORDER BY institution")]
             accounts = [dict(r) for r in conn.execute(
                 "SELECT a.*, p.institution FROM accounts a LEFT JOIN plaid_items p "
-                "ON a.item_id = p.item_id ORDER BY p.institution, a.type, a.name")]
+                "ON a.item_id = p.item_id WHERE a.source='plaid' ORDER BY p.institution, a.type, a.name")]
             txns = [dict(r) for r in conn.execute(
                 "SELECT t.*, a.name AS account_name, a.mask FROM transactions t "
-                "LEFT JOIN accounts a ON a.account_id = t.account_id "
+                "LEFT JOIN accounts a ON a.account_id = t.account_id WHERE t.source='plaid' "
                 "ORDER BY t.date DESC, t.first_seen_at DESC LIMIT 50")]
-            total = conn.execute("SELECT COUNT(*) AS n FROM transactions").fetchone()["n"]
+            total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid'").fetchone()["n"]
+            ynab_total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='ynab'").fetchone()["n"]
         ynab_status = None
         if ynab.configured:
-            try:
-                budgets = await ynab.budgets()
-                ynab_status = {"ok": True, "budgets": [b["name"] for b in budgets]}
-            except Exception as e:
-                ynab_status = {"ok": False, "error": type(e).__name__}
+            ynab_status = {"last_sync": db.get_kv("ynab_last_sync_at"), "error": db.get_kv("ynab_error"),
+                           "count": ynab_total}
         return templates.TemplateResponse(request, "dashboard.html", {
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
             "accounts": accounts, "txns": txns, "total": total, "ynab": ynab_status,
             "last_sync": db.get_kv("last_sync_at"),
         })
+
+    @app.get("/compare", response_class=HTMLResponse)
+    async def compare_page(request: Request):
+        return templates.TemplateResponse(request, "compare.html", {"c": compare_all(db)})
+
+    @app.post("/api/links")
+    async def save_links(request: Request):
+        body = await request.json()
+        links = body.get("links") or {}
+        with db.connect() as conn:
+            valid_p = {r["account_id"] for r in conn.execute("SELECT account_id FROM accounts WHERE source='plaid'")}
+            valid_y = {r["account_id"] for r in conn.execute("SELECT account_id FROM accounts WHERE source='ynab'")}
+            for pid, yid in links.items():
+                if pid not in valid_p:
+                    continue
+                if yid in valid_y:
+                    conn.execute("INSERT INTO account_links VALUES (?, ?) ON CONFLICT(plaid_account_id) "
+                                 "DO UPDATE SET ynab_account_id=excluded.ynab_account_id", (pid, yid))
+                else:
+                    conn.execute("DELETE FROM account_links WHERE plaid_account_id=?", (pid,))
+        return {"ok": True}
 
     @app.get("/oauth-return", response_class=HTMLResponse)
     async def oauth_return(request: Request):

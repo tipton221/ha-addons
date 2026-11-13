@@ -43,4 +43,4 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Skeleton (version 0.1.0): passkey login, Cloudflare Access check, Plaid Link with OAuth return, Plaid transaction and balance sync, a review checkbox per transaction, and a YNAB connection check. YNAB transaction import, the comparison view, bills coverage, search, and export come next.
+Version 0.2.0: passkey login, Cloudflare Access check, Plaid Link with OAuth return, Plaid transaction and balance sync, a review checkbox per transaction, YNAB account and transaction import (delta sync), and a Plaid versus YNAB comparison page with account linking. The daily inbox, bills coverage, search, and export come next.

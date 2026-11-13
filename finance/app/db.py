@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE INDEX IF NOT EXISTS transactions_date ON transactions (date DESC);
+CREATE INDEX IF NOT EXISTS transactions_account ON transactions (account_id, date);
+
+-- Which YNAB account tracks the same card or bank account as a Plaid account.
+CREATE TABLE IF NOT EXISTS account_links (
+    plaid_account_id TEXT PRIMARY KEY,
+    ynab_account_id  TEXT NOT NULL
+);
 """
 
 

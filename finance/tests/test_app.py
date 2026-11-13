@@ -153,3 +153,117 @@ def test_sync_marks_login_required(tmp_path):
         item = dict(conn.execute("SELECT * FROM plaid_items").fetchone())
     assert item["status"] == "login_required"
     assert result["Amex"] == {"error": "ITEM_LOGIN_REQUIRED"}
+
+
+# ---------------------------------------------------------------- YNAB and comparison
+
+from app.compare import compare_all, compare_lists, suggest_links  # noqa: E402
+from app.sync import sync_ynab  # noqa: E402
+
+
+class FakeYNAB:
+    configured = True
+
+    def __init__(self, accounts, batches):
+        self._accounts = accounts
+        self.batches = list(batches)
+        self.knowledge_seen = []
+
+    async def accounts(self):
+        return self._accounts
+
+    async def transactions(self, knowledge):
+        self.knowledge_seen.append(knowledge)
+        return self.batches.pop(0)
+
+
+def ytxn(tid, milli, d="2026-11-10", acct="y1", deleted=False, payee="Shop"):
+    return {"id": tid, "account_id": acct, "date": d, "amount": milli, "payee_name": payee,
+            "category_name": "Spending", "deleted": deleted}
+
+
+def test_ynab_import_signs_and_delta(tmp_path):
+    db = Database(tmp_path / "f.db")
+    ynab = FakeYNAB([{"id": "y1", "name": "AMEX Gold Card", "type": "creditCard", "balance": -187990,
+                      "closed": False, "deleted": False}],
+                    [([ytxn("a", -12500), ytxn("b", 500000)], 10),
+                     ([ytxn("a", -12500, deleted=True)], 11)])
+    asyncio.run(sync_ynab(db, ynab))
+    with db.connect() as conn:
+        amounts = {r["id"]: r["amount"] for r in conn.execute("SELECT * FROM transactions WHERE source='ynab'")}
+    assert amounts == {"a": 12.5, "b": -500.0}  # outflow positive, like Plaid
+    asyncio.run(sync_ynab(db, ynab))
+    assert ynab.knowledge_seen == [None, 10]
+    with db.connect() as conn:
+        assert [r["id"] for r in conn.execute("SELECT id FROM transactions WHERE source='ynab'")] == ["b"]
+        acct = dict(conn.execute("SELECT * FROM accounts WHERE source='ynab'").fetchone())
+    assert acct["account_id"] == "ynab:y1" and acct["current_balance"] == -187.99
+
+
+def test_suggest_links():
+    plaid = [{"account_id": "p1", "name": "American Express Gold Card", "mask": "1003"},
+             {"account_id": "p2", "name": "Blue Business Cash(TM)", "mask": "1008"},
+             {"account_id": "p3", "name": "Blue Cash Preferred®", "mask": "5003"},
+             {"account_id": "p4", "name": "Hilton Honors Card", "mask": "1004"},
+             {"account_id": "p5", "name": "Platinum Card®", "mask": "1000"},
+             {"account_id": "p6", "name": "Some Other Card", "mask": "9"}]
+    ynab = [{"account_id": "ynab:g", "name": "AMEX Gold Card", "subtype": "open"},
+            {"account_id": "ynab:gold", "name": "Amex Gold Card old", "subtype": "closed"},
+            {"account_id": "ynab:bbc", "name": "AMEX Business Cash", "subtype": "open"},
+            {"account_id": "ynab:bcp", "name": "AMEX Blue Cash Preferred", "subtype": "open"},
+            {"account_id": "ynab:h", "name": "AMEX Hilton Honors", "subtype": "open"},
+            {"account_id": "ynab:p", "name": "AMEX Platinum Card", "subtype": "open"},
+            {"account_id": "ynab:wf", "name": "Wealthfront", "subtype": "open"}]
+    assert suggest_links(plaid, ynab) == {"p1": "ynab:g", "p2": "ynab:bbc", "p3": "ynab:bcp",
+                                          "p4": "ynab:h", "p5": "ynab:p"}
+
+
+def ct(src, tid, amount, d, pending=0):
+    return {"source": src, "id": tid, "date": d, "name": tid, "merchant": tid, "amount": amount,
+            "pending": pending, "category": None}
+
+
+def test_compare_lists():
+    plaid = [ct("plaid", "same", 10.0, "2026-11-01"),
+             ct("plaid", "shifted", 20.0, "2026-11-02"),
+             ct("plaid", "tip", 50.0, "2026-11-03"),
+             ct("plaid", "missing", 7.0, "2026-11-04"),
+             ct("plaid", "pend", 3.0, "2026-11-05", pending=1),
+             ct("plaid", "late", 9.0, "2026-11-20")]
+    ynab = [ct("ynab", "same", 10.0, "2026-11-01"),
+            ct("ynab", "shifted", 20.0, "2026-11-05"),
+            ct("ynab", "tip", 58.0, "2026-11-03"),
+            ct("ynab", "extra", 4.0, "2026-11-06"),
+            ct("ynab", "before", 1.0, "2026-10-01")]
+    r = compare_lists(plaid, ynab, "2026-11-01", "2026-11-10")
+    assert r.matched == 2
+    assert [t["id"] for t in r.only_plaid] == ["missing"]
+    assert [t["id"] for t in r.only_ynab] == ["extra"]
+    assert [(p["id"], y["id"]) for p, y in r.amount_differs] == [("tip", "tip")]
+
+
+def test_links_api_and_compare_page(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    app = create_app(settings, background_sync=False)
+    db = Database(tmp_path / "finance.db")
+    with db.connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Amex')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Gold Card')")
+        conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES ('ynab:y1','ynab','AMEX Gold Card','open')")
+        conn.execute("INSERT INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')",
+                     (__import__("hashlib").sha256(b"tok").hexdigest(),))
+        for i, (src, acct, d) in enumerate([("plaid", "p1", "2026-11-01"), ("ynab", "ynab:y1", "2026-11-02")]):
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount) VALUES (?,?,?,?,?,?)",
+                         (src, f"t{i}", acct, d, "Shop", 5.0))
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/compare").text
+        assert "Gold Card" in page and "selected" in page  # suggestion preselected
+        assert c.post("/api/links", json={"links": {"p1": "ynab:y1", "bogus": "ynab:y1"}}, headers=H).json() == {"ok": True}
+        with db.connect() as conn:
+            assert [tuple(r) for r in conn.execute("SELECT * FROM account_links")] == [("p1", "ynab:y1")]
+        result = compare_all(db, today=__import__("datetime").date(2026, 11, 13))
+        assert result["pairs"][0].matched == 1
+        assert c.post("/api/links", json={"links": {"p1": ""}}, headers=H).status_code == 200
+        with db.connect() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM account_links").fetchone()[0] == 0
