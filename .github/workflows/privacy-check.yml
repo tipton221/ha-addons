@@ -1,0 +1,33 @@
+# Fails when the repository contains any personal term from the PRIVATE_TERMS
+# secret (one term per line, matched case-insensitively). The terms themselves
+# live only in that secret and in the private Technology repository, never here.
+name: Privacy check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan for personal terms
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+        run: |
+          if [ -z "$PRIVATE_TERMS" ]; then
+            echo "::warning::PRIVATE_TERMS secret is not available to this run; skipping the scan."
+            exit 0
+          fi
+          printf '%s\n' "$PRIVATE_TERMS" | sed '/^[[:space:]]*$/d' > "$RUNNER_TEMP/terms"
+          if git grep -I -i -n -F -f "$RUNNER_TEMP/terms" -- . ':!.github/workflows/privacy-check.yml' > "$RUNNER_TEMP/hits"; then
+            # Show file and line only, not the matched text, so the log does not repeat it.
+            cut -d: -f1,2 "$RUNNER_TEMP/hits" | sed 's/^/::error::Personal term found at /'
+            exit 1
+          fi
+          echo "No personal terms found."
