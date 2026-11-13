@@ -8,6 +8,7 @@ from .config import Settings
 
 BASE = "https://api.ynab.com/v1"
 BUDGET = "last-used"
+FULL_HISTORY_SINCE = "2000-01-01"
 
 
 class YNAB:
@@ -34,6 +35,10 @@ class YNAB:
 
     async def transactions(self, server_knowledge: int | None) -> tuple[list[dict], int]:
         """All transactions, or only those changed since server_knowledge."""
-        params = {"last_knowledge_of_server": server_knowledge} if server_knowledge else None
+        if server_knowledge:
+            params = {"last_knowledge_of_server": server_knowledge}
+        else:
+            # Without since_date, YNAB returned only the last 12 months (seen November 2026).
+            params = {"since_date": FULL_HISTORY_SINCE}
         data = await self._get(f"/budgets/{BUDGET}/transactions", params)
         return data["transactions"], data["server_knowledge"]

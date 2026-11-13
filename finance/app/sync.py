@@ -14,6 +14,11 @@ log = logging.getLogger("finance.sync")
 LOGIN_ERRORS = {"ITEM_LOGIN_REQUIRED", "PENDING_EXPIRATION", "PENDING_DISCONNECT"}
 
 
+def _clean(text: str | None) -> str:
+    """Drop Unicode replacement characters some banks send in names, and tidy spaces."""
+    return " ".join((text or "").replace("\ufffd", " ").split())
+
+
 def _txn_row(t: dict) -> tuple:
     pfc = t.get("personal_finance_category") or {}
     return (
@@ -111,7 +116,7 @@ async def refresh_accounts(db: Database, plaid: Plaid, item: dict) -> None:
                        current_balance=excluded.current_balance,
                        available_balance=excluded.available_balance,
                        currency=excluded.currency, updated_at=excluded.updated_at""",
-                (a["account_id"], item["item_id"], a.get("name") or "", a.get("official_name"),
+                (a["account_id"], item["item_id"], _clean(a.get("name")), _clean(a.get("official_name")) or None,
                  a.get("mask"), a.get("type"), a.get("subtype"), b.get("current"),
                  b.get("available"), b.get("iso_currency_code")),
             )
@@ -152,6 +157,9 @@ async def sync_ynab(db: Database, ynab) -> dict:
     """
     accounts = await ynab.accounts()
     knowledge = db.get_kv("ynab_server_knowledge")
+    if db.get_kv("ynab_full_history") != "1":
+        # Installs from 0.2.0/0.2.1 imported only the last year; start over once.
+        knowledge = None
     txns, new_knowledge = await ynab.transactions(int(knowledge) if knowledge else None)
     changed = deleted = 0
     with db.connect() as conn:
@@ -180,5 +188,6 @@ async def sync_ynab(db: Database, ynab) -> dict:
             ))
             changed += 1
     db.set_kv("ynab_server_knowledge", str(new_knowledge))
+    db.set_kv("ynab_full_history", "1")
     db.set_kv("ynab_last_sync_at", datetime.now(timezone.utc).isoformat())
     return {"changed": changed, "deleted": deleted}
