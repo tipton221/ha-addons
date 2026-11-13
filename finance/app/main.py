@@ -41,6 +41,15 @@ CSP = (
 )
 
 
+def shortdate(d: str | None, today: datetime | None = None) -> str:
+    """'Nov 12' for dates in the current year, 'Nov 12, 2024' otherwise."""
+    if not d:
+        return ""
+    dt = datetime.fromisoformat(d)
+    year = (today or datetime.now(PACIFIC)).year
+    return dt.strftime("%b %-d") if dt.year == year else dt.strftime("%b %-d, %Y")
+
+
 def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                ynab: YNAB | None = None, background_sync: bool = True) -> FastAPI:
     settings = settings or load_settings()
@@ -112,7 +121,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         return label.replace("_", " ").capitalize()
 
     templates.env.globals["category"] = category
-    templates.env.filters["shortdate"] = lambda d: datetime.fromisoformat(d).strftime("%b %-d") if d else ""
+    templates.env.filters["shortdate"] = shortdate
 
     @app.middleware("http")
     async def guard(request: Request, call_next):

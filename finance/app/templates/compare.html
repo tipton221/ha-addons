@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Plaid vs YNAB{% endblock %}
 {% block page %}compare{% endblock %}
-{% macro row(t) %}
+{% macro row(t, elsewhere=None) %}
 <li>
   <div class="grow">
     <strong>{{ t.merchant or t.name or "(no payee)" }}</strong>
-    <span class="muted small">{{ t.date | shortdate }}{% if t.category %} · {{ t.category | replace("_", " ") | capitalize }}{% endif %}</span>
+    <span class="muted small">{{ t.date | shortdate }}{% if t.category %} · {{ t.category | replace("_", " ") | capitalize }}{% endif %}{% if elsewhere %} · <span class="warn-text">in YNAB under {{ elsewhere }}</span>{% endif %}</span>
   </div>
   <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
 </li>
@@ -60,9 +60,9 @@
     <div><span class="stat {% if r.only_ynab %}warn-text{% endif %}">{{ r.only_ynab | length }}</span><span class="muted small">only in YNAB</span></div>
     <div><span class="stat {% if r.amount_differs %}warn-text{% endif %}">{{ r.amount_differs | length }}</span><span class="muted small">amount differs</span></div>
   </div>
-  <p class="muted small">From {{ r.start | shortdate }}</p>
+  <p class="muted small">Compared from {{ r.start | shortdate }}. This YNAB account holds {{ r.ynab_count }} transactions{% if r.ynab_first %}, the earliest on {{ r.ynab_first | shortdate }}{% endif %}.{% if r.elsewhere %} {{ r.elsewhere | length }} of the Plaid-only transactions appear in a different YNAB account.{% endif %}</p>
   {% if r.only_plaid %}
-  <details><summary>Only in Plaid</summary><ul class="list">{% for t in r.only_plaid[:100] %}{{ row(t) }}{% endfor %}</ul></details>
+  <details><summary>Only in Plaid</summary><ul class="list">{% for t in r.only_plaid[:200] %}{{ row(t, r.elsewhere.get(t.id)) }}{% endfor %}</ul></details>
   {% endif %}
   {% if r.only_ynab %}
   <details><summary>Only in YNAB</summary><ul class="list">{% for t in r.only_ynab[:100] %}{{ row(t) }}{% endfor %}</ul></details>
