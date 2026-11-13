@@ -271,14 +271,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             valid_p = {r["account_id"] for r in conn.execute("SELECT account_id FROM accounts WHERE source='plaid'")}
             valid_y = {r["account_id"] for r in conn.execute("SELECT account_id FROM accounts WHERE source='ynab'")}
-            for pid, yid in links.items():
+            for pid, chosen in links.items():
                 if pid not in valid_p:
                     continue
-                if yid in valid_y:
-                    conn.execute("INSERT INTO account_links VALUES (?, ?) ON CONFLICT(plaid_account_id) "
-                                 "DO UPDATE SET ynab_account_id=excluded.ynab_account_id", (pid, yid))
-                else:
-                    conn.execute("DELETE FROM account_links WHERE plaid_account_id=?", (pid,))
+                if isinstance(chosen, str):
+                    chosen = [chosen]
+                keep = [y for y in dict.fromkeys(chosen) if y in valid_y]
+                conn.execute("DELETE FROM account_links WHERE plaid_account_id=?", (pid,))
+                conn.executemany("INSERT INTO account_links VALUES (?, ?)", [(pid, y) for y in keep])
         return {"ok": True}
 
     @app.get("/oauth-return", response_class=HTMLResponse)

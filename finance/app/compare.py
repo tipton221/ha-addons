@@ -48,7 +48,7 @@ def suggest_links(plaid_accounts: list[dict], ynab_accounts: list[dict]) -> dict
 @dataclass
 class PairResult:
     plaid_account: dict
-    ynab_account: dict
+    ynab_accounts: list
     start: str
     end: str
     matched: int = 0
@@ -65,19 +65,29 @@ def _d(s: str) -> date:
     return date.fromisoformat(s)
 
 
+def _gap(plaid_txn: dict, ynab_txn: dict) -> timedelta:
+    """Days between the two records. Plaid gives both the posted date and, when known, the
+    date of purchase; YNAB often records the purchase date, so the closer of the two counts."""
+    yd = _d(ynab_txn["date"])
+    gaps = [abs(yd - _d(plaid_txn["date"]))]
+    if plaid_txn.get("authorized_date"):
+        gaps.append(abs(yd - _d(plaid_txn["authorized_date"])))
+    return min(gaps)
+
+
 def compare_lists(plaid: list[dict], ynab: list[dict], start: str, end: str) -> PairResult:
     """Match posted Plaid transactions to YNAB transactions within [start, end]."""
-    res = PairResult({}, {}, start, end)
+    res = PairResult({}, [], start, end)
     lo, hi = _d(start), _d(end)
     tol = timedelta(days=DATE_TOLERANCE)
     p_in = [t for t in plaid if not t["pending"] and lo <= _d(t["date"]) <= hi]
-    y_pool = [t for t in ynab if lo - tol <= _d(t["date"]) <= hi + tol]
+    # Purchases can be authorized well before they post, so look further back for YNAB records.
+    y_pool = [t for t in ynab if lo - 2 * tol <= _d(t["date"]) <= hi + tol]
     used: set[str] = set()
 
     def best(t, accept):
-        cands = [y for y in y_pool if y["id"] not in used and accept(t, y)
-                 and abs(_d(y["date"]) - _d(t["date"])) <= tol]
-        return min(cands, key=lambda y: abs(_d(y["date"]) - _d(t["date"])), default=None)
+        cands = [y for y in y_pool if y["id"] not in used and accept(t, y) and _gap(t, y) <= tol]
+        return min(cands, key=lambda y: _gap(t, y), default=None)
 
     exact = lambda t, y: abs(t["amount"] - y["amount"]) < 0.005  # noqa: E731
     leftovers = []
@@ -113,37 +123,39 @@ def compare_all(db: Database, today: date | None = None) -> dict:
             "WHERE a.source='plaid' ORDER BY p.institution, a.name")]
         ynab_accounts = [dict(r) for r in conn.execute(
             "SELECT * FROM accounts WHERE source='ynab' ORDER BY subtype DESC, name")]
-        links = {r["plaid_account_id"]: r["ynab_account_id"]
-                 for r in conn.execute("SELECT * FROM account_links")}
+        links: dict[str, list[str]] = {}
+        for r in conn.execute("SELECT * FROM account_links ORDER BY rowid"):
+            links.setdefault(r["plaid_account_id"], []).append(r["ynab_account_id"])
     ynab_by_id = {y["account_id"]: y for y in ynab_accounts}
     pairs = []
+    tol = timedelta(days=DATE_TOLERANCE)
     with db.connect() as conn:
         for p in plaid_accounts:
-            yid = links.get(p["account_id"])
-            if not yid or yid not in ynab_by_id:
+            yids = [y for y in links.get(p["account_id"], []) if y in ynab_by_id]
+            if not yids:
                 continue
             first = conn.execute(
                 "SELECT MIN(date) AS d FROM transactions WHERE source='plaid' AND account_id=?",
                 (p["account_id"],)).fetchone()["d"]
             if not first or first > end:
                 continue
-            cols = "source, id, date, name, merchant, amount, pending, category"
+            cols = "source, id, date, authorized_date, name, merchant, amount, pending, category"
+            marks = ",".join("?" * len(yids))
             pt = [dict(r) for r in conn.execute(
                 f"SELECT {cols} FROM transactions WHERE source='plaid' AND account_id=?", (p["account_id"],))]
             yt = [dict(r) for r in conn.execute(
-                f"SELECT {cols} FROM transactions WHERE source='ynab' AND account_id=?", (yid,))]
+                f"SELECT {cols} FROM transactions WHERE source='ynab' AND account_id IN ({marks})", yids)]
             r = compare_lists(pt, yt, first, end)
-            r.plaid_account, r.ynab_account = p, ynab_by_id[yid]
+            r.plaid_account, r.ynab_accounts = p, [ynab_by_id[y] for y in yids]
             r.ynab_count = len(yt)
             r.ynab_first = min((t["date"] for t in yt), default=None)
-            tol = timedelta(days=DATE_TOLERANCE)
             for t in r.only_plaid:
-                d0 = _d(t["date"])
+                d0 = _d(t["authorized_date"] or t["date"])
                 hit = conn.execute(
                     "SELECT a.name FROM transactions t JOIN accounts a ON a.account_id = t.account_id "
-                    "WHERE t.source='ynab' AND t.account_id != ? AND ABS(t.amount - ?) < 0.005 "
+                    f"WHERE t.source='ynab' AND t.account_id NOT IN ({marks}) AND ABS(t.amount - ?) < 0.005 "
                     "AND t.date BETWEEN ? AND ? LIMIT 1",
-                    (yid, t["amount"], (d0 - tol).isoformat(), (d0 + tol).isoformat())).fetchone()
+                    (*yids, t["amount"], (d0 - tol).isoformat(), (_d(t["date"]) + tol).isoformat())).fetchone()
                 if hit:
                     r.elsewhere[t["id"]] = hit["name"]
             pairs.append(r)

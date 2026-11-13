@@ -79,10 +79,12 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS transactions_date ON transactions (date DESC);
 CREATE INDEX IF NOT EXISTS transactions_account ON transactions (account_id, date);
 
--- Which YNAB account tracks the same card or bank account as a Plaid account.
+-- Which YNAB accounts track the same card or bank account as a Plaid account.
+-- More than one is allowed, e.g. when a card was converted and YNAB kept the old account.
 CREATE TABLE IF NOT EXISTS account_links (
-    plaid_account_id TEXT PRIMARY KEY,
-    ynab_account_id  TEXT NOT NULL
+    plaid_account_id TEXT NOT NULL,
+    ynab_account_id  TEXT NOT NULL,
+    PRIMARY KEY (plaid_account_id, ynab_account_id)
 );
 """
 
@@ -92,7 +94,21 @@ class Database:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
+            self._migrate(conn)
             conn.executescript(SCHEMA)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        # 0.2.x stored one YNAB account per Plaid account (plaid_account_id was the key).
+        cols = conn.execute("PRAGMA table_info(account_links)").fetchall()
+        pk = [c[1] for c in cols if c[5]]
+        if pk == ["plaid_account_id"]:
+            conn.execute("ALTER TABLE account_links RENAME TO account_links_old")
+            conn.execute("""CREATE TABLE account_links (
+                plaid_account_id TEXT NOT NULL, ynab_account_id TEXT NOT NULL,
+                PRIMARY KEY (plaid_account_id, ynab_account_id))""")
+            conn.execute("INSERT INTO account_links SELECT plaid_account_id, ynab_account_id FROM account_links_old")
+            conn.execute("DROP TABLE account_links_old")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

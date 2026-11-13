@@ -19,21 +19,27 @@
 
 <section class="card">
   <h2>Linked accounts</h2>
-  <p class="muted small">Pick the YNAB account that tracks each card or bank account. Suggestions are preselected; save to use them.</p>
+  <p class="muted small">Pick the YNAB account that tracks each card or bank account. If a card's history is split across YNAB accounts (for example after a card conversion), add the others too. Suggestions are preselected; save to use them.</p>
   {% if c.plaid_accounts %}
   <form id="links-form">
     <ul class="list">
       {% for p in c.plaid_accounts %}
-      {% set current = c.links.get(p.account_id) or c.suggested.get(p.account_id) %}
+      {% set current = c.links.get(p.account_id) or ([c.suggested[p.account_id]] if p.account_id in c.suggested else []) %}
       <li class="link-row">
-        <label for="l-{{ loop.index }}"><strong>{{ p.name }}</strong>{% if p.mask %} <span class="muted">••{{ p.mask }}</span>{% endif %}
+        <label for="l-{{ loop.index }}-0"><strong>{{ p.name }}</strong>{% if p.mask %} <span class="muted">••{{ p.mask }}</span>{% endif %}
           <span class="muted small">{{ p.institution }}</span></label>
-        <select id="l-{{ loop.index }}" name="{{ p.account_id }}">
-          <option value="">Not linked</option>
-          {% for y in c.ynab_accounts %}
-          <option value="{{ y.account_id }}" {% if y.account_id == current %}selected{% endif %}>{{ y.name }}{% if y.subtype == "closed" %} (closed){% endif %}</option>
+        <div class="selects">
+          {% set outer = loop %}
+          {% for chosen in current + [""] %}
+          <select id="l-{{ outer.index }}-{{ loop.index0 }}" data-plaid="{{ p.account_id }}"
+                  aria-label="{{ 'YNAB account' if loop.first else 'Also include YNAB account' }}">
+            <option value="">{{ "Not linked" if loop.first else "Add another…" }}</option>
+            {% for y in c.ynab_accounts %}
+            <option value="{{ y.account_id }}" {% if y.account_id == chosen %}selected{% endif %}>{{ y.name }}{% if y.subtype == "closed" %} (closed){% endif %}</option>
+            {% endfor %}
+          </select>
           {% endfor %}
-        </select>
+        </div>
       </li>
       {% endfor %}
     </ul>
@@ -52,7 +58,7 @@
 <section class="card">
   <div class="card-head">
     <h2>{{ r.plaid_account.name }}</h2>
-    <span class="muted small">YNAB: {{ r.ynab_account.name }}</span>
+    <span class="muted small">YNAB: {{ r.ynab_accounts | map(attribute="name") | join(" + ") }}</span>
   </div>
   <div class="stats">
     <div><span class="stat">{{ r.matched }}</span><span class="muted small">matched</span></div>
@@ -60,7 +66,7 @@
     <div><span class="stat {% if r.only_ynab %}warn-text{% endif %}">{{ r.only_ynab | length }}</span><span class="muted small">only in YNAB</span></div>
     <div><span class="stat {% if r.amount_differs %}warn-text{% endif %}">{{ r.amount_differs | length }}</span><span class="muted small">amount differs</span></div>
   </div>
-  <p class="muted small">Compared from {{ r.start | shortdate }}. This YNAB account holds {{ r.ynab_count }} transactions{% if r.ynab_first %}, the earliest on {{ r.ynab_first | shortdate }}{% endif %}.{% if r.elsewhere %} {{ r.elsewhere | length }} of the Plaid-only transactions appear in a different YNAB account.{% endif %}</p>
+  <p class="muted small">Compared from {{ r.start | shortdate }}. {{ 'These YNAB accounts hold' if r.ynab_accounts | length > 1 else 'This YNAB account holds' }} {{ r.ynab_count }} transactions{% if r.ynab_first %}, the earliest on {{ r.ynab_first | shortdate }}{% endif %}.{% if r.elsewhere %} {{ r.elsewhere | length }} of the Plaid-only transactions appear in a different YNAB account.{% endif %}</p>
   {% if r.only_plaid %}
   <details><summary>Only in Plaid</summary><ul class="list">{% for t in r.only_plaid[:200] %}{{ row(t, r.elsewhere.get(t.id)) }}{% endfor %}</ul></details>
   {% endif %}

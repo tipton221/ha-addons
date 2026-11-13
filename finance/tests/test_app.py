@@ -326,3 +326,51 @@ def test_ynab_client_requests_full_history_first(tmp_path, monkeypatch):
 def test_clean_account_names():
     from app.sync import _clean
     assert _clean("WELLS FARGO AUTOGRAPH VISA�� CARD ...5998") == "WELLS FARGO AUTOGRAPH VISA CARD ...5998"
+
+
+def test_compare_uses_purchase_date():
+    plaid = [dict(ct("plaid", "apple", 1694.94, "2026-09-19"), authorized_date="2026-09-14"),
+             dict(ct("plaid", "late", 50.0, "2026-09-19"), authorized_date=None)]
+    ynab = [ct("ynab", "apple", 1694.94, "2026-09-14"), ct("ynab", "late", 50.0, "2026-09-13")]
+    r = compare_lists(plaid, ynab, "2026-09-01", "2026-09-30")
+    assert r.matched == 1 and [t["id"] for t in r.only_plaid] == ["late"]
+
+
+def test_multiple_ynab_accounts_per_plaid_account(tmp_path, monkeypatch):
+    from datetime import date as _date
+    import hashlib
+    settings = make_settings(tmp_path, monkeypatch)
+    app = create_app(settings, background_sync=False)
+    db = Database(tmp_path / "finance.db")
+    with db.connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Wells Fargo')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name) VALUES ('p1','plaid','i1','Autograph')")
+        conn.execute("INSERT INTO accounts (account_id, source, name, subtype) VALUES "
+                     "('ynab:bilt','ynab','Bilt Rewards','open'), ('ynab:auto','ynab','Wells Fargo Autograph Visa','open')")
+        conn.execute("INSERT INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')", (hashlib.sha256(b"tok").hexdigest(),))
+        rows = [("plaid", "a", "p1", "2025-01-05", 10.0), ("plaid", "b", "p1", "2026-10-26", 20.0),
+                ("ynab", "y1", "ynab:bilt", "2025-01-05", 10.0), ("ynab", "y2", "ynab:auto", "2026-10-26", 20.0)]
+        conn.executemany("INSERT INTO transactions (source, id, account_id, date, name, amount) "
+                         "VALUES (?, ?, ?, ?, 'Shop', ?)", rows)
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        c.post("/api/links", json={"links": {"p1": ["ynab:auto", "ynab:bilt", "ynab:auto", "bogus"]}}, headers=H)
+        page = c.get("/compare").text
+    assert "Wells Fargo Autograph Visa + Bilt Rewards" in page
+    r = compare_all(db, today=_date(2026, 11, 13))["pairs"][0]
+    assert r.matched == 2 and not r.only_plaid and r.ynab_count == 2
+
+
+def test_links_table_migrates_from_single_link(tmp_path):
+    import sqlite3
+    path = tmp_path / "f.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE account_links (plaid_account_id TEXT PRIMARY KEY, ynab_account_id TEXT NOT NULL)")
+    conn.execute("INSERT INTO account_links VALUES ('p1', 'ynab:y1')")
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO account_links VALUES ('p1', 'ynab:y2')")
+        rows = sorted(tuple(r) for r in conn.execute("SELECT * FROM account_links"))
+    assert rows == [("p1", "ynab:y1"), ("p1", "ynab:y2")]
