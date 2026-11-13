@@ -295,3 +295,34 @@ def test_compare_flags_transactions_in_other_ynab_account(tmp_path):
     assert r.matched == 1 and [t["id"] for t in r.only_plaid] == ["a"]
     assert r.elsewhere == {"a": "BCP old"}
     assert r.ynab_count == 1 and r.ynab_first == "2026-03-05"
+
+
+def test_ynab_full_history_reimport_once(tmp_path):
+    db = Database(tmp_path / "f.db")
+    db.set_kv("ynab_server_knowledge", "99")  # left over from an install that imported only a year
+    ynab = FakeYNAB([], [([], 100), ([], 101)])
+    asyncio.run(sync_ynab(db, ynab))
+    asyncio.run(sync_ynab(db, ynab))
+    assert ynab.knowledge_seen == [None, 100]
+
+
+def test_ynab_client_requests_full_history_first(tmp_path, monkeypatch):
+    import httpx
+    from app.ynab import YNAB
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"data": {"transactions": [], "server_knowledge": 5}})
+
+    settings = make_settings(tmp_path, monkeypatch, ynab_token="t")
+    client = httpx.AsyncClient(base_url="https://api.ynab.com/v1", transport=httpx.MockTransport(handler))
+    y = YNAB(settings, client)
+    asyncio.run(y.transactions(None))
+    asyncio.run(y.transactions(5))
+    assert seen == [{"since_date": "2000-01-01"}, {"last_knowledge_of_server": "5"}]
+
+
+def test_clean_account_names():
+    from app.sync import _clean
+    assert _clean("WELLS FARGO AUTOGRAPH VISA�� CARD ...5998") == "WELLS FARGO AUTOGRAPH VISA CARD ...5998"
