@@ -1,0 +1,30 @@
+# Weekly checks for newer pinned versions. Each update arrives as a pull request;
+# after it is merged, the bump-version workflow raises the add-on version so
+# Home Assistant offers the update.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /finance
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      # Python 3.13 to 3.14 and similar jumps get a deliberate, tested update instead.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: pip
+    directory: /finance
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python-packages:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

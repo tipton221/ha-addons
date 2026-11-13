@@ -1,0 +1,26 @@
+# Runs the tests and builds the image on every pull request, so dependency
+# updates are checked before they are merged.
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: pip install -r finance/requirements.txt pytest
+      - name: Tests
+        run: python -m pytest finance/tests
+      - name: Build the image
+        run: docker build finance

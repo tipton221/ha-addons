@@ -1,0 +1,37 @@
+# Home Assistant only offers an add-on update when its version changes. When a
+# merge to main changes the Dockerfile or Python requirements without changing
+# config.yaml (Dependabot updates), raise the patch version and commit it.
+name: Bump add-on version
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - finance/Dockerfile
+      - finance/requirements.txt
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Bump the version if this push did not
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -q '^0*$' \
+             && ! git diff --quiet "$BEFORE" HEAD -- finance/config.yaml; then
+            echo "config.yaml version already changed in this push; nothing to do."
+            exit 0
+          fi
+          new=$(python3 .github/scripts/bump_version.py finance/config.yaml)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Finance $new: dependency updates"
+          git push
