@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Set up Finance{% endblock %}
+{% block page %}setup{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Set up Finance</h1>
+  {% if code_ok %}
+  <p class="muted">Enter the setup code from the add-on options, then create a passkey on this device. After this, signing in uses Face ID or Touch ID.</p>
+  <form id="setup-form" autocomplete="off">
+    <label for="code">Setup code</label>
+    <input id="code" name="code" type="password" required autocomplete="off">
+    <label for="label">Device name</label>
+    <input id="label" name="label" type="text" placeholder="iPhone" maxlength="60">
+    <button type="submit" class="primary">Create passkey</button>
+  </form>
+  <p id="msg" class="msg" role="status"></p>
+  {% else %}
+  <p>Setup is locked. In Home Assistant, set <code>setup_code</code> in the Finance add-on options to a random value of at least 12 characters, restart the add-on, and reload this page.</p>
+  {% endif %}
+</section>
+{% endblock %}

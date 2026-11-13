@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Finance{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
+  <script src="/static/app.js" defer></script>
+</head>
+<body data-page="{% block page %}{% endblock %}">
+  <main class="wrap">
+    {% if nav is defined %}
+    <nav class="tabs" aria-label="Sections">
+      <a href="/" {% if nav == "inbox" %}aria-current="page"{% endif %}>Inbox</a>
+      <a href="/bills" {% if nav == "bills" %}aria-current="page"{% endif %}>Bills</a>
+      <a href="/search" {% if nav == "search" %}aria-current="page"{% endif %}>Search</a>
+      <a href="/accounts" {% if nav == "accounts" %}aria-current="page"{% endif %}>Accounts</a>
+    </nav>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

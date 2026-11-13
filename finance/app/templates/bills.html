@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% set nav = "bills" %}
+{% block title %}Bills{% endblock %}
+{% block page %}bills{% endblock %}
+{% macro bill_form(b=None) %}
+<form class="bill-form" data-id="{{ b.id if b else '' }}" autocomplete="off">
+  <div class="grid2">
+    <label>Name<input name="name" type="text" required maxlength="80" value="{{ b.name if b else '' }}"></label>
+    <label>Amount<input name="amount" type="number" step="0.01" min="0" required value="{{ '%.2f' % b.amount if b else '' }}"></label>
+    <label>Repeats
+      <select name="cadence">
+        {% for c in ["monthly", "quarterly", "semiannual", "yearly"] %}
+        <option value="{{ c }}" {% if b and b.cadence == c %}selected{% endif %}>{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[c] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ b.due_day if b and b.due_day else '' }}"></label>
+    <label>Matches charges containing<input name="match" type="text" value="{{ b.match if b else '' }}" placeholder="same as name"></label>
+    <label>Next due (optional)<input name="next_due" type="date" value="{{ b.next_due_override if b and b.next_due_override else '' }}"></label>
+  </div>
+  <label class="inline"><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
+  <div class="row-actions">
+    <button type="submit" class="primary">Save</button>
+    {% if b %}<button type="button" class="ghost danger delete-bill" data-id="{{ b.id }}">Remove</button>{% endif %}
+  </div>
+</form>
+{% endmacro %}
+{% block content %}
+<header class="top"><h1>Bills</h1></header>
+<p id="msg" class="msg" role="status"></p>
+
+<section class="card">
+  <h2>Coverage through {{ cov.payday.isoformat() | shortdate }}</h2>
+  <dl class="sums">
+    <div><dt>Cash</dt><dd>{{ cov.cash | money }}</dd></div>
+    <div><dt>Card balances</dt><dd>-{{ cov.cards | money }}</dd></div>
+    <div><dt>Pending card charges</dt><dd>-{{ cov.pending | money }}</dd></div>
+    <div><dt>Bills due before payday</dt><dd>-{{ cov.due_total | money }}</dd></div>
+    <div class="total {{ 'ok' if cov.ok else 'short' }}"><dt>Left</dt><dd>{{ cov.left | money }}</dd></div>
+  </dl>
+  {% if cov.due %}
+  <ul class="list">
+    {% for b in cov.due %}
+    <li><div><strong>{{ b.name }}</strong><span class="muted small">{{ b.next_due.isoformat() | shortdate }}</span></div><span class="amount">{{ b.amount | money }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="muted small">Non-monthly bills average {{ cov.annual_reserve | money }} a month. All bills together average {{ monthly_total | money }} a month.</p>
+</section>
+
+<section class="card">
+  <h2>Paydays</h2>
+  <form id="payday-form" class="payday">
+    <label class="inline"><input type="radio" name="kind" value="semimonthly" {% if schedule.kind != "biweekly" %}checked{% endif %}> Twice a month on days</label>
+    <input name="days" type="text" inputmode="numeric" value="{{ (schedule.days or [10, 25]) | join(', ') }}" aria-label="Days of the month">
+    <label class="inline"><input type="radio" name="kind" value="biweekly" {% if schedule.kind == "biweekly" %}checked{% endif %}> Every two weeks, including</label>
+    <input name="anchor" type="date" value="{{ schedule.anchor or '' }}" aria-label="A recent payday">
+    <button type="submit" class="ghost">Save paydays</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Recurring bills</h2>
+    <button id="detect" class="ghost">Find new bills</button>
+  </div>
+  {% if bills %}
+  <ul class="list bills">
+    {% for b in bills %}
+    <li class="{{ '' if b.active and not b.stale else 'inactive' }}">
+      <details>
+        <summary>
+          <span class="grow"><strong>{{ b.name }}</strong>
+            <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
+            {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}</span>
+          <span class="amount">{{ b.amount | money }}</span>
+        </summary>
+        {{ bill_form(b) }}
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No bills yet. They are detected after the first sync, or add one below.</p>
+  {% endif %}
+  <details class="add">
+    <summary>Add a bill</summary>
+    {{ bill_form() }}
+  </details>
+</section>
+{% endblock %}
