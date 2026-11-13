@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Finishing bank connection{% endblock %}
+{% block page %}oauth{% endblock %}
+{% block head %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>{% endblock %}
+{% block content %}
+<section class="card narrow center">
+  <h1>Finishing bank connection</h1>
+  <p id="msg" class="msg" role="status">One moment.</p>
+  <p><a href="/">Back to Finance</a></p>
+</section>
+{% endblock %}

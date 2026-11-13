@@ -1,0 +1,35 @@
+name: Finance
+version: "0.1.0"
+slug: finance
+description: Personal finance tracker (Plaid and YNAB), served at its own address through a Cloudflare Tunnel
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+# No ports are published. The app listens on 127.0.0.1 inside the container,
+# and the bundled cloudflared connector is the only way in.
+options:
+  public_url: "https://finance.example.com"
+  cloudflare_tunnel_token: ""
+  cf_access_team_domain: ""
+  cf_access_aud: ""
+  setup_code: ""
+  plaid_env: production
+  plaid_client_id: ""
+  plaid_secret: ""
+  ynab_token: ""
+  sync_interval_hours: 4
+  session_hours: 24
+schema:
+  public_url: url
+  cloudflare_tunnel_token: password?
+  cf_access_team_domain: str?
+  cf_access_aud: str?
+  setup_code: password?
+  plaid_env: list(production|sandbox)
+  plaid_client_id: str?
+  plaid_secret: password?
+  ynab_token: password?
+  sync_interval_hours: int(1,24)
+  session_hours: int(1,720)

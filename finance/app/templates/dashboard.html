@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block page %}dashboard{% endblock %}
+{% block head %}{% if plaid_ready %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>{% endif %}{% endblock %}
+{% block content %}
+<header class="top">
+  <h1>Finance</h1>
+  <div class="actions">
+    {% if plaid_ready %}<button id="sync" class="ghost">Sync now</button>{% endif %}
+    <button id="logout" class="ghost">Sign out</button>
+  </div>
+</header>
+<p id="msg" class="msg" role="status"></p>
+
+{% if not settings.cf_access_enabled %}
+<div class="banner warn">The Cloudflare Access check inside the app is off. Set <code>cf_access_team_domain</code> and <code>cf_access_aud</code> in the add-on options.</div>
+{% endif %}
+{% if not plaid_ready %}
+<div class="banner warn">Plaid is not set up. Add the client ID and secret in the add-on options.</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>Connections</h2>
+    {% if plaid_ready %}<button id="connect" class="primary">Connect a bank</button>{% endif %}
+  </div>
+  {% if items %}
+  <ul class="list">
+    {% for i in items %}
+    <li>
+      <div>
+        <strong>{{ i.institution or "Unnamed connection" }}</strong>
+        <span class="muted small">
+          {% if i.last_sync_at %}Synced {{ i.last_sync_at | local }}{% else %}Not synced yet{% endif %}
+          {% if i.update_status and i.update_status != "HISTORICAL_UPDATE_COMPLETE" %} · history loading{% endif %}
+        </span>
+      </div>
+      {% if i.status == "ok" %}<span class="pill ok">Connected</span>
+      {% else %}<button class="ghost reconnect" data-item="{{ i.item_id }}">Reconnect</button>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No banks connected yet.</p>
+  {% endif %}
+  <p class="muted small">YNAB:
+    {% if ynab is none %}not set up
+    {% elif ynab.ok %}connected ({{ ynab.budgets | join(", ") }})
+    {% else %}connection failed ({{ ynab.error }}){% endif %}
+  </p>
+</section>
+
+{% if accounts %}
+<section class="card">
+  <h2>Accounts</h2>
+  <ul class="list">
+    {% for a in accounts %}
+    <li>
+      <div>
+        <strong>{{ a.name }}</strong>{% if a.mask %} <span class="muted">••{{ a.mask }}</span>{% endif %}
+        <span class="muted small">{{ a.institution }} · {{ a.subtype or a.type }}</span>
+      </div>
+      <span class="amount">{{ a.current_balance | money }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>Recent transactions</h2>
+    <span class="muted small">{{ total }} stored</span>
+  </div>
+  {% if txns %}
+  <ul class="list txns">
+    {% for t in txns %}
+    <li class="{% if t.reviewed %}reviewed{% endif %}">
+      <label class="check">
+        <input type="checkbox" class="review" data-source="{{ t.source }}" data-id="{{ t.id }}" {% if t.reviewed %}checked{% endif %} aria-label="Reviewed">
+      </label>
+      <div class="grow">
+        <strong>{{ t.merchant or t.name }}</strong>
+        {% if t.pending %}<span class="pill">Pending</span>{% endif %}
+        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ t.category | replace("_", " ") | title }}{% endif %}</span>
+      </div>
+      <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No transactions yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
