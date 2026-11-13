@@ -1,4 +1,4 @@
-FROM cloudflare/cloudflared:2026.10.3 AS cloudflared
+FROM cloudflare/cloudflared:2026.11.0 AS cloudflared
 
 FROM python:3.13-slim-bookworm
 
