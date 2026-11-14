@@ -286,9 +286,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
-        horizon = today() + timedelta(days=30)
+        # Every scheduled bill, furthest out first so the next one sits at the bottom (like YNAB).
         upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"]
-                           and b["next_due"] <= horizon), key=lambda b: b["next_due"])
+                           and (not selected or b["account_id"] == selected)),
+                          key=lambda b: b["next_due"], reverse=True)
         return templates.TemplateResponse(request, "home.html", {
             "upcoming": upcoming, "upcoming_total": sum(b["amount"] for b in upcoming), "colors": COLORS,
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,

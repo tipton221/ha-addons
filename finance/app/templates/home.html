@@ -50,9 +50,10 @@
     {% endfor %}
   </div>
   {% endif %}
+  <div id="scheduled-wrap">
   {% if upcoming %}
   <details class="scheduled" id="scheduled">
-    <summary><span class="chev-down" aria-hidden="true">›</span> Scheduled <span class="count zero">{{ upcoming | length }}</span><span class="muted small sched-total">{{ upcoming_total | money }} · 30 days</span></summary>
+    <summary><span class="chev-down" aria-hidden="true">›</span> Scheduled <span class="count zero">{{ upcoming | length }}</span><span class="muted small sched-total">{{ upcoming_total | money }}</span></summary>
     <ul class="list">
       {% for b in upcoming %}
       <li class="edit-row" role="button" tabindex="0" data-editor="sched-{{ b.id }}">
@@ -67,6 +68,7 @@
     </ul>
   </details>
   {% endif %}
+  </div>
   <div id="all">
     {% include "_rows.html" %}
     {% if not groups %}<p class="empty">No reviewed transactions{% if selected %} for this account{% endif %}.</p>{% endif %}

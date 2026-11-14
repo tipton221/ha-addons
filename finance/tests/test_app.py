@@ -743,3 +743,25 @@ def test_tip_badge_scheduled_section_and_icons(tmp_path, monkeypatch):
         assert c.get("/manifest.json").json()["display"] == "standalone"  # reachable before signing in
         assert c.get("/favicon.ico").headers["content-type"] == "image/png"
         assert c.get("/static/icons/apple-touch-icon.png").status_code == 200
+
+
+# ---------------------------------------------------------------- 0.4.4: scheduled list follows the account filter
+
+def test_scheduled_all_bills_reverse_order_and_filtered(tmp_path, monkeypatch):
+    from datetime import timedelta
+    t = D.today()
+    rows = [("p1", "card", (t - timedelta(days=20)).isoformat(), "PHONE CO", "Phone Co", 50.0, 0, "X", "X", 1),
+            ("s1", "card2", (t - timedelta(days=300)).isoformat(), "STREAM BOX", "Stream Box", 120.0, 0, "X", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                       ("card2", "Card B", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Phone Co', 'phone co', 50, 'monthly')")
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Stream Box', 'stream box', 120, 'yearly')")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        sched = c.get("/").text.split('id="scheduled"')[1].split("</details>")[0]
+        # The yearly bill is ~65 days out (beyond 30) and listed first; the next one is last.
+        assert "Stream Box" in sched and sched.index("Stream Box") < sched.index("Phone Co")
+        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
+        sched = c.get("/").text.split('id="scheduled-wrap"')[1].split("</details>")[0]
+        assert "Phone Co" in sched and "Stream Box" not in sched

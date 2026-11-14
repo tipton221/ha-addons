@@ -502,6 +502,7 @@ const pages = {
     const refresh = async (ids) => {
       const r = await fetch("/", { credentials: "same-origin" });
       const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+      const wasOpen = document.getElementById("scheduled")?.open;
       for (const id of ids) {
         const fresh = doc.getElementById(id);
         const cur = document.getElementById(id);
@@ -510,6 +511,8 @@ const pages = {
           fresh.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 220 });
         }
       }
+      const sched = document.getElementById("scheduled");
+      if (sched && wasOpen) sched.open = true;
       lastRefresh = Date.now();
     };
 
@@ -548,7 +551,7 @@ const pages = {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && Date.now() - lastRefresh > 60000 &&
           !document.querySelector(".sheet.open")) {
-        refresh(["coverage", "review-card", "scheduled", "all"]).catch(() => {});
+        refresh(["coverage", "review-card", "scheduled-wrap", "all"]).catch(() => {});
       }
     });
 
@@ -561,13 +564,12 @@ const pages = {
         b.classList.toggle("on", on);
         b.setAttribute("aria-checked", on ? "true" : "false");
       });
-      const cur = document.getElementById("all");
-      cur.style.transition = "opacity .15s";
-      cur.style.opacity = "0.25";
+      const dim = ["all", "scheduled-wrap"].map((id) => document.getElementById(id));
+      dim.forEach((el) => { el.style.transition = "opacity .15s"; el.style.opacity = "0.25"; });
       try {
         await api("/api/view/account-filter", { account: btn.dataset.account });
-        await refresh(["all"]);
-      } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
+        await refresh(["scheduled-wrap", "all"]);
+      } catch (e) { dim.forEach((el) => { el.style.opacity = "1"; }); toast(e.message, true); }
     });
     bindLoadMore(document.body);
   },
