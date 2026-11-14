@@ -64,7 +64,7 @@ RECHECK_CHANGE = 0.30   # a posted charge this much above its pending amount goe
 def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: float) -> None:
     """When a pending charge posts, keep what the user did to it (review, note, one-off category)
     and remember the pending amount, so a tip or final total can be shown."""
-    row = conn.execute("SELECT amount, reviewed, note, category_id, name_override, bill_id FROM transactions "
+    row = conn.execute("SELECT amount, reviewed, note, category_id, name_override, bill_id, tip FROM transactions "
                        "WHERE source='plaid' AND id=?", (pending_id,)).fetchone()
     if not row:
         return
@@ -74,8 +74,8 @@ def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: flo
     conn.execute(
         "UPDATE transactions SET reviewed = MAX(reviewed, ?), note = COALESCE(note, ?), "
         "category_id = COALESCE(category_id, ?), name_override = COALESCE(name_override, ?), "
-        "bill_id = COALESCE(bill_id, ?), pending_amount = ? WHERE source='plaid' AND id=?",
-        (reviewed, row["note"], row["category_id"], row["name_override"], row["bill_id"],
+        "bill_id = COALESCE(bill_id, ?), tip = COALESCE(tip, ?), pending_amount = ? WHERE source='plaid' AND id=?",
+        (reviewed, row["note"], row["category_id"], row["name_override"], row["bill_id"], row["tip"],
          row["amount"] if abs(row["amount"] - posted_amount) >= 0.005 else None, posted_id))
 
 

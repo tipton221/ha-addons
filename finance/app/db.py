@@ -157,6 +157,7 @@ class Database:
                 ("transfer_peer", "TEXT"),   # id of the other side of a transfer or card payment
                 ("name_override", "TEXT"),   # one-off name for this transaction only
                 ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
+                ("tip", "REAL"),             # tip entered by hand (part of the amount); NULL: automatic; 0: no tip
             ],
             "accounts": [("display_name", "TEXT")],
             "bills": [

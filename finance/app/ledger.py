@@ -136,6 +136,7 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         t["category_info"] = cats.get(cid)
         t["account_label"] = t.get("account_display_name") or t.get("account_name") or ""
         t["bill"] = None
+        t["tip_info"], t["change"] = tip_info(t)  # t["tip"] stays the hand-entered amount
         t["transfer"] = None
         if t.get("transfer_peer"):
             peer = peers.get(t["transfer_peer"])
@@ -152,6 +153,27 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
                     t["bill"] = b
                     break
     return txns
+
+
+TIP_CATEGORY = "Restaurants"
+
+
+def tip_info(t: dict) -> tuple[dict | None, float | None]:
+    """(tip, change since pending). A tip entered by hand wins; otherwise a restaurant charge that
+    posted higher than its pending amount counts as a tip. Any other change is just a difference."""
+    amount = t["amount"]
+    no_tip = t.get("tip") == 0  # the user cleared an automatic tip
+    if t.get("tip"):
+        base = abs(amount) - t["tip"]
+        return {"amount": t["tip"], "pct": round(100 * t["tip"] / base) if base > 0 else None,
+                "manual": True}, None
+    pending = t.get("pending_amount")
+    if pending is None or abs(pending - amount) < 0.005:
+        return None, None
+    diff = round(amount - pending, 2)
+    if not no_tip and diff > 0 and pending > 0 and (t.get("category_info") or {}).get("name") == TIP_CATEGORY:
+        return {"amount": diff, "pct": round(100 * diff / pending), "manual": False, "pending": pending}, None
+    return None, diff
 
 
 def list_transactions(db: Database, *, reviewed: bool | None = None, account: str | None = None,

@@ -52,7 +52,9 @@
         <div class="row name-row"><label for="sheet-merchant" id="sheet-title">Merchant</label><input id="sheet-merchant" name="merchant" maxlength="80" autocomplete="off" autocapitalize="words" role="combobox" aria-autocomplete="list" aria-controls="name-suggest" aria-expanded="false"></div>
         <ul class="suggest" id="name-suggest" role="listbox" hidden></ul>
         <div class="row"><label for="sheet-category">Category</label><select id="sheet-category" name="category_id"></select></div>
+        <div class="row"><label for="sheet-tip">Tip</label><input id="sheet-tip" name="tip" type="text" inputmode="numeric" class="money" placeholder="None"></div>
       </div>
+      <p class="hint" id="sheet-tip-hint" hidden></p>
       <p class="section-label">Apply name and category to</p>
       <div class="scope" role="radiogroup" aria-label="Apply name and category to">
         <label><input type="radio" name="scope" value="merchant" checked><span>All from this merchant</span></label>
