@@ -10,7 +10,7 @@ import io
 import json
 import sqlite3
 from datetime import date, datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -45,7 +45,7 @@ CSP = (
     "script-src 'self' https://cdn.plaid.com; "
     "frame-src https://cdn.plaid.com; "
     "connect-src 'self' https://*.plaid.com; "
-    "img-src 'self' data:; style-src 'self'; base-uri 'none'; form-action 'self'; "
+    "img-src 'self' data: https://*.plaid.com; style-src 'self'; base-uri 'none'; form-action 'self'; "
     "frame-ancestors 'none'"
 )
 
@@ -271,29 +271,33 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         raw = db.get_kv("payday_schedule")
         return json.loads(raw) if raw else {"kind": "semimonthly", "days": [10, 25]}
 
-    def account_filter() -> str | None:
-        """The one account the transaction list is narrowed to, or None for all accounts."""
-        value = db.get_kv("account_filter") or None
-        return value if value in {a["account_id"] for a in plaid_accounts()} else None
+    def account_filter(value: str | None) -> str | None:
+        """The one account the list is narrowed to (from the request), or None for all accounts.
+        Filters live in the page, not the database, so a reload starts from All accounts."""
+        return value if value and value in {a["account_id"] for a in plaid_accounts()} else None
 
-    def pending_only() -> bool:
-        return db.get_kv("pending_only") == "1"
-
-    def all_list(account: str | None, before=None) -> list[dict]:
+    def all_list(account: str | None, before=None, pending: bool = False) -> list[dict]:
         """The All transactions list: reviewed transactions, or every pending one when that filter is on."""
-        if pending_only():
+        if pending:
             return list_transactions(db, account=account, before=before, limit=PAGE, where="t.pending = 1")
         return list_transactions(db, reviewed=True, account=account, before=before, limit=PAGE)
 
     def today() -> date:
         return datetime.now(PACIFIC).date()
 
+    VISIBILITY = ("everyday", "less", "archived")
+
     def plaid_accounts() -> list[dict]:
+        """Plaid accounts with their full label, short pill label, and visibility (everyday first)."""
         with db.connect() as conn:
-            return [dict(r) for r in conn.execute(
+            rows = [dict(r) for r in conn.execute(
                 "SELECT a.*, COALESCE(a.display_name, a.name) AS label, p.institution FROM accounts a "
                 "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE a.source='plaid' "
                 "ORDER BY p.institution, a.type, label")]
+        for a in rows:
+            a["pill"] = a.get("short_name") or a["label"]
+            a["visibility"] = a.get("visibility") if a.get("visibility") in VISIBILITY else "everyday"
+        return sorted(rows, key=lambda a: VISIBILITY.index(a["visibility"]))
 
     PAGE = 60
 
@@ -301,10 +305,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         return f"{rows[-1]['date']}:{rows[-1]['rid']}" if len(rows) == PAGE else None
 
     @app.get("/", response_class=HTMLResponse)
-    async def home(request: Request):
+    async def home(request: Request, account: str = "", pending: int = 0):
         inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
-        selected = account_filter()
-        rest = resolve(db, all_list(selected))
+        selected = account_filter(account)
+        pending_only = bool(pending)
+        rest = resolve(db, all_list(selected, pending=pending_only))
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
@@ -322,36 +327,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
             "groups": group_by_date(rest, today()), "more": page_after(rest),
-            "accounts": plaid_accounts(), "selected": selected, "pending_only": pending_only(),
+            "accounts": plaid_accounts(), "selected": selected, "pending_only": pending_only,
             "pending_count": pending_count,
         })
 
     @app.get("/api/transactions/page", response_class=HTMLResponse)
-    async def more_transactions(request: Request, before: str):
+    async def more_transactions(request: Request, before: str, account: str = "", pending: int = 0):
         try:
             d, rid = before.split(":")
             date.fromisoformat(d)
             int(rid)
         except ValueError:
             raise HTTPException(400, "Bad cursor")
-        rows = resolve(db, all_list(account_filter(), before=(d, rid)))
+        rows = resolve(db, all_list(account_filter(account), before=(d, rid), pending=bool(pending)))
         return templates.TemplateResponse(request, "_rows.html", {
             "groups": group_by_date(rows, today()), "more": page_after(rows)})
-
-    @app.post("/api/view/account-filter")
-    async def set_account_filter(request: Request):
-        body = await request.json()
-        account = body.get("account") or ""
-        if account and account not in {a["account_id"] for a in plaid_accounts()}:
-            raise HTTPException(400, "Unknown account")
-        db.set_kv("account_filter", account)
-        return {"ok": True}
-
-    @app.post("/api/view/pending")
-    async def set_pending_filter(request: Request):
-        body = await request.json()
-        db.set_kv("pending_only", "1" if body.get("on") else "0")
-        return {"ok": True}
 
     @app.get("/favicon.ico")
     async def favicon():
@@ -397,6 +387,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "tip_is_manual": bool(t["tip"]),  # 0 means "no tip" and counts as not manual
             "bill": t["bill"]["name"] if t["bill"] else None, "reviewed": bool(t["reviewed"]),
             "bill_id": t["bill"]["id"] if t["bill"] else None, "bill_choice": t["bill_id"],
+            "details": transaction_details(t),
             "bills": bill_choices(t["amount"] < 0),
             "merchant_count": len(keys.get(t["merchant_key"], [])),
             "similar": similar_merchants(t["merchant_key"], keys),
@@ -406,6 +397,61 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     GENERIC_FIRST_WORDS = {"transfer", "sq", "tst", "pos", "paypal", "debit", "purchase", "check", "online",
                            "ach", "deposit", "withdrawal", "web", "card", "recurring", "aplpay", "applepay",
                            "venmo", "zelle", "atm", "fee", "interest", "mobile", "point", "sale", "pp"}
+
+    PAYMENT_CHANNELS = {"in store": "In store", "online": "Online"}
+
+    def local_time(value: str | None) -> str | None:
+        """A Plaid timestamp as Pacific time, or None when missing or a placeholder midnight."""
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None or (dt.hour, dt.minute, dt.second) == (0, 0, 0):
+            return None
+        return dt.astimezone(PACIFIC).strftime("%-I:%M %p").lower().replace(" ", "\u202f")
+
+    def transaction_details(t: dict) -> dict:
+        """Extra facts from Plaid's original record, only the ones that are filled in."""
+        try:
+            raw = json.loads(t.get("raw") or "{}")
+        except ValueError:
+            raw = {}
+        loc = raw.get("location") or {}
+        street = loc.get("address")
+        place = ", ".join(x for x in [loc.get("city"), " ".join(x for x in [loc.get("region"), loc.get("postal_code")] if x)] if x)
+        maps = None
+        name = t["display_name"]
+        if loc.get("lat") is not None and loc.get("lon") is not None:
+            maps = f"https://maps.apple.com/?ll={loc['lat']},{loc['lon']}&q={quote(name)}"
+        elif street or place:
+            maps = f"https://maps.apple.com/?q={quote(', '.join(x for x in [name, street, place] if x))}"
+        meta = raw.get("payment_meta") or {}
+        pfc = raw.get("personal_finance_category") or {}
+        counterparties = [{"name": c.get("name"), "type": (c.get("type") or "").replace("_", " ")}
+                          for c in raw.get("counterparties") or []
+                          if c.get("name") and c.get("name") != name]
+        def logo_ok(url):
+            return url if isinstance(url, str) and url.startswith("https://") and ".plaid.com/" in url else None
+        return {
+            "time": local_time(raw.get("authorized_datetime")) or local_time(raw.get("datetime")),
+            "authorized_date": t.get("authorized_date") if t.get("authorized_date") != t["date"] else None,
+            "posted_date": t["date"],
+            "channel": PAYMENT_CHANNELS.get(raw.get("payment_channel")),
+            "street": street, "place": place or None, "store": loc.get("store_number"),
+            "country": loc.get("country") if loc.get("country") not in (None, "US") else None,
+            "maps": maps,
+            "website": raw.get("website"),
+            "logo": logo_ok(raw.get("logo_url")),
+            "counterparties": counterparties,
+            "mcc": raw.get("merchant_category_code"),
+            "confidence": (pfc.get("confidence_level") or "").replace("_", " ").lower() or None,
+            "payee": meta.get("payee"), "payer": meta.get("payer"),
+            "reference": meta.get("reference_number"), "processor": meta.get("payment_processor"),
+            "check": raw.get("check_number"),
+            "original": raw.get("original_description") if raw.get("original_description") != t.get("name") else None,
+        }
 
     def merchant_keys() -> dict[str, list[dict]]:
         """Plaid transactions grouped by merchant key."""
@@ -571,9 +617,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def rename_account(account_id: str, request: Request):
         body = await request.json()
         name = str(body.get("name") or "").strip()[:60] or None
+        short = str(body.get("short_name") or "").strip()[:24] or None
+        visibility = body.get("visibility") if body.get("visibility") in VISIBILITY else "everyday"
         with db.connect() as conn:
-            cur = conn.execute("UPDATE accounts SET display_name=? WHERE account_id=? AND source='plaid'",
-                               (name, account_id))
+            cur = conn.execute("UPDATE accounts SET display_name=?, short_name=?, visibility=? "
+                               "WHERE account_id=? AND source='plaid'", (name, short, visibility, account_id))
             if not cur.rowcount:
                 raise HTTPException(404, "Unknown account")
         return {"ok": True}

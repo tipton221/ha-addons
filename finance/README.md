@@ -43,10 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.6.1:
+Version 1.7.0:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
-- Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
+- Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time; filters reset when the page reloads).
 - Every edit or add (transactions, bills, paydays, categories, account names) opens in the same pop-up sheet. Amount fields fill in from the cents as you type (1500 becomes 15.00).
 - Tap a transaction to rename the merchant, change its category (for every transaction from that merchant, or just this one), and add a note. Merchant renames and categories apply to past and future transactions.
 - Your own categories (a starter list mapped from Plaid's categories, then fully editable, with named or custom hex colors), renamable accounts, and colored recurring tags for transactions that match a bill.
@@ -59,5 +59,7 @@ Version 1.6.1:
 - Accounts lists every renamed merchant with the bank's name and transaction count, and Undo restores the bank's name.
 - Automatic bill tags check amount and timing, not just the merchant: a fixed bill needs a close amount plus a repeat about one cycle away (or its scheduled date), or the exact amount repeating one cycle away (an older price). Varying bills need their scheduled date or a charge about a cycle away. One-off orders from the same merchant are not tagged.
 - Archive a bill or income when it ends: it leaves coverage and Scheduled, moves to an Archived list, and keeps tagging charges up to the archive date. Restore brings it back; Delete removes it and its tags.
+- Accounts can have a short name (used on filter pills) and be marked Everyday, Less used (behind More in the filters, last in lists), or Archived (hidden from filters and lists; history stays).
+- The transaction editor shows Plaid's details when the bank provides them: time, purchase and posted dates, in store or online, address with a Show in Maps button (Apple Maps), website, merchant logo, payment app, transfer details, and the original bank description.
 - Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), the card each bill is paid with (the card of its last charge unless you pick one), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.
