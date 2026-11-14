@@ -462,7 +462,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         today = datetime.now(PACIFIC).date()
         bills = bill_status(db, today)
         return templates.TemplateResponse(request, "bills.html", {
-            "bills": bills, "colors": COLORS, "schedule": schedule(), "cov": coverage(db, schedule(), today),
+            "bills": bills, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(), "cov": coverage(db, schedule(), today),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
         })
 
@@ -478,11 +478,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "active": 1 if body.get("active", True) else 0,
                 "color": valid_color(body.get("color"), "purple"),
                 "varies": 1 if body.get("varies") else 0,
+                "account_id": str(body["account_id"]) if body.get("account_id") else None,
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
         if not out["name"] or not out["match"] or (out["due_day"] is not None and not 1 <= out["due_day"] <= 31):
             raise HTTPException(400, "Check the name and day of month")
+        if out["account_id"] and out["account_id"] not in {a["account_id"] for a in plaid_accounts()}:
+            raise HTTPException(400, "Unknown account")
         if not out["varies"] and out["amount"] <= 0:
             raise HTTPException(400, "Enter the amount, or mark the bill as varying")
         return out
@@ -494,10 +497,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if body.get("id"):
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=?, color=?, varies=? WHERE id=?", (*f.values(), int(body["id"])))
+                             "active=?, color=?, varies=?, account_id=? WHERE id=?", (*f.values(), int(body["id"])))
             else:
                 conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
-                             "varies) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
+                             "varies, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
         return {"ok": True}
 
     @app.post("/api/bills/{bill_id}/delete")

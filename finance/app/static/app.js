@@ -400,7 +400,7 @@ const forms = {
       id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
       cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
       next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
-      varies: f.varies.checked,
+      varies: f.varies.checked, account_id: f.account_id.value,
     });
   },
   async "cat-form"(form) {

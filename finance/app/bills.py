@@ -156,8 +156,10 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
         row = {"date": hit[1], "amount": hit[2]} if hit else None
         b["last_date"] = row["date"] if row else None
         b["last_amount"] = row["amount"] if row else None
-        # The card it charged last time, so the account filter can show it.
-        b["account_id"] = hit[3] if hit else None
+        # The card it is paid with: the one chosen in the editor, else the card of the last charge.
+        b["auto_account_id"] = hit[3] if hit else None
+        b["account_choice"] = b.get("account_id")
+        b["account_id"] = b["account_choice"] or b["auto_account_id"]
         step = CADENCE_MONTHS.get(b["cadence"], 1)
         if b["next_due_override"]:
             due = date.fromisoformat(b["next_due_override"])

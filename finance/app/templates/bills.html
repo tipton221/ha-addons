@@ -64,6 +64,7 @@
       <div class="grow">
         <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
         <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
+        {% for a in accounts if a.account_id == b.account_id %}<span class="muted small">{{ a.label }}</span>{% endfor %}
         {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}
       </div>
       <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>

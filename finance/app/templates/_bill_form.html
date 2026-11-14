@@ -16,6 +16,15 @@
     <label>Matches charges containing<input name="match" type="text" value="{{ b.match if b else '' }}" placeholder="same as name"></label>
     <label>Next due (optional)<input name="next_due" type="date" value="{{ b.next_due_override if b and b.next_due_override else '' }}"></label>
   </div>
+  {% set labels = {} %}{% for a in accounts %}{% set _ = labels.update({a.account_id: a.label}) %}{% endfor %}
+  <label>Paid with
+    <select name="account_id">
+      <option value="">{% if b and b.auto_account_id in labels %}Automatic ({{ labels[b.auto_account_id] }}){% else %}Automatic (card of the last charge){% endif %}</option>
+      {% for a in accounts if a.type in ("credit", "depository") %}
+      <option value="{{ a.account_id }}" {% if b and b.account_choice == a.account_id %}selected{% endif %}>{{ a.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
   <label>Tag color</label>
   {{ color_picker(b.color if b else "purple", colors, "purple") }}
   <label class="inline"><input name="varies" type="checkbox" {% if b and b.varies %}checked{% endif %}> Amount varies (use the average of recent charges)</label>

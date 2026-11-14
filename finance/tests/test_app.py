@@ -765,3 +765,27 @@ def test_scheduled_all_bills_reverse_order_and_filtered(tmp_path, monkeypatch):
         c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
         sched = c.get("/").text.split('id="scheduled-wrap"')[1].split("</details>")[0]
         assert "Phone Co" in sched and "Stream Box" not in sched
+
+
+def test_bill_account_choice_overrides_last_charge(tmp_path, monkeypatch):
+    from datetime import timedelta
+    t = D.today()
+    rows = [("p1", "card", (t - timedelta(days=20)).isoformat(), "PHONE CO", "Phone Co", 50.0, 0, "X", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                       ("card2", "Card B", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Phone Co', 'phone co', 50, 'monthly')")
+        bid = conn.execute("SELECT id FROM bills").fetchone()["id"]
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert "Automatic (Card A)" in c.get("/bills").text
+        body = {"id": bid, "name": "Phone Co", "amount": "50", "cadence": "monthly", "account_id": "card2"}
+        assert c.post("/api/bills", json=body, headers=H).status_code == 200
+        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
+        assert "Phone Co" not in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        c.post("/api/view/account-filter", json={"account": "card2"}, headers=H)
+        assert "Phone Co" in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        assert c.post("/api/bills", json={**body, "account_id": "nope"}, headers=H).status_code == 400
+        assert c.post("/api/bills", json={**body, "account_id": ""}, headers=H).status_code == 200  # back to automatic
+        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
+        assert "Phone Co" in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
