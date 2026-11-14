@@ -210,6 +210,26 @@ function swipeToClose(el) {
   el.addEventListener("touchcancel", end);
 }
 
+// ---------- keep pop-up fields above the on-screen keyboard ----------
+
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const fit = () => {
+    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty("--kb", kb + "px");
+    document.documentElement.style.setProperty("--vvh", Math.round(vv.height) + "px");
+  };
+  vv.addEventListener("resize", fit);
+  vv.addEventListener("scroll", fit);
+  fit();
+}
+document.addEventListener("focusin", (ev) => {
+  const el = ev.target;
+  if (!el.matches || !el.matches("input, textarea") || !el.closest(".sheet")) return;
+  // Wait for the keyboard to finish opening, then bring the field into view inside the pop-up.
+  setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
+});
+
 // ---------- refresh without reloading (keeps the scroll position) ----------
 
 // Swap in fresh copies of sections of the home page.
@@ -418,6 +438,11 @@ const sheet = {
       const form = document.getElementById("sheet-form");
       form.merchant.value = t.display_name;
       form.note.value = t.note;
+      form.tip.value = t.tip ? t.tip.toFixed(2) : "";
+      this.tipStart = form.tip.value;
+      const tipHint = document.getElementById("sheet-tip-hint");
+      tipHint.hidden = !(t.tip && !t.tip_is_manual);
+      tipHint.textContent = "Tip worked out from the pending amount. Change it to correct it, or clear it to remove it.";
       const sel = form.category_id;
       sel.innerHTML = "";
       for (const c of cats.categories) {
@@ -502,6 +527,7 @@ const sheet = {
     const cid = Number(form.category_id.value);
     if (cid !== t.category_id || scopeChanged) body.category_id = cid;
     if (form.note.value.trim() !== t.note) body.note = form.note.value;
+    if (form.tip.value !== this.tipStart) body.tip = form.tip.value || null;
     const bill = form.bill_id.value;
     if (bill !== "new" && bill !== (t.bill_choice === null ? "" : String(t.bill_choice))) body.bill_id = bill;
     const picked = [...form.querySelectorAll('input[name="similar"]:checked')].map((b) => b.value);

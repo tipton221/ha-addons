@@ -1001,3 +1001,27 @@ def test_archived_bill_keeps_old_tags_and_leaves_coverage(tmp_path, monkeypatch)
         # Restore brings it back.
         c.post(f"/api/bills/{bid}/archive", json={"restore": True}, headers=H)
         assert c.get("/api/transactions/plaid/r2").json()["bill"] == "Old Rent"
+
+
+def test_tips_manual_automatic_and_cleared(tmp_path, monkeypatch):
+    rows = [("r1", "card", "2026-11-01", "CORNER BISTRO", "Corner Bistro", 47.20, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_RESTAURANT", 1),
+            ("g1", "card", "2026-11-01", "CORNER GROCER", "Corner Grocer", 52.00, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_GROCERIES", 1),
+            ("h1", "card", "2026-11-02", "CLIPPER SHOP", "Clipper Shop", 40.00, 0, "PERSONAL_CARE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET pending_amount=40.00 WHERE id IN ('r1', 'g1')")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/").text
+        # Restaurant: automatic tip. Groceries: only a difference, not a tip.
+        assert "Tip +$7.20 · 18%" in page and "+$12.00 since pending" in page
+        # Haircut: a tip entered by hand, percent of the price before the tip.
+        c.post("/api/transactions/plaid/h1", json={"tip": "10.00"}, headers=H)
+        d = c.get("/api/transactions/plaid/h1").json()
+        assert d["tip"] == 10.0 and d["tip_is_manual"] and "Tip +$10.00 · 33%" in c.get("/").text
+        assert c.post("/api/transactions/plaid/h1", json={"tip": "40"}, headers=H).status_code == 400
+        # Clearing the automatic restaurant tip keeps it off; the change shows as a difference.
+        c.post("/api/transactions/plaid/r1", json={"tip": None}, headers=H)
+        page = c.get("/").text
+        assert "Tip +$7.20" not in page and "+$7.20 since pending" in page
+        assert "tip" in c.get("/export.csv").text.splitlines()[0]

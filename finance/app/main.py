@@ -393,6 +393,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "category_id": (t["category_info"] or {}).get("id"),
             "category_is_override": bool(t["category_id"]),
             "name_is_override": bool(t["name_override"]),
+            "tip": t["tip_info"]["amount"] if t["tip_info"] else None,
+            "tip_is_manual": bool(t["tip"]),  # 0 means "no tip" and counts as not manual
             "bill": t["bill"]["name"] if t["bill"] else None, "reviewed": bool(t["reviewed"]),
             "bill_id": t["bill"]["id"] if t["bill"] else None, "bill_choice": t["bill_id"],
             "bills": bill_choices(t["amount"] < 0),
@@ -472,6 +474,17 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             else:
                 for key in [t["merchant_key"], *also]:
                     set_merchant_rule(db, key, category_id=int(cid) if cid is not None else None)
+        if "tip" in body:  # a tip entered by hand; empty or 0 goes back to automatic
+            try:
+                tip = round(abs(float(body["tip"] or 0)), 2) or None
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Enter the tip as an amount")
+            if tip is not None and tip >= abs(t["amount"]):
+                raise HTTPException(400, "The tip must be less than the total")
+            if tip is None and t["tip_info"] and not t["tip_info"]["manual"]:
+                tip = 0  # clearing an automatic tip: remember "no tip" so it does not come back
+            with db.connect() as conn:
+                conn.execute("UPDATE transactions SET tip=? WHERE source=? AND id=?", (tip, source, tid))
         if "bill_id" in body:  # "" or None: automatic; 0: not a bill; a bill id: that bill
             raw = body["bill_id"]
             bid = None if raw in (None, "", "auto") else int(raw)
@@ -785,13 +798,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["date", "authorized_date", "institution", "account", "name", "bank_description",
-                    "amount", "category", "note", "bill", "pending", "reviewed"])
+                    "amount", "category", "note", "bill", "pending", "reviewed", "tip"])
         for t in rows:
             w.writerow([t["date"], t["authorized_date"] or "", t["institution"] or "", t["account_label"],
                         t["display_name"], t["name"], f"{-t['amount']:.2f}",
                         (t["category_info"] or {}).get("name", ""), t["note"] or "",
                         t["bill"]["name"] if t["bill"] else "", "yes" if t["pending"] else "no",
-                        "yes" if t["reviewed"] else "no"])
+                        "yes" if t["reviewed"] else "no",
+                        f"{t['tip_info']['amount']:.2f}" if t["tip_info"] else ""])
         stamp = datetime.now(PACIFIC).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="transactions-{stamp}.csv"'})

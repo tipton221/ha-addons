@@ -511,6 +511,11 @@ details:not(.add) > summary { padding: 6px 0; font-weight: 600; }
 /* Sheets: the page stays put while one is open; the handle has a large touch area. */
 html.sheet-open, html.sheet-open body { overflow: hidden; }
 .sheet { overscroll-behavior: contain; }
+/* With the on-screen keyboard up (phones), the pop-up sits on top of it instead of under it.
+   --kb and --vvh come from the visual viewport in app.js. */
+@media (max-width: 640px) {
+  .sheet { bottom: var(--kb, 0px); max-height: min(88vh, calc(var(--vvh, 100vh) - 16px)); }
+}
 .grabber { position: relative; touch-action: none; }
 .grabber::before { content: ""; position: absolute; left: -60px; right: -60px; top: -14px; bottom: -14px; }
 .sheet-head, .sheet-title { touch-action: none; }

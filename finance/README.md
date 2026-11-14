@@ -43,14 +43,14 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.5.1:
+Version 1.6.0:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
 - Every edit or add (transactions, bills, paydays, categories, account names) opens in the same pop-up sheet. Amount fields fill in from the cents as you type (1500 becomes 15.00).
 - Tap a transaction to rename the merchant, change its category (for every transaction from that merchant, or just this one), and add a note. Merchant renames and categories apply to past and future transactions.
 - Your own categories (a starter list mapped from Plaid's categories, then fully editable, with named or custom hex colors), renamable accounts, and colored recurring tags for transactions that match a bill.
-- When a pending charge posts, its review, note, and one-off category carry over; a changed final amount shows as a tip (restaurants) or a difference, and a jump of more than 30% goes back to the inbox.
+- When a pending charge posts, its review, note, and one-off category carry over; a changed final amount shows as a tip (Restaurants category) or a difference. Any transaction can also take a tip entered by hand (for example, a haircut); the percentage is of the price before the tip, and the CSV export has a tip column, and a jump of more than 30% goes back to the inbox.
 - Card payments and transfers between your accounts are paired (same amount, opposite sides, within 5 days, at least one side checking): both show a ⇄ tag naming the other account, reviewing one reviews both, and search totals leave them out.
 - YNAB names: posted transactions on linked accounts take the payee and memo of the matching YNAB transaction (runs once after upgrading; Compare has Apply again). Merchants with two or more matches on one payee are renamed for the future; others get one-off names. Your own renames and notes win.
 - Transaction editor: one choice ("All from this merchant" or "Just this one") covers the name and category, a list of similar merchants (same first word) you can include one by one, unchecked by default, name suggestions while typing, and a Bill or income picker (automatic, none, a specific one, or a new one filled in from the transaction). Saving updates the list in place without losing your scroll position.
