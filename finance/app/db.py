@@ -136,7 +136,7 @@ class Database:
     def _add_columns(conn: sqlite3.Connection) -> None:
         """Columns added after the first release (0.4.0)."""
         wanted = {
-            "transactions": [("note", "TEXT"), ("category_id", "INTEGER")],
+            "transactions": [("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL")],
             "accounts": [("display_name", "TEXT")],
             "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0")],
         }

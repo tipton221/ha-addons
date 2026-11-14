@@ -159,6 +159,7 @@ function fold(li, delay = 0) {
 
 function openSheet(el) {
   el.hidden = false;
+  document.documentElement.classList.add("sheet-open");
   requestAnimationFrame(() => {
     el.classList.add("open");
     document.getElementById("scrim").classList.add("open");
@@ -167,7 +168,10 @@ function openSheet(el) {
 
 function closeSheet(el) {
   el.classList.remove("open");
-  if (!document.querySelector(".sheet.open")) document.getElementById("scrim").classList.remove("open");
+  if (!document.querySelector(".sheet.open")) {
+    document.getElementById("scrim").classList.remove("open");
+    document.documentElement.classList.remove("sheet-open");
+  }
   setTimeout(() => { if (!el.classList.contains("open")) el.hidden = true; }, 450);
 }
 
@@ -175,23 +179,35 @@ function closeAllSheets() {
   document.querySelectorAll(".sheet.open").forEach(closeSheet);
 }
 
+// Drag a sheet down to dismiss it: from the handle anytime, or from the content when it is
+// scrolled to the top. While dragging, the page and the sheet do not scroll.
 function swipeToClose(el) {
-  let startY = null;
-  el.addEventListener("touchstart", (e) => { if (el.scrollTop <= 0) startY = e.touches[0].clientY; }, { passive: true });
-  el.addEventListener("touchmove", (e) => {
+  let startY = null, dy = 0, dragging = false, fromHandle = false;
+  const end = () => {
     if (startY === null) return;
-    const dy = Math.max(0, e.touches[0].clientY - startY);
-    el.style.transition = "none";
-    el.style.transform = `translate(-50%, ${dy}px)`;
-  }, { passive: true });
-  el.addEventListener("touchend", (e) => {
-    if (startY === null) return;
-    const dy = e.changedTouches[0].clientY - startY;
     el.style.transition = "";
     el.style.transform = "";
-    startY = null;
-    if (dy > 120) closeSheet(el);
-  });
+    if (dragging && dy > 110) closeSheet(el);
+    startY = null; dragging = false;
+  };
+  el.addEventListener("touchstart", (e) => {
+    startY = e.touches[0].clientY; dy = 0; dragging = false;
+    fromHandle = !!e.target.closest(".grabber, .sheet-head, .sheet-title");
+  }, { passive: true });
+  el.addEventListener("touchmove", (e) => {
+    if (startY === null) return;
+    dy = e.touches[0].clientY - startY;
+    if (!dragging) {
+      if (dy > 6 && (fromHandle || el.scrollTop <= 0)) dragging = true;
+      else if (dy < -6 && !fromHandle) { startY = null; return; }
+      else if (!fromHandle) return;
+    }
+    if (e.cancelable) e.preventDefault();
+    el.style.transition = "none";
+    el.style.transform = `translate(-50%, ${Math.max(0, dy)}px)`;
+  }, { passive: false });
+  el.addEventListener("touchend", end);
+  el.addEventListener("touchcancel", end);
 }
 
 // Pop-up editors: any element with data-editor="<template id>" opens that template in a sheet.
@@ -464,9 +480,11 @@ const pages = {
   home() {
     const sync = document.getElementById("sync");
     if (sync) sync.addEventListener("click", syncNow);
-    const list = document.getElementById("inbox");
-    const count = document.getElementById("inbox-count");
-    const refresh = () => {
+    let lastRefresh = Date.now();
+
+    const updateCount = () => {
+      const list = document.getElementById("inbox");
+      const count = document.getElementById("inbox-count");
       const n = list.querySelectorAll(".txn-item:not(.leaving)").length;
       count.textContent = n;
       count.classList.toggle("zero", !n);
@@ -479,8 +497,24 @@ const pages = {
         if (all) all.hidden = true;
       }
     };
-    list.addEventListener("click", async (ev) => {
-      const btn = ev.target.closest(".tick");
+
+    // Swap in fresh copies of page sections without a reload.
+    const refresh = async (ids) => {
+      const r = await fetch("/", { credentials: "same-origin" });
+      const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+      for (const id of ids) {
+        const fresh = doc.getElementById(id);
+        const cur = document.getElementById(id);
+        if (fresh && cur) {
+          cur.replaceWith(fresh);
+          fresh.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 220 });
+        }
+      }
+      lastRefresh = Date.now();
+    };
+
+    document.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("#inbox .tick");
       if (!btn) return;
       ev.stopPropagation();
       const li = btn.closest(".txn-item");
@@ -489,27 +523,39 @@ const pages = {
       try {
         await api(`/api/transactions/${li.dataset.source}/${encodeURIComponent(li.dataset.id)}/review`, { reviewed: true });
         await fold(li, 250);
-        refresh();
+        updateCount();
+        refresh(["all"]);  // the reviewed transaction now belongs in All transactions
       } catch (e) { btn.classList.remove("checked"); btn.disabled = false; toast(e.message, true); }
     });
-    const all = document.getElementById("review-all");
-    if (all) all.addEventListener("click", async () => {
-      const items = [...list.querySelectorAll(".txn-item")];
+
+    document.addEventListener("click", async (ev) => {
+      const all = ev.target.closest("#review-all");
+      if (!all) return;
+      const items = [...document.querySelectorAll("#inbox .txn-item")];
       if (!items.length || !confirm(`Mark all ${items.length} as reviewed?`)) return;
       all.disabled = true;
       try {
         await api("/api/inbox/review-all", { ids: items.map((li) => li.dataset.id) });
-        items.forEach((li, i) => li.querySelector(".tick")?.classList.add("checked"));
+        items.forEach((li) => li.querySelector(".tick")?.classList.add("checked"));
         await Promise.all(items.map((li, i) => fold(li, 120 + Math.min(i, 20) * 45)));
-        refresh();
+        updateCount();
         toast(`${items.length} reviewed`);
-        setTimeout(() => location.reload(), 900);
+        refresh(["all"]);
       } catch (e) { all.disabled = false; toast(e.message, true); }
     });
-    const filters = document.getElementById("filters");
-    if (filters) filters.addEventListener("click", async (ev) => {
-      const btn = ev.target.closest(".filter");
+
+    // Returning to the app (home screen icon or tab) picks up anything the background sync added.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && Date.now() - lastRefresh > 60000 &&
+          !document.querySelector(".sheet.open")) {
+        refresh(["coverage", "review-card", "scheduled", "all"]).catch(() => {});
+      }
+    });
+
+    document.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("#filters .filter");
       if (!btn || btn.classList.contains("on")) return;
+      const filters = btn.closest("#filters");
       filters.querySelectorAll(".filter").forEach((b) => {
         const on = b === btn;
         b.classList.toggle("on", on);
@@ -520,12 +566,7 @@ const pages = {
       cur.style.opacity = "0.25";
       try {
         await api("/api/view/account-filter", { account: btn.dataset.account });
-        const r = await fetch("/", { credentials: "same-origin" });
-        const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-        const fresh = doc.getElementById("all");
-        cur.replaceWith(fresh);
-        fresh.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
-                      { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" });
+        await refresh(["all"]);
       } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
     });
     bindLoadMore(document.body);

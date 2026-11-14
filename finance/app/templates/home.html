@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_txn.html" import txn_row %}
+{% from "_bill_form.html" import bill_form with context %}
 {% set nav = "inbox" %}
 {% block page %}home{% endblock %}
 {% block content %}
@@ -18,7 +19,7 @@
 <div class="banner warn">{{ attention }} bank connection{{ "s need" if attention > 1 else " needs" }} attention. <a href="/accounts">Open Accounts</a></div>
 {% endif %}
 
-<a class="card hero {{ 'ok' if cov.ok else 'short' }}" href="/bills">
+<a id="coverage" class="card hero {{ 'ok' if cov.ok else 'short' }}" href="/bills">
   <span class="eyebrow">Left through {{ cov.payday.isoformat() | shortdate }}</span>
   <span class="big-number">{{ cov.left | money }}</span>
   <span class="parts">
@@ -48,6 +49,23 @@
     <button class="filter {% if a.account_id == selected %}on{% endif %}" data-account="{{ a.account_id }}" role="radio" aria-checked="{{ 'true' if a.account_id == selected else 'false' }}">{{ a.label }}</button>
     {% endfor %}
   </div>
+  {% endif %}
+  {% if upcoming %}
+  <details class="scheduled" id="scheduled">
+    <summary><span class="chev-down" aria-hidden="true">›</span> Scheduled <span class="count zero">{{ upcoming | length }}</span><span class="muted small sched-total">{{ upcoming_total | money }} · 30 days</span></summary>
+    <ul class="list">
+      {% for b in upcoming %}
+      <li class="edit-row" role="button" tabindex="0" data-editor="sched-{{ b.id }}">
+        <div class="grow">
+          <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
+          <span class="muted small">{{ b.next_due.isoformat() | shortdate }} · {{ {"monthly": "Repeats monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Repeats yearly"}[b.cadence] }}</span>
+        </div>
+        <span class="amount">{% if b.varies %}≈ {% endif %}{{ (0 - b.amount) | money }}</span>
+        <template id="sched-{{ b.id }}">{{ bill_form(b) }}</template>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
   {% endif %}
   <div id="all">
     {% include "_rows.html" %}

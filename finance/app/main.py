@@ -9,14 +9,14 @@ import csv
 import io
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -36,7 +36,7 @@ log = logging.getLogger("finance")
 
 HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
-PUBLIC_PATHS = {"/login", "/setup", "/api/auth/options", "/api/auth/verify",
+PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify"}
 
 CSP = (
@@ -286,7 +286,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
+        horizon = today() + timedelta(days=30)
+        upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"]
+                           and b["next_due"] <= horizon), key=lambda b: b["next_due"])
         return templates.TemplateResponse(request, "home.html", {
+            "upcoming": upcoming, "upcoming_total": sum(b["amount"] for b in upcoming), "colors": COLORS,
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
             "groups": group_by_date(rest, today()), "more": page_after(rest),
@@ -314,6 +318,23 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             raise HTTPException(400, "Unknown account")
         db.set_kv("account_filter", account)
         return {"ok": True}
+
+    @app.get("/favicon.ico")
+    async def favicon():
+        return FileResponse(HERE / "static" / "icons" / "favicon-32.png", media_type="image/png")
+
+    @app.get("/manifest.json")
+    async def manifest():
+        return JSONResponse({
+            "name": "Finance", "short_name": "Finance", "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": "#07080b", "theme_color": "#07080b",
+            "icons": [
+                {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/static/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png",
+                 "purpose": "maskable"},
+            ],
+        }, media_type="application/manifest+json")
 
     @app.get("/colors.css")
     async def colors_stylesheet():

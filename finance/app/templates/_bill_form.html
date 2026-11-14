@@ -1,0 +1,29 @@
+{% from "_color.html" import color_picker %}
+{% macro bill_form(b=None) %}
+<h3 class="sheet-title">{{ "Edit bill" if b else "Add a bill" }}</h3>
+<form class="bill-form editor-form" data-id="{{ b.id if b else '' }}" autocomplete="off">
+  <div class="grid2">
+    <label>Name<input name="name" type="text" required maxlength="80" value="{{ b.name if b else '' }}"></label>
+    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '%.2f' % b.amount if b else '' }}" {% if b and b.varies %}disabled placeholder="Average of recent charges"{% endif %}></label>
+    <label>Repeats
+      <select name="cadence">
+        {% for c in ["monthly", "quarterly", "semiannual", "yearly"] %}
+        <option value="{{ c }}" {% if b and b.cadence == c %}selected{% endif %}>{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[c] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ b.due_day if b and b.due_day else '' }}"></label>
+    <label>Matches charges containing<input name="match" type="text" value="{{ b.match if b else '' }}" placeholder="same as name"></label>
+    <label>Next due (optional)<input name="next_due" type="date" value="{{ b.next_due_override if b and b.next_due_override else '' }}"></label>
+  </div>
+  <label>Tag color</label>
+  {{ color_picker(b.color if b else "purple", colors, "purple") }}
+  <label class="inline"><input name="varies" type="checkbox" {% if b and b.varies %}checked{% endif %}> Amount varies (use the average of recent charges)</label>
+  <label class="inline"><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
+  {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove bill</button>{% endif %}
+  <div class="sheet-actions">
+    <button type="button" class="sheet-close">Cancel</button>
+    <button type="submit" class="primary">Save</button>
+  </div>
+</form>
+{% endmacro %}
