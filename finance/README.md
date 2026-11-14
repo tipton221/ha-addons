@@ -61,7 +61,7 @@ Version 1.10.5:
 - Archive a bill or income when it ends: it leaves coverage and Scheduled, moves to an Archived list, and keeps tagging charges up to the archive date. Restore brings it back; Delete removes it and its tags.
 - Accounts can have a short name (used on filter pills) and be marked Everyday, Less used (behind More in the filters, last in lists), or Archived (hidden from filters and lists; history stays).
 - The transaction editor shows Plaid's details when the bank provides them: time, purchase and posted dates, address with a Show in Maps button (Apple Maps), website, merchant logo, payment app, transfer details, and the original bank description. Amazon purchases link to Amazon's payment history and Apple App Store and subscription charges to Apple's purchase history.
-- Search: quick picks for each month and the last five years (a month and a year together mean that month of that year), dates that stay empty until tapped, several accounts or categories at once, spent or received, has a note, tagged as a recurring bill or income, and includes a tip.
+- Search: quick picks for each month and the last five years (a month and a year together mean that month of that year), dates that stay empty until tapped, several accounts or categories at once, spent or received, has a note, tagged as a recurring bill or income, includes a tip, pending, amount changed since pending, and transfers only.
 - Bills shows the bills due before payday with their date, frequency, and card.
 - Each bank connection has an Accounts button to share another account from that bank (Plaid account selection). New connections list their accounts right away.
 - Moving between Inbox, Bills, Search, and Accounts slides the tab highlight (view transitions where supported).

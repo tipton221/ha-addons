@@ -1108,6 +1108,9 @@ def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET note='gift' WHERE id='s3'")
         conn.execute("UPDATE transactions SET tip=1.5 WHERE id='s2'")
+        conn.execute("UPDATE transactions SET pending=1 WHERE id='s4'")
+        conn.execute("UPDATE transactions SET pending_amount=25 WHERE id='s3'")  # posted at 30
+        conn.execute("UPDATE transactions SET category_id=(SELECT id FROM categories WHERE name='Transfers and payments') WHERE id='s1'")
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
         def found(qs):
@@ -1118,6 +1121,8 @@ def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
         assert found(f"category={cats['Restaurants']}&category={cats['Shopping']}") == {"Book Barn", "Corner Cafe", "Toy Town"}
         assert found("flow=in") == {"Book Barn"} and found("noted=1") == {"Toy Town"}
         assert found("tipped=1") == {"Corner Cafe"}
+        assert found("pending=1") == {"Book Barn"} and found("changed=1") == {"Toy Town"}
+        assert found("transfers=1") == {"Book Barn"} and found("transfers=1&pending=1") == set()
         page = c.get("/search").text
         assert page.count('class="filter quick-month') == 12 and page.count('class="filter quick-year') == 5
         assert 'type="text" class="lazy-date"' in page

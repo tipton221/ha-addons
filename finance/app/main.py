@@ -862,6 +862,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             rows = [t for t in rows if t["bill"]]
         if q.get("tipped"):
             rows = [t for t in rows if t["tip_info"]]
+        if q.get("pending"):
+            rows = [t for t in rows if t["pending"]]
+        if q.get("changed"):  # final amount differs from pending, not counting tips
+            rows = [t for t in rows if t["change"]]
+        if q.get("transfers"):
+            rows = [t for t in rows if is_transfer(t)]
         return rows
 
     def quick_ranges(today_: date, q: dict) -> dict:
@@ -891,8 +897,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         q = search_query(request)
         rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
         more = len(rows) > 1000
-        # Totals leave out money moving between your own accounts, unless you searched by category.
-        counted = rows if q.get("category") else [t for t in rows if not is_transfer(t)]
+        # Totals leave out money moving between your own accounts, unless you searched by category
+        # or asked for transfers.
+        counted = rows if q.get("category") or q.get("transfers") else [t for t in rows if not is_transfer(t)]
         out = sum(t["amount"] for t in counted if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
