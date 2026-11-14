@@ -42,15 +42,20 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--text);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(10, 132, 255, 0.16), transparent 60%),
-    radial-gradient(900px 500px at 110% 10%, rgba(191, 90, 242, 0.12), transparent 60%),
-    radial-gradient(800px 600px at 50% 120%, rgba(48, 209, 88, 0.07), transparent 60%),
-    var(--bg);
-  background-attachment: fixed;
+  background: transparent;  /* html paints the base color; the glow layer sits between them */
   font: 17px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.01em;
+}
+
+/* Color glow, on its own pinned layer: the browser composites it instead of repainting a
+   fixed background on every scroll. */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(10, 132, 255, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(191, 90, 242, 0.12), transparent 60%),
+    radial-gradient(800px 600px at 50% 120%, rgba(48, 209, 88, 0.07), transparent 60%);
 }
 
 /* Fine wave texture over the whole page, blended into the background. */
@@ -60,6 +65,8 @@ body::before {
   background-size: 100px 20px;
   opacity: 0.1;
 }
+/* Phones draw the thin wave lines at 3x density, which makes them read fainter than on desktop. */
+@media (max-width: 700px) { body::before { opacity: 0.2; } }
 .wrap { position: relative; z-index: 1; }
 
 .wrap {
@@ -83,13 +90,14 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 
 .card {
   position: relative;
-  background: var(--glass);
+  /* A frosted fill that does the blur's job without the blur's cost. */
+  background: linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.04)), rgba(16, 17, 24, 0.8);
   border: 1px solid var(--glass-border);
   border-radius: var(--r-xl);
   padding: 18px;
   margin: 0 0 16px;
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  /* No backdrop blur on cards: they can be thousands of pixels tall, and re-blurring them while
+     scrolling made phones stutter. Over the dark background the blur was barely visible. */
   box-shadow: var(--glass-inset), var(--shadow-card);
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
