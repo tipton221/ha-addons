@@ -29,9 +29,10 @@
     <label><input type="radio" name="flow" value="out" {% if q.flow == "out" %}checked{% endif %}><span>Spent</span></label>
     <label><input type="radio" name="flow" value="in" {% if q.flow == "in" %}checked{% endif %}><span>Received</span></label>
   </div>
-  <div class="chips">
+  <div class="chips toggle-chips">
     <label class="filter toggle-chip"><input type="checkbox" name="noted" value="1" {% if q.noted %}checked{% endif %}><span>Has a note</span></label>
-    <label class="filter toggle-chip"><input type="checkbox" name="billed" value="1" {% if q.billed %}checked{% endif %}><span>↻ Bill or income</span></label>
+    <label class="filter toggle-chip"><input type="checkbox" name="billed" value="1" {% if q.billed %}checked{% endif %}><span>Recurring bill or income</span></label>
+    <label class="filter toggle-chip"><input type="checkbox" name="tipped" value="1" {% if q.tipped %}checked{% endif %}><span>Includes a tip</span></label>
   </div>
 
   {% set chosen_accounts = q.account or [] %}

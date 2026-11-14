@@ -1107,6 +1107,7 @@ def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
                                                        ("card3", "Card C", "credit", 0, None)])
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET note='gift' WHERE id='s3'")
+        conn.execute("UPDATE transactions SET tip=1.5 WHERE id='s2'")
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
         def found(qs):
@@ -1116,6 +1117,7 @@ def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
         cats = {x["name"]: x["id"] for x in c.get("/api/categories").json()["categories"]}
         assert found(f"category={cats['Restaurants']}&category={cats['Shopping']}") == {"Book Barn", "Corner Cafe", "Toy Town"}
         assert found("flow=in") == {"Book Barn"} and found("noted=1") == {"Toy Town"}
+        assert found("tipped=1") == {"Corner Cafe"}
         page = c.get("/search").text
         assert page.count('class="filter quick-month') == 12 and page.count('class="filter quick-year') == 5
         assert 'type="text" class="lazy-date"' in page

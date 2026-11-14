@@ -32,7 +32,7 @@
     {% for a in accounts %}
     <li class="edit-row" role="button" tabindex="0" data-editor="acct-{{ loop.index }}">
       <div class="grow">
-        <strong>{{ a.label }}{% if a.visibility == "less" %} <span class="pill">Less used</span>{% elif a.visibility == "archived" %} <span class="pill">Archived</span>{% endif %}</strong>
+        <strong>{{ a.label }}{% if a.visibility == "less" %} <span class="pill mini">Less used</span>{% elif a.visibility == "archived" %} <span class="pill mini">Archived</span>{% endif %}</strong>
         <span class="muted small">{{ a.institution }} · {{ (a.subtype or a.type or "") | capitalize }}{% if a.short_name %} · pill: {{ a.short_name }}{% endif %}{% if a.display_name %} · bank name: {{ a.name }}{% endif %}</span>
         {% if a.visibility == "archived" and (a.current_balance or 0) | abs >= 0.005 %}<span class="small warn-text">Archived but the balance is not zero, so it still counts in coverage.</span>{% endif %}
       </div>
