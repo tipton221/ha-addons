@@ -125,5 +125,25 @@
   </template>
 </section>
 
+<section class="card" id="rules">
+  <details class="scheduled">
+    <summary><span class="chev-down" aria-hidden="true">›</span> Renamed merchants <span class="count zero">{{ rules | length }}</span></summary>
+    <p class="muted small">Every merchant you renamed or gave a category, with the bank's name and how many transactions it covers. Undo puts back the bank's name and default category.</p>
+    {% if rules %}
+    <ul class="list">
+      {% for r in rules %}
+      <li class="plain-row rule-row">
+        <div class="grow">
+          <strong>{{ r.display_name or r.bank }}</strong>
+          <span class="muted small">Bank: {{ r.bank }} · {{ r.count }} transaction{{ "" if r.count == 1 else "s" }}{% if r.category %} · <span class="chip cat-{{ r.category.id }}">{{ r.category.name }}</span>{% endif %}</span>
+        </div>
+        <button type="button" class="ghost undo-rule" data-key="{{ r.merchant_key }}">Undo</button>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted small">None yet.</p>{% endif %}
+  </details>
+</section>
+
 <p class="muted small center">{{ total }} transactions stored · <a href="#" id="logout">Sign out</a></p>
 {% endblock %}

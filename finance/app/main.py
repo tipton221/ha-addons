@@ -421,9 +421,16 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         first = key.split(" ")[0] if key else ""
         if len(first) < 3 or first in GENERIC_FIRST_WORDS:
             return []
-        out = [{"key": k, "count": len(v), "sample": (v[0]["merchant"] or v[0]["name"] or "")}
-               for k, v in keys.items() if k != key and k.split(" ")[0] == first]
-        return sorted(out, key=lambda x: -x["count"])[:50]
+        with db.connect() as conn:
+            names = {r["merchant_key"]: r["display_name"] for r in conn.execute(
+                "SELECT merchant_key, display_name FROM merchant_rules WHERE display_name IS NOT NULL")}
+        out = []
+        for k, v in keys.items():
+            if k == key or k.split(" ")[0] != first:
+                continue
+            bank = v[0]["merchant"] or v[0]["name"] or ""
+            out.append({"key": k, "count": len(v), "sample": bank, "name": names.get(k) or bank})
+        return sorted(out, key=lambda x: -x["count"])[:30]
 
     def bill_choices(income: bool) -> list[dict]:
         with db.connect() as conn:
@@ -521,8 +528,30 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         return templates.TemplateResponse(request, "accounts.html", {
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
             "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
-            "categories": categories(db), "colors": COLORS,
+            "categories": categories(db), "colors": COLORS, "rules": merchant_rule_list(),
         })
+
+    def merchant_rule_list() -> list[dict]:
+        """Merchant renames and categories, with how many transactions each covers."""
+        keys = merchant_keys()
+        cats = {c["id"]: c for c in categories(db)}
+        with db.connect() as conn:
+            rules = [dict(r) for r in conn.execute(
+                "SELECT * FROM merchant_rules WHERE display_name IS NOT NULL OR category_id IS NOT NULL")]
+        out = []
+        for r in rules:
+            rows = keys.get(r["merchant_key"], [])
+            bank = (rows[0]["merchant"] or rows[0]["name"]) if rows else r["merchant_key"]
+            out.append({**r, "count": len(rows), "bank": bank, "category": cats.get(r["category_id"])})
+        return sorted(out, key=lambda r: (r["display_name"] or r["bank"] or "").lower())
+
+    @app.post("/api/rules/delete")
+    async def delete_rule(request: Request):
+        """Undo a merchant rename (and its category): transactions go back to the bank's name."""
+        body = await request.json()
+        with db.connect() as conn:
+            conn.execute("DELETE FROM merchant_rules WHERE merchant_key=?", (str(body.get("key") or ""),))
+        return {"ok": True}
 
     @app.post("/api/accounts/{account_id}/rename")
     async def rename_account(account_id: str, request: Request):
