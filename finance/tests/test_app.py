@@ -686,7 +686,7 @@ def test_varying_bill(tmp_path):
     # A much higher winter bill still gets the bill's tag, because the amount varies.
     from app.ledger import resolve
     tagged = resolve(db, [{"source": "plaid", "id": "e4", "merchant": "City Power", "name": "CITY POWER",
-                           "amount": 320.0, "category": None, "category_detail": None, "category_id": None}])
+                           "date": "2026-11-17", "amount": 320.0, "category": None, "category_detail": None, "category_id": None}])
     assert tagged[0]["bill"]["name"] == "City Power"
 
 
@@ -954,3 +954,23 @@ def test_similar_merchants_are_chosen_one_by_one_and_renames_can_be_undone(tmp_p
         c.post("/api/rules/delete", json={"key": "washington state parks"}, headers=H)
         assert c.get("/api/transactions/plaid/p1").json()["display_name"] == "Washington State Parks"
         assert c.get("/api/transactions/plaid/d1").json()["display_name"] == "Washington Department of Licensing"
+
+
+
+def test_bill_tags_need_amount_and_date(tmp_path, monkeypatch):
+    rows = [("v1", "card", "2026-09-23", "AMAZON PRIME VIDEO", "Amazon", 8.99, 0, "ENTERTAINMENT", "X", 1),
+            ("v2", "card", "2026-10-23", "AMAZON PRIME VIDEO", "Amazon", 8.99, 0, "ENTERTAINMENT", "X", 1),
+            ("y1", "card", "2026-03-02", "AMAZON PRIME", "Amazon", 139.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("o1", "card", "2026-10-05", "AMAZON MKTPL", "Amazon", 9.20, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("o2", "card", "2026-10-22", "AMAZON MKTPL", "Amazon", 24.00, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("o3", "card", "2026-08-14", "AMAZON MKTPL", "Amazon", 118.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Prime Video', 'amazon', 8.99, 'monthly')")
+        conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Prime', 'amazon', 139, 'yearly')")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        bill = {i: c.get(f"/api/transactions/plaid/{i}").json()["bill"] for i in ("v1", "v2", "y1", "o1", "o2", "o3")}
+    # Right amount and date: tagged. Similar amount on the wrong day, wrong amount on the right day,
+    # or an order near the annual fee months off schedule: not tagged.
+    assert bill == {"v1": "Prime Video", "v2": "Prime Video", "y1": "Prime", "o1": None, "o2": None, "o3": None}

@@ -14,7 +14,14 @@ from datetime import date, timedelta
 
 from .db import Database
 
-AMOUNT_TOLERANCE = 0.35  # a charge within 35% of the expected amount counts (utilities vary)
+AMOUNT_TOLERANCE = 0.35  # finding a bill's last charge: within 35% of the expected amount
+# Tagging a transaction with a bill is stricter: the amount must be close (unless the bill varies)
+# and the date must fall near one of the bill's scheduled dates, so a $9 Amazon order on the
+# 23rd is not "Prime Video".
+TAG_TOLERANCE = 0.10     # within 10% ...
+TAG_MIN_DIFF = 1.00      # ... or $1, whichever is more
+TAG_DATE_WINDOW = {"biweekly": 3}  # days either side of a scheduled date
+TAG_DATE_WINDOW_DEFAULT = 6
 MIN_BILL = 5.00         # ignore tiny recurring charges
 STALE_GRACE_DAYS = 10  # a bill this late with no charge has probably ended
 
@@ -166,8 +173,10 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
             b["samples"] = len(hits)
         else:
             # Same merchant and a similar amount, so one Amazon Prime bill does not match every Amazon order.
-            hit = next((c for c in charges if b["match"] and b["match"] in c[0]
-                        and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])), None)
+            # A close amount (or a charge assigned to this bill) wins over a merely similar one.
+            near = [c for c in charges if b["match"] and b["match"] in c[0]
+                    and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])]
+            hit = next((c for c in near if amount_matches(b, c[2])), near[0] if near else None)
         row = {"date": hit[1], "amount": hit[2]} if hit else None
         b["last_date"] = row["date"] if row else None
         b["last_amount"] = row["amount"] if row else None
@@ -200,6 +209,90 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
             advance(date.fromisoformat(row["date"]), cadence) + timedelta(days=STALE_GRACE_DAYS) < today)
         b["monthly_equivalent"] = b["amount"] * PER_MONTH.get(cadence, 1)
     return bills
+
+
+def amount_matches(bill: dict, amount: float) -> bool:
+    if bill.get("varies"):
+        return True
+    expected = bill["amount"] or 0
+    return abs(amount - expected) <= max(TAG_MIN_DIFF, TAG_TOLERANCE * max(expected, amount))
+
+
+def on_schedule(bill: dict, d: date) -> bool:
+    """Whether d is within a few days of one of the bill's scheduled dates (past or future)."""
+    anchor = bill.get("next_due")
+    if not anchor:
+        return True
+    cadence = bill.get("cadence") or "monthly"
+    if cadence == "biweekly":
+        off = (d - anchor).days % 14
+        return min(off, 14 - off) <= TAG_DATE_WINDOW["biweekly"]
+    step = CADENCE_MONTHS.get(cadence, 1)
+    day = bill.get("due_day") or anchor.day
+    k = round(((d.year - anchor.year) * 12 + d.month - anchor.month) / step)
+    gap = min(abs((add_months(anchor, (k + j) * step, day) - d).days) for j in (-1, 0, 1))
+    return gap <= TAG_DATE_WINDOW.get(cadence, TAG_DATE_WINDOW_DEFAULT)
+
+
+# Days between charges for each cadence, and how far off a repeat may be.
+PERIOD_DAYS = {"biweekly": (14, 2), "monthly": (30.4, 5), "quarterly": (91.3, 9), "semiannual": (182.6, 14),
+               "yearly": (365.2, 16)}
+REPEAT_SAME = 0.02       # a repeat is the same amount within 2% (or 50 cents)
+REPEAT_OLD_PRICE = 0.35  # a repeating amount within 35% counts too (the bill's price before a change)
+
+
+def repeats(series: list[tuple[date, float]], d: date, amount: float, cadence: str, same_amount: bool = True,
+            exact: bool = False, cycles: tuple[int, ...] = (1, 2, 3)) -> bool:
+    """Whether another charge in the series is one to three cycles before or after this one
+    (with the same amount, unless same_amount is False, as for varying bills)."""
+    period, slack = PERIOD_DAYS.get(cadence, PERIOD_DAYS["monthly"])
+    for d2, a2 in series:
+        gap = abs((d - d2).days)
+        # One to three cycles away (a skipped month, or a yearly repeat of a twice-a-year bill).
+        if gap == 0 or not any(abs(gap - n * period) <= slack + 3 * (n - 1) for n in cycles):
+            continue
+        if not same_amount:
+            return True
+        if abs(a2 - amount) <= (0.005 if exact else max(0.50, REPEAT_SAME * max(amount, a2))):
+            return True
+    return False
+
+
+def bill_matches(bill: dict, key: str, amount: float, d: date, series: list[tuple[date, float]] | None = None) -> bool:
+    """Automatic tagging. The merchant must match, then:
+    - fixed bills: the amount is close and the charge either repeats a cycle away or falls on the
+      bill's schedule; or the exact amount repeats one cycle away and is within 35% (an older price).
+    - varying bills: the charge falls on the schedule or another charge comes about a cycle away.
+    One-off purchases from the same merchant (an Amazon order next to Prime Video) do neither."""
+    if not bill["match"] or bill["match"] not in key:
+        return False
+    series = series or []
+    cadence = bill.get("cadence") or "monthly"
+    if bill.get("varies"):
+        return on_schedule(bill, d) or repeats(series, d, amount, cadence, same_amount=False)
+    expected = bill["amount"] or 0
+    again = repeats(series, d, amount, cadence)
+    if amount_matches(bill, amount):
+        return again or on_schedule(bill, d)
+    # An older price: the exact same amount one cycle away (subscriptions repeat to the cent;
+    # orders from a busy merchant only come close).
+    return (abs(amount - expected) <= REPEAT_OLD_PRICE * max(expected, amount)
+            and repeats(series, d, amount, cadence, exact=True, cycles=(1,)))
+
+
+def bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, float]]]:
+    """Posted charges (deposits for income) from each bill's merchant, for repeat checks."""
+    with db.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT merchant, name, date, amount, bill_id FROM transactions "
+            "WHERE source='plaid' AND pending=0 AND amount != 0 AND transfer_peer IS NULL")]
+    keyed = [(normalize(r["merchant"] or r["name"]), date.fromisoformat(r["date"]), r["amount"], r["bill_id"]) for r in rows]
+    out = {}
+    for b in bills:
+        income = b.get("kind") == "income"
+        out[b["id"]] = [(d, abs(a)) for k, d, a, bid in keyed
+                        if (a < 0) == income and bid in (None, b["id"]) and b["match"] and b["match"] in k]
+    return out
 
 
 # ---------------------------------------------------------------- paydays
