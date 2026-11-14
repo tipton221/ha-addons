@@ -428,6 +428,14 @@ document.addEventListener("input", (ev) => {
   if (ev.target.matches("input.money")) formatMoneyInput(ev.target);
 });
 
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "sheet-tip") sheet.syncTip("amount");
+  if (ev.target.id === "sheet-tip-pct") {
+    ev.target.value = ev.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+    sheet.syncTip("pct");
+  }
+});
+
 // ---------- transaction editor sheet ----------
 
 const sheet = {
@@ -458,6 +466,7 @@ const sheet = {
       form.note.value = t.note;
       form.tip.value = t.tip ? t.tip.toFixed(2) : "";
       this.tipStart = form.tip.value;
+      this.syncTip("amount");
       const tipHint = document.getElementById("sheet-tip-hint");
       tipHint.hidden = !(t.tip && !t.tip_is_manual);
       tipHint.textContent = "Tip worked out from the pending amount. Change it to correct it, or clear it to remove it.";
@@ -546,10 +555,11 @@ const sheet = {
       row.append(l, v);
       list.appendChild(row);
     }
-    if (d.amazon) {
+    if (d.shop) {
       const a = document.createElement("a");
-      a.className = "maps-btn"; a.href = d.amazon; a.target = "_blank"; a.rel = "noopener noreferrer";
-      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Open Amazon transactions</span>';
+      a.className = "maps-btn"; a.href = d.shop.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span></span>';
+      a.querySelector("span").textContent = d.shop.label;
       list.appendChild(a);
     }
     if (d.maps) {
@@ -559,6 +569,22 @@ const sheet = {
       list.appendChild(a);
     }
     document.getElementById("sheet-details").hidden = !list.children.length;
+  },
+
+  // The tip in dollars and as a percent of the price before the tip stay in step as either is typed.
+  syncTip(from) {
+    const t = this.current;
+    if (!t) return;
+    const form = document.getElementById("sheet-form");
+    const total = Math.abs(t.amount);
+    const round1 = (x) => String(Math.round(x * 10) / 10);
+    if (from === "amount") {
+      const tip = parseFloat(form.tip.value);
+      form.tip_pct.value = tip > 0 && tip < total ? round1(100 * tip / (total - tip)) : "";
+    } else {
+      const pct = parseFloat(form.tip_pct.value);
+      form.tip.value = pct > 0 ? (total * pct / (100 + pct)).toFixed(2) : "";
+    }
   },
 
   updateHint() {

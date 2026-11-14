@@ -53,7 +53,14 @@
         <div class="row name-row"><label for="sheet-merchant" id="sheet-title">Merchant</label><input id="sheet-merchant" name="merchant" maxlength="80" autocomplete="off" autocapitalize="words" role="combobox" aria-autocomplete="list" aria-controls="name-suggest" aria-expanded="false"></div>
         <ul class="suggest" id="name-suggest" role="listbox" hidden></ul>
         <div class="row"><label for="sheet-category">Category</label><select id="sheet-category" name="category_id"></select></div>
-        <div class="row"><label for="sheet-tip">Tip</label><input id="sheet-tip" name="tip" type="text" inputmode="numeric" class="money" placeholder="None"></div>
+        <div class="row tip-row">
+          <label for="sheet-tip">Tip</label>
+          <div class="tip-inputs">
+            <span class="unit">$</span><input id="sheet-tip" name="tip" type="text" inputmode="numeric" class="money" placeholder="0.00" aria-label="Tip in dollars">
+            <span class="tip-or">or</span>
+            <input id="sheet-tip-pct" name="tip_pct" type="text" inputmode="decimal" placeholder="0" maxlength="5" aria-label="Tip percent"><span class="unit">%</span>
+          </div>
+        </div>
       </div>
       <p class="hint" id="sheet-tip-hint" hidden></p>
       <p class="section-label">Apply name and category to</p>
