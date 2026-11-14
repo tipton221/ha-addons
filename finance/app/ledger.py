@@ -125,7 +125,8 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         key = merchant_key(t)
         rule = rules.get(key) or {}
         t["merchant_key"] = key
-        t["display_name"] = rule.get("display_name") or t.get("merchant") or t.get("name") or "(no name)"
+        t["display_name"] = (t.get("name_override") or rule.get("display_name") or t.get("merchant")
+                             or t.get("name") or "(no name)")
         cid = t.get("category_id") or rule.get("category_id") or _default_category(t, by_name)
         t["category_info"] = cats.get(cid)
         t["account_label"] = t.get("account_display_name") or t.get("account_name") or ""

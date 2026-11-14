@@ -29,6 +29,7 @@ from .compare import compare_all
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import sync_all, sync_ynab
+from .ynab_names import apply_ynab_names
 from .ynab import YNAB
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -96,7 +97,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                     log.warning("YNAB sync failed: %s", e)
                     db.set_kv("ynab_error", type(e).__name__)
                     results["ynab"] = {"error": type(e).__name__}
+            if db.get_kv("ynab_names_applied") != "1" and ynab_names_ready():
+                results["ynab_names"] = apply_ynab_names(db)  # once; the Compare page can run it again
         return results
+
+    def ynab_names_ready() -> bool:
+        with db.connect() as conn:
+            return bool(conn.execute("SELECT 1 FROM account_links LIMIT 1").fetchone()
+                        and conn.execute("SELECT 1 FROM transactions WHERE source='ynab' LIMIT 1").fetchone())
 
     async def sync_loop():
         await asyncio.sleep(60)
@@ -360,6 +368,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "account": t["account_label"], "note": t["note"] or "",
             "category_id": (t["category_info"] or {}).get("id"),
             "category_is_override": bool(t["category_id"]),
+            "name_is_override": bool(t["name_override"]),
             "bill": t["bill"]["name"] if t["bill"] else None, "reviewed": bool(t["reviewed"]),
         }
 
@@ -370,7 +379,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if "display_name" in body:
             name = str(body["display_name"] or "").strip()[:80]
             bank = (t["merchant"] or t["name"] or "").strip()
-            set_merchant_rule(db, t["merchant_key"], display_name=None if name in ("", bank) else name)
+            if t["name_override"]:  # a one-off name (from YNAB) stays one-off
+                with db.connect() as conn:
+                    conn.execute("UPDATE transactions SET name_override=? WHERE source=? AND id=?",
+                                 (None if name in ("", bank) else name, source, tid))
+            else:
+                set_merchant_rule(db, t["merchant_key"], display_name=None if name in ("", bank) else name)
         if "category_id" in body:
             cid = body["category_id"]
             with db.connect() as conn:
@@ -607,7 +621,16 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     @app.get("/compare", response_class=HTMLResponse)
     async def compare_page(request: Request):
-        return templates.TemplateResponse(request, "compare.html", {"c": compare_all(db)})
+        last = db.get_kv("ynab_names_result")
+        return templates.TemplateResponse(request, "compare.html", {
+            "c": compare_all(db), "names": json.loads(last) if last else None})
+
+    @app.post("/api/ynab-names")
+    async def run_ynab_names():
+        if not ynab_names_ready():
+            raise HTTPException(400, "Link accounts and sync YNAB first")
+        async with sync_lock:
+            return apply_ynab_names(db)
 
     @app.post("/api/links")
     async def save_links(request: Request):
