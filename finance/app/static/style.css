@@ -269,6 +269,9 @@ button svg { width: 18px; height: 18px; }
   color: var(--text-2); background: transparent; border-color: var(--glass-border);
 }
 .filter.on { color: #fff; background: var(--blue); border-color: transparent; }
+.pending-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.pending-toggle .count { margin: 0; }
+.pending-toggle.on .count { background: rgba(255,255,255,0.25); color: #fff; }
 
 /* ---------- sheet (transaction editor) ---------- */
 

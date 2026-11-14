@@ -30,6 +30,16 @@
 
 <section class="card">
   <div class="card-head"><h2>Paydays</h2></div>
+  {% if cov.paycheck %}
+  <div class="edit-row" role="button" tabindex="0" data-editor="bill-{{ cov.paycheck.id }}">
+    <div class="grow">
+      <strong>From your paycheck</strong>
+      <span class="muted small"><span class="pill tag bill-{{ cov.paycheck.id }}">↻ {{ cov.paycheck.name }}</span> {{ cadence_label[cov.paycheck.cadence] }} · next {{ cov.payday.isoformat() | shortdate }}</span>
+    </div>
+    <span class="chev" aria-hidden="true">›</span>
+  </div>
+  {% else %}
+  <p class="muted small">Tip: open your paycheck under Recurring income and check "This is my paycheck" to take paydays from it.</p>
   <div class="edit-row" role="button" tabindex="0" data-editor="paydays">
     <div class="grow">
       <strong>{% if schedule.kind == "biweekly" %}Every two weeks{% else %}Twice a month{% endif %}</strong>
@@ -37,6 +47,7 @@
     </div>
     <span class="chev" aria-hidden="true">›</span>
   </div>
+  {% endif %}
   <template id="paydays">
     <h3 class="sheet-title">Paydays</h3>
     <form id="payday-form" class="editor-form">

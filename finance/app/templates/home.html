@@ -41,7 +41,10 @@
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>All transactions</h2></div>
+  <div class="card-head" id="all-head">
+    <h2>{{ "Pending" if pending_only else "All transactions" }}</h2>
+    <button class="filter pending-toggle {% if pending_only %}on{% endif %}" id="pending-filter" aria-pressed="{{ 'true' if pending_only else 'false' }}">Pending only{% if pending_count %}<span class="count {% if not pending_only %}zero{% endif %}">{{ pending_count }}</span>{% endif %}</button>
+  </div>
   {% if accounts | length > 1 %}
   <div class="filters" id="filters" role="radiogroup" aria-label="Show transactions from">
     <button class="filter {% if not selected %}on{% endif %}" data-account="" role="radio" aria-checked="{{ 'false' if selected else 'true' }}">All accounts</button>
@@ -71,7 +74,7 @@
   </div>
   <div id="all">
     {% include "_rows.html" %}
-    {% if not groups %}<p class="empty">No reviewed transactions{% if selected %} for this account{% endif %}.</p>{% endif %}
+    {% if not groups %}<p class="empty">No {{ "pending" if pending_only else "reviewed" }} transactions{% if selected %} for this account{% endif %}.</p>{% endif %}
   </div>
 </section>
 {% if last_sync %}<p class="muted small center">Last synced {{ last_sync | local }}</p>{% endif %}

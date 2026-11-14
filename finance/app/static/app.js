@@ -594,6 +594,7 @@ const forms = {
       cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
       next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
       varies: f.varies.checked, account_id: f.account_id.value, kind: f.kind.value,
+      is_payday: f.is_payday.checked,
       from_txn: form.dataset.fromTxn || null,
     });
   },
@@ -714,7 +715,7 @@ const pages = {
         if (peer) peer.querySelector(".tick")?.classList.add("checked");
         await Promise.all([fold(li, 250), peer ? fold(peer, 250) : null]);
         updateCount();
-        refresh(["all"]);  // the reviewed transaction now belongs in All transactions
+        refresh(["all-head", "all"]);  // the reviewed transaction now belongs in All transactions
       } catch (e) { btn.classList.remove("checked"); btn.disabled = false; toast(e.message, true); }
     });
 
@@ -738,7 +739,7 @@ const pages = {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && Date.now() - lastRefresh > 60000 &&
           !document.querySelector(".sheet.open")) {
-        refresh(["coverage", "review-card", "scheduled-wrap", "all"]).catch(() => {});
+        refresh(["coverage", "review-card", "scheduled-wrap", "all-head", "all"]).catch(() => {});
       }
     });
 
@@ -755,8 +756,23 @@ const pages = {
       dim.forEach((el) => { el.style.transition = "opacity .15s"; el.style.opacity = "0.25"; });
       try {
         await api("/api/view/account-filter", { account: btn.dataset.account });
-        await refresh(["scheduled-wrap", "all"]);
+        await refresh(["all-head", "scheduled-wrap", "all"]);
       } catch (e) { dim.forEach((el) => { el.style.opacity = "1"; }); toast(e.message, true); }
+    });
+
+    document.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("#pending-filter");
+      if (!btn) return;
+      const on = !btn.classList.contains("on");
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      const cur = document.getElementById("all");
+      cur.style.transition = "opacity .15s";
+      cur.style.opacity = "0.25";
+      try {
+        await api("/api/view/pending", { on });
+        await refresh(["all-head", "all"]);
+      } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
     });
     bindLoadMore(document.body);
   },

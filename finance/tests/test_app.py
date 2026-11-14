@@ -905,3 +905,28 @@ def test_similar_merchants_bill_choice_income_and_rows(tmp_path, monkeypatch):
         # Categories are alphabetical.
         cats = [x["name"] for x in c.get("/api/categories").json()["categories"]]
         assert cats == sorted(cats, key=str.lower)
+
+
+def test_paycheck_sets_payday_and_pending_filter(tmp_path, monkeypatch):
+    from datetime import timedelta
+    t = D.today()
+    rows = [("p1", "chk", (t - timedelta(days=4)).isoformat(), "ACME PAYROLL", None, -2000.0, 0, "INCOME", "X", 1),
+            ("q1", "card", t.isoformat(), "CORNER CAFE", "Corner Cafe", 6.0, 1, "FOOD_AND_DRINK", "X", 1),
+            ("q2", "card", t.isoformat(), "BOOK BARN", "Book Barn", 12.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                       ("chk", "Checking", "depository", 1000, 1000)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        c.post("/api/bills", json={"name": "Paycheck", "match": "acme payroll", "kind": "income", "amount": "2000",
+                                   "cadence": "biweekly", "is_payday": True}, headers=H)
+        expected = (t + timedelta(days=10)).isoformat()
+        from app.bills import coverage
+        assert coverage(db, {"kind": "semimonthly", "days": [1, 15]}, t)["payday"].isoformat() == expected
+        assert "From your paycheck" in c.get("/bills").text
+        # Pending only: just the pending transaction in the list.
+        c.post("/api/view/pending", json={"on": True}, headers=H)
+        all_list = c.get("/").text.split('id="all"')[1]
+        assert "Corner Cafe" in all_list and "Book Barn" not in all_list
+        c.post("/api/view/pending", json={"on": False}, headers=H)
+        all_list = c.get("/").text.split('id="all"')[1]
+        assert "Book Barn" in all_list

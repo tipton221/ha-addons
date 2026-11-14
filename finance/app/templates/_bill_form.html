@@ -35,6 +35,7 @@
   <label>Tag color</label>
   {{ color_picker(v.color if v and v.color else ("green" if income else "purple"), colors, "purple") }}
   <label class="inline"><input name="varies" type="checkbox" {% if v and v.varies %}checked{% endif %}> Amount varies (use the average of recent ones)</label>
+  <label class="inline kind-income" {% if not income %}hidden{% endif %}><input name="is_payday" type="checkbox" {% if v and v.is_payday %}checked{% endif %}> This is my paycheck (its dates are my paydays)</label>
   <label class="inline kind-bill" {% if income %}hidden{% endif %}><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
   {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove</button>{% endif %}
   <div class="sheet-actions">

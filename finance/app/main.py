@@ -276,6 +276,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         value = db.get_kv("account_filter") or None
         return value if value in {a["account_id"] for a in plaid_accounts()} else None
 
+    def pending_only() -> bool:
+        return db.get_kv("pending_only") == "1"
+
+    def all_list(account: str | None, before=None) -> list[dict]:
+        """The All transactions list: reviewed transactions, or every pending one when that filter is on."""
+        if pending_only():
+            return list_transactions(db, account=account, before=before, limit=PAGE, where="t.pending = 1")
+        return list_transactions(db, reviewed=True, account=account, before=before, limit=PAGE)
+
     def today() -> date:
         return datetime.now(PACIFIC).date()
 
@@ -295,10 +304,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def home(request: Request):
         inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
         selected = account_filter()
-        rest = resolve(db, list_transactions(db, reviewed=True, account=selected, limit=PAGE))
+        rest = resolve(db, all_list(selected))
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
+            pending_count = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid' AND pending=1 "
+                                         + ("AND account_id=?" if selected else ""),
+                                         (selected,) if selected else ()).fetchone()["n"]
         # Every scheduled bill, furthest out first so the next one sits at the bottom (like YNAB).
         upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"]
                            and (not selected or b["account_id"] == selected)),
@@ -310,7 +322,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
             "groups": group_by_date(rest, today()), "more": page_after(rest),
-            "accounts": plaid_accounts(), "selected": selected,
+            "accounts": plaid_accounts(), "selected": selected, "pending_only": pending_only(),
+            "pending_count": pending_count,
         })
 
     @app.get("/api/transactions/page", response_class=HTMLResponse)
@@ -321,8 +334,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             int(rid)
         except ValueError:
             raise HTTPException(400, "Bad cursor")
-        rows = resolve(db, list_transactions(db, reviewed=True, account=account_filter(),
-                                             before=(d, rid), limit=PAGE))
+        rows = resolve(db, all_list(account_filter(), before=(d, rid)))
         return templates.TemplateResponse(request, "_rows.html", {
             "groups": group_by_date(rows, today()), "more": page_after(rows)})
 
@@ -333,6 +345,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if account and account not in {a["account_id"] for a in plaid_accounts()}:
             raise HTTPException(400, "Unknown account")
         db.set_kv("account_filter", account)
+        return {"ok": True}
+
+    @app.post("/api/view/pending")
+    async def set_pending_filter(request: Request):
+        body = await request.json()
+        db.set_kv("pending_only", "1" if body.get("on") else "0")
         return {"ok": True}
 
     @app.get("/favicon.ico")
@@ -599,6 +617,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "varies": 1 if body.get("varies") else 0,
                 "account_id": str(body["account_id"]) if body.get("account_id") else None,
                 "kind": "income" if body.get("kind") == "income" else "bill",
+                "is_payday": 1 if body.get("is_payday") and body.get("kind") == "income" else 0,
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
@@ -620,11 +639,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             if body.get("id"):
                 bill_id = int(body["id"])
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=?, color=?, varies=?, account_id=?, kind=? WHERE id=?", (*f.values(), bill_id))
+                             "active=?, color=?, varies=?, account_id=?, kind=?, is_payday=? WHERE id=?",
+                             (*f.values(), bill_id))
             else:
                 bill_id = conn.execute(
                     "INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
-                    "varies, account_id, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values())).lastrowid
+                    "varies, account_id, kind, is_payday) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    tuple(f.values())).lastrowid
+            if f["is_payday"]:  # only one paycheck sets paydays
+                conn.execute("UPDATE bills SET is_payday=0 WHERE id != ?", (bill_id,))
             if body.get("from_txn"):  # made from a transaction: that transaction belongs to it
                 conn.execute("UPDATE transactions SET bill_id=? WHERE source='plaid' AND id=?",
                              (bill_id, str(body["from_txn"])))
