@@ -1,0 +1,14 @@
+{% macro color_picker(current, colors, default="gray") %}
+{% set current = current or default %}
+{% set custom = current not in colors %}
+<div class="color-picker">
+  <div class="swatches" role="radiogroup" aria-label="Color">
+    {% for color in colors %}<label title="{{ color | capitalize }}"><input type="radio" name="color" value="{{ color }}" {% if color == current %}checked{% endif %}><span class="c-{{ color }}"></span></label>{% endfor %}
+    <label class="custom-swatch" title="Custom color"><input type="radio" name="color" value="custom" {% if custom %}checked{% endif %}><span class="rainbow"></span></label>
+  </div>
+  <div class="hex-row" {% if not custom %}hidden{% endif %}>
+    <input type="color" name="custom_picker" value="{{ current if custom else '#0a84ff' }}" aria-label="Pick a custom color">
+    <input type="text" name="custom_hex" value="{{ current if custom else '#0a84ff' }}" maxlength="7" pattern="#?[0-9a-fA-F]{6}" placeholder="#0A84FF" aria-label="Hex color code" autocapitalize="off" spellcheck="false">
+  </div>
+</div>
+{% endmacro %}

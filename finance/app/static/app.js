@@ -287,6 +287,32 @@ function bindLoadMore(container) {
   });
 }
 
+// ---------- color picker ----------
+
+function colorValue(form) {
+  const picked = form.querySelector('input[name="color"]:checked');
+  if (!picked) return null;
+  if (picked.value !== "custom") return picked.value;
+  let hex = form.elements.custom_hex.value.trim();
+  if (!hex.startsWith("#")) hex = "#" + hex;
+  return hex;
+}
+
+function bindColorPickers() {
+  document.querySelectorAll(".color-picker").forEach((box) => {
+    const row = box.querySelector(".hex-row");
+    const picker = box.querySelector('input[name="custom_picker"]');
+    const hex = box.querySelector('input[name="custom_hex"]');
+    box.querySelectorAll('input[name="color"]').forEach((r) =>
+      r.addEventListener("change", () => { row.hidden = r.value !== "custom" || !r.checked; }));
+    picker.addEventListener("input", () => { hex.value = picker.value.toUpperCase(); });
+    hex.addEventListener("input", () => {
+      const v = hex.value.trim().replace(/^#?/, "#");
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) picker.value = v.toLowerCase();
+    });
+  });
+}
+
 // ---------- pages ----------
 
 const pages = {
@@ -365,24 +391,30 @@ const pages = {
     const filters = document.getElementById("filters");
     if (filters) filters.addEventListener("click", async (ev) => {
       const btn = ev.target.closest(".filter");
-      if (!btn) return;
-      btn.classList.toggle("off");
-      btn.setAttribute("aria-pressed", btn.classList.contains("off") ? "false" : "true");
-      const hidden = [...filters.querySelectorAll(".filter.off")].map((b) => b.dataset.account);
+      if (!btn || btn.classList.contains("on")) return;
+      filters.querySelectorAll(".filter").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+      });
+      const cur = document.getElementById("all");
+      cur.style.transition = "opacity .15s";
+      cur.style.opacity = "0.25";
       try {
-        await api("/api/view/hidden-accounts", { hidden });
+        await api("/api/view/account-filter", { account: btn.dataset.account });
         const r = await fetch("/", { credentials: "same-origin" });
         const doc = new DOMParser().parseFromString(await r.text(), "text/html");
         const fresh = doc.getElementById("all");
-        const cur = document.getElementById("all");
-        cur.style.opacity = "0.3";
-        setTimeout(() => { cur.replaceWith(fresh); fresh.animate([{ opacity: 0.3 }, { opacity: 1 }], 250); }, 120);
-      } catch (e) { toast(e.message, true); }
+        cur.replaceWith(fresh);
+        fresh.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
+                      { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" });
+      } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
     });
     bindLoadMore(document.body);
   },
 
   accounts() {
+    bindColorPickers();
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
     on("logout", async (ev) => { ev.preventDefault(); await api("/api/logout"); location.href = "/login"; });
@@ -407,7 +439,7 @@ const pages = {
         ev.preventDefault();
         try {
           await api("/api/categories", { id: form.dataset.id || null, name: form.elements.name.value,
-                                         color: form.elements.color.value });
+                                         color: colorValue(form) });
           location.reload();
         } catch (e) { toast(e.message, true); }
       }));
@@ -437,6 +469,15 @@ const pages = {
   },
 
   bills() {
+    bindColorPickers();
+    document.querySelectorAll(".bill-form").forEach((form) => {
+      const varies = form.elements.varies;
+      const amount = form.elements.amount;
+      varies.addEventListener("change", () => {
+        amount.disabled = varies.checked;
+        amount.placeholder = varies.checked ? "Average of recent charges" : "";
+      });
+    });
     document.querySelectorAll(".bill-form").forEach((form) =>
       form.addEventListener("submit", async (ev) => {
         ev.preventDefault();
@@ -445,7 +486,8 @@ const pages = {
           await api("/api/bills", {
             id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
             cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
-            next_due: f.next_due.value, active: f.active.checked, color: f.color.value,
+            next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
+            varies: f.varies.checked,
           });
           location.reload();
         } catch (e) { toast(e.message, true); }

@@ -26,8 +26,8 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCE_MONTHS, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
-from .ledger import (COLORS, categories, group_by_date, list_transactions, resolve, seed_categories,
-                     set_merchant_rule)
+from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, resolve, seed_categories,
+                     set_merchant_rule, valid_color)
 from .sync import sync_all, sync_ynab
 from .ynab import YNAB
 
@@ -258,9 +258,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         raw = db.get_kv("payday_schedule")
         return json.loads(raw) if raw else {"kind": "semimonthly", "days": [10, 25]}
 
-    def hidden_accounts() -> list[str]:
-        raw = db.get_kv("hidden_accounts")
-        return json.loads(raw) if raw else []
+    def account_filter() -> str | None:
+        """The one account the transaction list is narrowed to, or None for all accounts."""
+        value = db.get_kv("account_filter") or None
+        return value if value in {a["account_id"] for a in plaid_accounts()} else None
 
     def today() -> date:
         return datetime.now(PACIFIC).date()
@@ -280,8 +281,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
-        hidden = hidden_accounts()
-        rest = resolve(db, list_transactions(db, reviewed=True, hidden_accounts=hidden, limit=PAGE))
+        selected = account_filter()
+        rest = resolve(db, list_transactions(db, reviewed=True, account=selected, limit=PAGE))
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
@@ -289,7 +290,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
             "groups": group_by_date(rest, today()), "more": page_after(rest),
-            "accounts": plaid_accounts(), "hidden": hidden,
+            "accounts": plaid_accounts(), "selected": selected,
         })
 
     @app.get("/api/transactions/page", response_class=HTMLResponse)
@@ -300,17 +301,23 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             int(rid)
         except ValueError:
             raise HTTPException(400, "Bad cursor")
-        rows = resolve(db, list_transactions(db, reviewed=True, hidden_accounts=hidden_accounts(),
+        rows = resolve(db, list_transactions(db, reviewed=True, account=account_filter(),
                                              before=(d, rid), limit=PAGE))
         return templates.TemplateResponse(request, "_rows.html", {
             "groups": group_by_date(rows, today()), "more": page_after(rows)})
 
-    @app.post("/api/view/hidden-accounts")
-    async def set_hidden(request: Request):
+    @app.post("/api/view/account-filter")
+    async def set_account_filter(request: Request):
         body = await request.json()
-        valid = {a["account_id"] for a in plaid_accounts()}
-        db.set_kv("hidden_accounts", json.dumps([a for a in body.get("hidden", []) if a in valid]))
+        account = body.get("account") or ""
+        if account and account not in {a["account_id"] for a in plaid_accounts()}:
+            raise HTTPException(400, "Unknown account")
+        db.set_kv("account_filter", account)
         return {"ok": True}
+
+    @app.get("/colors.css")
+    async def colors_stylesheet():
+        return Response(colors_css(db), media_type="text/css")
 
     def find_txn(source: str, tid: str) -> dict:
         rows = list_transactions(db, where="t.source = ? AND t.id = ?", params=(source, tid), limit=1) \
@@ -390,7 +397,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def save_category(request: Request):
         body = await request.json()
         name = str(body.get("name") or "").strip()[:40]
-        color = body.get("color") if body.get("color") in COLORS else "gray"
+        color = valid_color(body.get("color"))
         if not name:
             raise HTTPException(400, "Name the category")
         try:
@@ -442,17 +449,20 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             out = {
                 "name": str(body["name"]).strip()[:80],
                 "match": normalize(str(body.get("match") or body["name"])),
-                "amount": round(abs(float(body["amount"])), 2),
+                "amount": round(abs(float(body.get("amount") or 0)), 2),
                 "cadence": body.get("cadence") if body.get("cadence") in CADENCE_MONTHS else "monthly",
                 "due_day": int(body["due_day"]) if body.get("due_day") else None,
                 "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
                 "active": 1 if body.get("active", True) else 0,
-                "color": body.get("color") if body.get("color") in COLORS else "purple",
+                "color": valid_color(body.get("color"), "purple"),
+                "varies": 1 if body.get("varies") else 0,
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
         if not out["name"] or not out["match"] or (out["due_day"] is not None and not 1 <= out["due_day"] <= 31):
             raise HTTPException(400, "Check the name and day of month")
+        if not out["varies"] and out["amount"] <= 0:
+            raise HTTPException(400, "Enter the amount, or mark the bill as varying")
         return out
 
     @app.post("/api/bills")
@@ -462,10 +472,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if body.get("id"):
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=?, color=? WHERE id=?", (*f.values(), int(body["id"])))
+                             "active=?, color=?, varies=? WHERE id=?", (*f.values(), int(body["id"])))
             else:
-                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
+                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
+                             "varies) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
         return {"ok": True}
 
     @app.post("/api/bills/{bill_id}/delete")
