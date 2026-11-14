@@ -10,8 +10,8 @@
   <div class="grid2">
     <label>From<input name="start" type="date" value="{{ q.start or '' }}"></label>
     <label>To<input name="end" type="date" value="{{ q.end or '' }}"></label>
-    <label>Min amount<input name="min" type="number" step="0.01" min="0" value="{{ q.min or '' }}"></label>
-    <label>Max amount<input name="max" type="number" step="0.01" min="0" value="{{ q.max or '' }}"></label>
+    <label>Min amount<input name="min" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ q.min or '' }}"></label>
+    <label>Max amount<input name="max" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ q.max or '' }}"></label>
     <label>Account
       <select name="account">
         <option value="">All accounts</option>

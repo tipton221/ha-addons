@@ -4,10 +4,11 @@
 {% block page %}bills{% endblock %}
 {% from "_color.html" import color_picker %}
 {% macro bill_form(b=None) %}
-<form class="bill-form" data-id="{{ b.id if b else '' }}" autocomplete="off">
+<h3 class="sheet-title">{{ "Edit bill" if b else "Add a bill" }}</h3>
+<form class="bill-form editor-form" data-id="{{ b.id if b else '' }}" autocomplete="off">
   <div class="grid2">
     <label>Name<input name="name" type="text" required maxlength="80" value="{{ b.name if b else '' }}"></label>
-    <label>Amount<input name="amount" type="text" inputmode="decimal" value="{{ '%.2f' % b.amount if b else '' }}" {% if b and b.varies %}disabled placeholder="Average of recent charges"{% endif %}></label>
+    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '%.2f' % b.amount if b else '' }}" {% if b and b.varies %}disabled placeholder="Average of recent charges"{% endif %}></label>
     <label>Repeats
       <select name="cadence">
         {% for c in ["monthly", "quarterly", "semiannual", "yearly"] %}
@@ -23,9 +24,10 @@
   {{ color_picker(b.color if b else "purple", colors, "purple") }}
   <label class="inline"><input name="varies" type="checkbox" {% if b and b.varies %}checked{% endif %}> Amount varies (use the average of recent charges)</label>
   <label class="inline"><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
-  <div class="row-actions">
+  {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove bill</button>{% endif %}
+  <div class="sheet-actions">
+    <button type="button" class="sheet-close">Cancel</button>
     <button type="submit" class="primary">Save</button>
-    {% if b %}<button type="button" class="ghost danger delete-bill" data-id="{{ b.id }}">Remove</button>{% endif %}
   </div>
 </form>
 {% endmacro %}
@@ -54,14 +56,27 @@
 </section>
 
 <section class="card">
-  <h2>Paydays</h2>
-  <form id="payday-form" class="payday">
-    <label class="inline"><input type="radio" name="kind" value="semimonthly" {% if schedule.kind != "biweekly" %}checked{% endif %}> Twice a month on days</label>
-    <input name="days" type="text" inputmode="numeric" value="{{ (schedule.days or [10, 25]) | join(', ') }}" aria-label="Days of the month">
-    <label class="inline"><input type="radio" name="kind" value="biweekly" {% if schedule.kind == "biweekly" %}checked{% endif %}> Every two weeks, including</label>
-    <input name="anchor" type="date" value="{{ schedule.anchor or '' }}" aria-label="A recent payday">
-    <button type="submit" class="ghost">Save paydays</button>
-  </form>
+  <div class="card-head"><h2>Paydays</h2></div>
+  <div class="edit-row" role="button" tabindex="0" data-editor="paydays">
+    <div class="grow">
+      <strong>{% if schedule.kind == "biweekly" %}Every two weeks{% else %}Twice a month{% endif %}</strong>
+      <span class="muted small">{% if schedule.kind == "biweekly" %}Including {{ schedule.anchor | shortdate }}{% else %}On the {{ (schedule.days or [10, 25]) | join(" and ") }}{% endif %} · next {{ cov.payday.isoformat() | shortdate }}</span>
+    </div>
+    <span class="chev" aria-hidden="true">›</span>
+  </div>
+  <template id="paydays">
+    <h3 class="sheet-title">Paydays</h3>
+    <form id="payday-form" class="editor-form">
+      <label class="inline"><input type="radio" name="kind" value="semimonthly" {% if schedule.kind != "biweekly" %}checked{% endif %}> Twice a month on these days</label>
+      <input name="days" type="text" inputmode="numeric" value="{{ (schedule.days or [10, 25]) | join(', ') }}" aria-label="Days of the month">
+      <label class="inline"><input type="radio" name="kind" value="biweekly" {% if schedule.kind == "biweekly" %}checked{% endif %}> Every two weeks, including</label>
+      <input name="anchor" type="date" value="{{ schedule.anchor or '' }}" aria-label="A recent payday">
+      <div class="sheet-actions">
+        <button type="button" class="sheet-close">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </template>
 </section>
 
 <section class="card">
@@ -72,25 +87,22 @@
   {% if bills %}
   <ul class="list bills">
     {% for b in bills %}
-    <li class="{{ '' if b.active and not b.stale else 'inactive' }}">
-      <details>
-        <summary>
-          <span class="grow"><span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-            <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
-            {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}</span>
-          <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>
-        </summary>
-        {{ bill_form(b) }}
-      </details>
+    <li class="edit-row {{ '' if b.active and not b.stale else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
+      <div class="grow">
+        <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
+        <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
+        {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}
+      </div>
+      <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="bill-{{ b.id }}">{{ bill_form(b) }}</template>
     </li>
     {% endfor %}
   </ul>
   {% else %}
-  <p class="muted">No bills yet. They are detected after the first sync, or add one below.</p>
+  <p class="muted">No bills yet. They are detected after the first sync, or add one.</p>
   {% endif %}
-  <details class="add">
-    <summary>Add a bill</summary>
-    {{ bill_form() }}
-  </details>
+  <button class="add-btn" data-editor="bill-new">＋ Add a bill</button>
+  <template id="bill-new">{{ bill_form() }}</template>
 </section>
 {% endblock %}

@@ -155,6 +155,84 @@ function fold(li, delay = 0) {
   });
 }
 
+// ---------- sheets ----------
+
+function openSheet(el) {
+  el.hidden = false;
+  requestAnimationFrame(() => {
+    el.classList.add("open");
+    document.getElementById("scrim").classList.add("open");
+  });
+}
+
+function closeSheet(el) {
+  el.classList.remove("open");
+  if (!document.querySelector(".sheet.open")) document.getElementById("scrim").classList.remove("open");
+  setTimeout(() => { if (!el.classList.contains("open")) el.hidden = true; }, 450);
+}
+
+function closeAllSheets() {
+  document.querySelectorAll(".sheet.open").forEach(closeSheet);
+}
+
+function swipeToClose(el) {
+  let startY = null;
+  el.addEventListener("touchstart", (e) => { if (el.scrollTop <= 0) startY = e.touches[0].clientY; }, { passive: true });
+  el.addEventListener("touchmove", (e) => {
+    if (startY === null) return;
+    const dy = Math.max(0, e.touches[0].clientY - startY);
+    el.style.transition = "none";
+    el.style.transform = `translate(-50%, ${dy}px)`;
+  }, { passive: true });
+  el.addEventListener("touchend", (e) => {
+    if (startY === null) return;
+    const dy = e.changedTouches[0].clientY - startY;
+    el.style.transition = "";
+    el.style.transform = "";
+    startY = null;
+    if (dy > 120) closeSheet(el);
+  });
+}
+
+// Pop-up editors: any element with data-editor="<template id>" opens that template in a sheet.
+const editor = {
+  open(id) {
+    const tpl = document.getElementById(id);
+    const sheetEl = document.getElementById("edit-sheet");
+    if (!tpl || !sheetEl) return;
+    const body = document.getElementById("edit-body");
+    body.innerHTML = "";
+    body.appendChild(tpl.content.cloneNode(true));
+    sheetEl.scrollTop = 0;
+    openSheet(sheetEl);
+  },
+  init() {
+    const sheetEl = document.getElementById("edit-sheet");
+    if (!sheetEl) return;
+    swipeToClose(sheetEl);
+    document.addEventListener("click", (ev) => {
+      const trigger = ev.target.closest("[data-editor]");
+      if (trigger && !ev.target.closest(".sheet")) { this.open(trigger.dataset.editor); return; }
+      if (ev.target.closest(".sheet-close")) closeSheet(ev.target.closest(".sheet"));
+    });
+    document.addEventListener("keydown", (ev) => {
+      const trigger = ev.target.closest && ev.target.closest(".edit-row[data-editor]");
+      if (trigger && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); this.open(trigger.dataset.editor); }
+    });
+  },
+};
+
+// ---------- money fields: digits fill in from the cents, like a register (1500 -> 15.00) ----------
+
+function formatMoneyInput(input) {
+  const digits = input.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 10);
+  input.value = digits ? (Number(digits) / 100).toFixed(2) : "";
+}
+
+document.addEventListener("input", (ev) => {
+  if (ev.target.matches("input.money")) formatMoneyInput(ev.target);
+});
+
 // ---------- transaction editor sheet ----------
 
 const sheet = {
@@ -194,20 +272,13 @@ const sheet = {
       form.scope.value = t.category_is_override ? "this" : "merchant";
       document.getElementById("sheet-bank").textContent =
         t.bank_name && t.bank_name !== t.display_name ? `Bank description: ${t.bank_name}` : "";
-      el.hidden = false;
-      requestAnimationFrame(() => {
-        el.classList.add("open");
-        document.getElementById("scrim").classList.add("open");
-      });
+      openSheet(el);
       this.li = li;
     } catch (e) { toast("Could not open this transaction", true); }
   },
 
   close() {
-    const el = document.getElementById("sheet");
-    el.classList.remove("open");
-    document.getElementById("scrim").classList.remove("open");
-    setTimeout(() => { if (!el.classList.contains("open")) el.hidden = true; }, 450);
+    closeSheet(document.getElementById("sheet"));
   },
 
   async save(ev) {
@@ -237,7 +308,7 @@ const sheet = {
     const el = document.getElementById("sheet");
     if (!el) return;
     document.addEventListener("click", (ev) => {
-      if (ev.target.closest(".tick, .load-more, a, button:not(.txn)")) return;
+      if (ev.target.closest(".tick, .load-more, a, button:not(.txn), .sheet")) return;
       const row = ev.target.closest(".txn");
       if (row) this.open(row.closest(".txn-item"));
     });
@@ -246,28 +317,12 @@ const sheet = {
         ev.preventDefault();
         this.open(ev.target.closest(".txn-item"));
       }
-      if (ev.key === "Escape" && el.classList.contains("open")) this.close();
+      if (ev.key === "Escape") closeAllSheets();
     });
-    document.getElementById("scrim").addEventListener("click", () => this.close());
+    document.getElementById("scrim").addEventListener("click", closeAllSheets);
     document.getElementById("sheet-cancel").addEventListener("click", () => this.close());
     document.getElementById("sheet-form").addEventListener("submit", (ev) => this.save(ev));
-    // Swipe the sheet down to close it.
-    let startY = null;
-    el.addEventListener("touchstart", (e) => { if (el.scrollTop <= 0) startY = e.touches[0].clientY; }, { passive: true });
-    el.addEventListener("touchmove", (e) => {
-      if (startY === null) return;
-      const dy = Math.max(0, e.touches[0].clientY - startY);
-      el.style.transition = "none";
-      el.style.transform = `translate(-50%, ${dy}px)`;
-    }, { passive: true });
-    el.addEventListener("touchend", (e) => {
-      if (startY === null) return;
-      const dy = e.changedTouches[0].clientY - startY;
-      el.style.transition = "";
-      el.style.transform = "";
-      startY = null;
-      if (dy > 120) this.close();
-    });
+    swipeToClose(el);
   },
 };
 
@@ -298,20 +353,83 @@ function colorValue(form) {
   return hex;
 }
 
-function bindColorPickers() {
-  document.querySelectorAll(".color-picker").forEach((box) => {
-    const row = box.querySelector(".hex-row");
-    const picker = box.querySelector('input[name="custom_picker"]');
-    const hex = box.querySelector('input[name="custom_hex"]');
-    box.querySelectorAll('input[name="color"]').forEach((r) =>
-      r.addEventListener("change", () => { row.hidden = r.value !== "custom" || !r.checked; }));
-    picker.addEventListener("input", () => { hex.value = picker.value.toUpperCase(); });
-    hex.addEventListener("input", () => {
-      const v = hex.value.trim().replace(/^#?/, "#");
-      if (/^#[0-9a-fA-F]{6}$/.test(v)) picker.value = v.toLowerCase();
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (t.matches('.color-picker input[name="color"]')) {
+    t.closest(".color-picker").querySelector(".hex-row").hidden = t.value !== "custom";
+  }
+  if (t.matches('.bill-form input[name="varies"]')) {
+    const amount = t.form.elements.amount;
+    amount.disabled = t.checked;
+    amount.placeholder = t.checked ? "Average of recent charges" : "0.00";
+  }
+});
+
+document.addEventListener("input", (ev) => {
+  const t = ev.target;
+  if (t.matches('input[name="custom_picker"]')) {
+    t.closest(".hex-row").querySelector('input[name="custom_hex"]').value = t.value.toUpperCase();
+  }
+  if (t.matches('input[name="custom_hex"]')) {
+    const v = t.value.trim().replace(/^#?/, "#");
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) t.closest(".hex-row").querySelector('input[name="custom_picker"]').value = v.toLowerCase();
+  }
+});
+
+// Forms inside pop-up editors are created on demand, so submits and removals are delegated.
+const forms = {
+  async "bill-form"(form) {
+    const f = form.elements;
+    await api("/api/bills", {
+      id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
+      cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
+      next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
+      varies: f.varies.checked,
     });
-  });
-}
+  },
+  async "cat-form"(form) {
+    await api("/api/categories", { id: form.dataset.id || null, name: form.elements.name.value,
+                                   color: colorValue(form) });
+  },
+  async "acct-form"(form) {
+    await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`, { name: form.elements.name.value });
+  },
+  async "payday-form"(form) {
+    const f = form.elements;
+    const kind = f.kind.value;
+    await api("/api/paydays", kind === "biweekly"
+      ? { kind, anchor: f.anchor.value }
+      : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean) });
+  },
+};
+
+document.addEventListener("submit", async (ev) => {
+  const form = ev.target;
+  const key = Object.keys(forms).find((k) => form.classList.contains(k) || form.id === k);
+  if (!key) return;
+  ev.preventDefault();
+  const btn = form.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    await forms[key](form);
+    closeAllSheets();
+    toast("Saved");
+    setTimeout(() => location.reload(), 600);
+  } catch (e) { if (btn) btn.disabled = false; toast(e.message, true); }
+});
+
+document.addEventListener("click", async (ev) => {
+  const del = ev.target.closest(".delete-bill, .delete-cat");
+  if (!del) return;
+  const isBill = del.classList.contains("delete-bill");
+  if (!confirm(isBill ? "Remove this bill?" : "Remove this category? Its transactions go back to their default category.")) return;
+  try {
+    await api(isBill ? `/api/bills/${del.dataset.id}/delete` : `/api/categories/${del.dataset.id}/delete`);
+    closeAllSheets();
+    toast("Removed");
+    setTimeout(() => location.reload(), 600);
+  } catch (e) { toast(e.message, true); }
+});
 
 // ---------- pages ----------
 
@@ -414,40 +532,12 @@ const pages = {
   },
 
   accounts() {
-    bindColorPickers();
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
     on("logout", async (ev) => { ev.preventDefault(); await api("/api/logout"); location.href = "/login"; });
     on("sync", syncNow);
     document.querySelectorAll(".reconnect").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item)));
-    document.querySelectorAll("form.rename").forEach((form) => {
-      const input = form.elements.name;
-      const save = async () => {
-        if (input.value.trim() === input.dataset.original) return;
-        try {
-          await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`, { name: input.value });
-          input.dataset.original = input.value.trim();
-          toast("Renamed");
-        } catch (e) { toast(e.message, true); }
-      };
-      form.addEventListener("submit", (ev) => { ev.preventDefault(); input.blur(); });
-      input.addEventListener("blur", save);
-    });
-    document.querySelectorAll(".cat-form").forEach((form) =>
-      form.addEventListener("submit", async (ev) => {
-        ev.preventDefault();
-        try {
-          await api("/api/categories", { id: form.dataset.id || null, name: form.elements.name.value,
-                                         color: colorValue(form) });
-          location.reload();
-        } catch (e) { toast(e.message, true); }
-      }));
-    document.querySelectorAll(".delete-cat").forEach((b) =>
-      b.addEventListener("click", async () => {
-        if (!confirm("Remove this category? Its transactions go back to their default category.")) return;
-        try { await api(`/api/categories/${b.dataset.id}/delete`); location.reload(); } catch (e) { toast(e.message, true); }
-      }));
   },
 
   search() {
@@ -469,34 +559,6 @@ const pages = {
   },
 
   bills() {
-    bindColorPickers();
-    document.querySelectorAll(".bill-form").forEach((form) => {
-      const varies = form.elements.varies;
-      const amount = form.elements.amount;
-      varies.addEventListener("change", () => {
-        amount.disabled = varies.checked;
-        amount.placeholder = varies.checked ? "Average of recent charges" : "";
-      });
-    });
-    document.querySelectorAll(".bill-form").forEach((form) =>
-      form.addEventListener("submit", async (ev) => {
-        ev.preventDefault();
-        const f = form.elements;
-        try {
-          await api("/api/bills", {
-            id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
-            cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
-            next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
-            varies: f.varies.checked,
-          });
-          location.reload();
-        } catch (e) { toast(e.message, true); }
-      }));
-    document.querySelectorAll(".delete-bill").forEach((b) =>
-      b.addEventListener("click", async () => {
-        if (!confirm("Remove this bill?")) return;
-        try { await api(`/api/bills/${b.dataset.id}/delete`); location.reload(); } catch (e) { toast(e.message, true); }
-      }));
     const detect = document.getElementById("detect");
     if (detect) detect.addEventListener("click", async () => {
       detect.classList.add("spin");
@@ -507,23 +569,12 @@ const pages = {
       } catch (e) { toast(e.message, true); }
       detect.classList.remove("spin");
     });
-    const pay = document.getElementById("payday-form");
-    if (pay) pay.addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const f = pay.elements;
-      const kind = f.kind.value;
-      try {
-        await api("/api/paydays", kind === "biweekly"
-          ? { kind, anchor: f.anchor.value }
-          : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean) });
-        location.reload();
-      } catch (e) { toast(e.message, true); }
-    });
   },
 };
 
 document.addEventListener("DOMContentLoaded", () => {
   sheet.init();
+  editor.init();
   const fn = pages[document.body.dataset.page];
   if (fn) fn();
 });

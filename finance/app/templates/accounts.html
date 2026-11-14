@@ -26,18 +26,28 @@
 
 <section class="card">
   <div class="card-head"><h2>Accounts</h2></div>
-  <p class="muted small">Tap a name to rename it. The new name is used everywhere in the app.</p>
+  <p class="muted small">Tap an account to rename it. The new name is used everywhere in the app.</p>
   {% if accounts %}
   <ul class="list">
     {% for a in accounts %}
-    <li class="plain-row">
+    <li class="edit-row" role="button" tabindex="0" data-editor="acct-{{ loop.index }}">
       <div class="grow">
-        <form class="rename" data-account="{{ a.account_id }}">
-          <input type="text" name="name" value="{{ a.label }}" maxlength="60" aria-label="Name for {{ a.name }}" data-original="{{ a.label }}">
-        </form>
+        <strong>{{ a.label }}</strong>
         <span class="muted small">{{ a.institution }} · {{ (a.subtype or a.type or "") | capitalize }}{% if a.display_name %} · bank name: {{ a.name }}{% endif %}</span>
       </div>
       <span class="amount">{{ a.current_balance | money }}</span>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="acct-{{ loop.index }}">
+        <h3 class="sheet-title">Rename account</h3>
+        <form class="acct-form editor-form" data-account="{{ a.account_id }}">
+          <label>Name<input type="text" name="name" value="{{ a.label }}" maxlength="60"></label>
+          <p class="hint">Bank name: {{ a.name }}. Leave the field empty to use it.</p>
+          <div class="sheet-actions">
+            <button type="button" class="sheet-close">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+      </template>
     </li>
     {% endfor %}
   </ul>
@@ -81,29 +91,38 @@
   <p class="muted small">Rename, recolor, add, or remove. Removing a category sends its transactions back to their default.</p>
   <ul class="list" id="categories">
     {% for c in categories %}
-    <li>
-      <details>
-        <summary class="plain-row"><span class="chip cat-{{ c.id }}">{{ c.name }}</span><span class="muted small edit-hint">Edit</span></summary>
-        <form class="cat-form editor" data-id="{{ c.id }}">
-          <input type="text" name="name" value="{{ c.name }}" maxlength="40" required aria-label="Category name">
+    <li class="edit-row" role="button" tabindex="0" data-editor="cat-{{ c.id }}">
+      <div class="grow"><span><span class="chip cat-{{ c.id }}">{{ c.name }}</span></span></div>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="cat-{{ c.id }}">
+        <h3 class="sheet-title">Edit category</h3>
+        <form class="cat-form editor-form" data-id="{{ c.id }}">
+          <label>Name<input type="text" name="name" value="{{ c.name }}" maxlength="40" required></label>
+          <label>Color</label>
           {{ color_picker(c.color, colors) }}
-          <div class="row-actions">
+          <button type="button" class="danger delete-cat wide-btn" data-id="{{ c.id }}">Remove category</button>
+          <div class="sheet-actions">
+            <button type="button" class="sheet-close">Cancel</button>
             <button type="submit" class="primary">Save</button>
-            <button type="button" class="danger delete-cat" data-id="{{ c.id }}">Remove</button>
           </div>
         </form>
-      </details>
+      </template>
     </li>
     {% endfor %}
   </ul>
-  <details class="add">
-    <summary>Add a category</summary>
-    <form class="cat-form editor" data-id="">
-      <input type="text" name="name" maxlength="40" required placeholder="Name" aria-label="Category name">
+  <button class="add-btn" data-editor="cat-new">＋ Add a category</button>
+  <template id="cat-new">
+    <h3 class="sheet-title">Add a category</h3>
+    <form class="cat-form editor-form" data-id="">
+      <label>Name<input type="text" name="name" maxlength="40" required placeholder="Name"></label>
+      <label>Color</label>
       {{ color_picker("blue", colors) }}
-      <div class="row-actions"><button type="submit" class="primary">Add</button></div>
+      <div class="sheet-actions">
+        <button type="button" class="sheet-close">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
     </form>
-  </details>
+  </template>
 </section>
 
 <p class="muted small center">{{ total }} transactions stored · <a href="#" id="logout">Sign out</a></p>
