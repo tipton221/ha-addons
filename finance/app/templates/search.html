@@ -9,11 +9,11 @@
   <label class="wide">Merchant, description, or note<input name="q" type="search" value="{{ q.q or '' }}" placeholder="Amazon"></label>
 
   <p class="filter-label">When</p>
-  <div class="chips" id="quick-dates">
-    {% for r in quick.months %}<button type="button" class="filter quick {% if q.start == r.start and q.end == r.end %}on{% endif %}" data-start="{{ r.start }}" data-end="{{ r.end }}">{{ r.label }}</button>{% endfor %}
+  <div class="chips" id="quick-months">
+    {% for m in quick.months %}<button type="button" class="filter quick-month {% if m.on %}on{% endif %}" data-month="{{ m.n }}">{{ m.label }}</button>{% endfor %}
   </div>
-  <div class="chips">
-    {% for r in quick.years %}<button type="button" class="filter quick {% if q.start == r.start and q.end == r.end %}on{% endif %}" data-start="{{ r.start }}" data-end="{{ r.end }}">{{ r.label }}</button>{% endfor %}
+  <div class="chips" id="quick-years">
+    {% for y in quick.years %}<button type="button" class="filter quick-year {% if y.on %}on{% endif %}" data-year="{{ y.n }}">{{ y.label }}</button>{% endfor %}
   </div>
   <div class="grid2">
     {# Text fields until tapped, so an empty date shows "Any" instead of a grayed-out today. #}

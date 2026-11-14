@@ -862,20 +862,23 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             rows = [t for t in rows if t["bill"]]
         return rows
 
-    def quick_ranges(today_: date) -> dict:
-        """Quick date picks: the last 12 months and each year that has transactions."""
-        months = []
-        d = date(today_.year, today_.month, 1)
-        for _ in range(12):
-            end = date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
-            label = d.strftime("%b") + ("" if d.year == today_.year else d.strftime(" ’%y"))
-            months.append({"label": label, "start": d.isoformat(), "end": end.isoformat()})
-            d = date(d.year - 1, 12, 1) if d.month == 1 else date(d.year, d.month - 1, 1)
-        with db.connect() as conn:
-            first = conn.execute("SELECT MIN(date) FROM transactions WHERE source='plaid'").fetchone()[0]
-        first_year = int(first[:4]) if first else today_.year
-        years = [{"label": str(y), "start": f"{y}-01-01", "end": f"{y}-12-31"}
-                 for y in range(today_.year, first_year - 1, -1)]
+    def quick_ranges(today_: date, q: dict) -> dict:
+        """Month (Jan to Dec) and year (last five) picks. A month and a year together mean that
+        month of that year; the active picks are read back from the From and To dates."""
+        active_month = active_year = None
+        try:
+            start = date.fromisoformat(q.get("start", ""))
+            end = date.fromisoformat(q.get("end", ""))
+        except ValueError:
+            start = end = None
+        if start and end and start.day == 1:
+            if start.year == end.year and start.month == end.month and \
+                    end.day == calendar.monthrange(end.year, end.month)[1]:
+                active_month, active_year = start.month, start.year
+            elif (start.month, end.month, end.day, start.year) == (1, 12, 31, end.year):
+                active_year = start.year
+        months = [{"n": m, "label": calendar.month_abbr[m], "on": m == active_month} for m in range(1, 13)]
+        years = [{"n": y, "label": str(y), "on": y == active_year} for y in range(today_.year, today_.year - 5, -1)]
         return {"months": months, "years": years}
 
     def is_transfer(t: dict) -> bool:
@@ -894,7 +897,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
             "total_out": out, "total_in": inflow, "export_query": urlencode(q, doseq=True),
-            "excluded": len(rows) - len(counted), "quick": quick_ranges(today()),
+            "excluded": len(rows) - len(counted), "quick": quick_ranges(today(), q),
         })
 
     @app.get("/export.csv")
@@ -1009,9 +1012,18 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             conn.execute("UPDATE plaid_items SET status='ok', error_code=NULL WHERE item_id=?",
                          (body.get("item_id"),))
-        await load_accounts(str(body.get("item_id") or ""))  # picks up accounts added in Plaid
+        item_id = str(body.get("item_id") or "")
+        def count() -> int:
+            with db.connect() as conn:
+                return conn.execute("SELECT COUNT(*) FROM accounts WHERE source='plaid' AND item_id=?",
+                                    (item_id,)).fetchone()[0]
+        before = count()
+        await load_accounts(item_id)  # picks up accounts added in Plaid
+        added = count() - before
+        log.info("Connection updated: Link reported %s selected account(s); Plaid now shares %s new account(s)",
+                 body.get("selected", "?"), added)
         asyncio.create_task(run_sync())
-        return {"ok": True}
+        return {"ok": True, "added": added}
 
     @app.post("/api/sync")
     async def sync_now():

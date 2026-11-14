@@ -243,7 +243,9 @@ button svg { width: 18px; height: 18px; }
 }
 .txn .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .txn .name { font-weight: 600; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.txn .name span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.txn .name span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* Slightly narrowed SF Pro (Apple devices) so long merchant names fit before the amount. */
+  font-stretch: 90%; font-width: 90%; font-variation-settings: "wdth" 90; letter-spacing: -0.005em; }
 .txn .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--text-2); font-size: 0.85rem; }
 .txn .name .pill { height: 18px; padding: 0 7px; font-size: 0.6rem; letter-spacing: 0.05em; font-weight: 700; }
 .txn .note {

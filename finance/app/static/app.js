@@ -89,7 +89,18 @@ function plaidHandler(token, extra) {
       localStorage.removeItem(LINK_KEY);
       try {
         if (state.itemId) {
-          await api("/api/plaid/updated", { item_id: state.itemId });
+          const r = await api("/api/plaid/updated",
+                              { item_id: state.itemId, selected: (metadata.accounts || []).length });
+          if (state.chooseAccounts && !r.added) {
+            say("Plaid did not share any new accounts. For banks that sign in on their own site, like Chase, " +
+                "the bank decides what is shared: allow the account in the bank's linked apps settings, then try again.", true);
+            setTimeout(() => { location.href = "/accounts"; }, 9000);
+            return;
+          }
+          say(r.added ? `Added ${r.added} account${r.added > 1 ? "s" : ""}. Transactions follow in a few minutes.`
+                      : "Updated.");
+          setTimeout(() => { location.href = "/accounts"; }, 1800);
+          return;
         } else {
           await api("/api/plaid/exchange", { public_token: publicToken, institution: metadata.institution });
         }
@@ -111,7 +122,8 @@ async function openLink(itemId, chooseAccounts) {
     const { link_token } = await api("/api/plaid/link-token",
                                      itemId ? { item_id: itemId, accounts: !!chooseAccounts } : {});
     // Saved so the OAuth return page can resume the same Link session.
-    localStorage.setItem(LINK_KEY, JSON.stringify({ token: link_token, itemId: itemId || null }));
+    localStorage.setItem(LINK_KEY, JSON.stringify({ token: link_token, itemId: itemId || null,
+                                                    chooseAccounts: !!chooseAccounts }));
     plaidHandler(link_token).open();
   } catch (e) { say(e.message, true); }
 }
@@ -977,16 +989,33 @@ const pages = {
       });
       el.addEventListener("blur", () => { if (!el.value) el.type = "text"; });
     });
-    // Quick month and year picks fill the dates and search.
+    // Quick picks: a month, a year, or both (that month of that year). A month alone means its
+    // most recent occurrence. Tapping a chosen chip again clears it. The dates fill in and it searches.
     form.addEventListener("click", (ev) => {
-      const quick = ev.target.closest(".quick");
+      const quick = ev.target.closest(".quick-month, .quick-year");
       if (quick) {
-        const on = quick.classList.contains("on");
-        form.querySelectorAll(".quick").forEach((b) => b.classList.remove("on"));
-        for (const [name, value] of [["start", quick.dataset.start], ["end", quick.dataset.end]]) {
+        const group = quick.classList.contains("quick-month") ? ".quick-month" : ".quick-year";
+        const wasOn = quick.classList.contains("on");
+        form.querySelectorAll(group).forEach((b) => b.classList.remove("on"));
+        if (!wasOn) quick.classList.add("on");
+        const m = Number(form.querySelector(".quick-month.on")?.dataset.month || 0);
+        let y = Number(form.querySelector(".quick-year.on")?.dataset.year || 0);
+        const pad = (n) => String(n).padStart(2, "0");
+        let start = "", end = "";
+        if (m) {
+          if (!y) {
+            const now = new Date();
+            y = m > now.getMonth() + 1 ? now.getFullYear() - 1 : now.getFullYear();
+          }
+          const last = new Date(y, m, 0).getDate();
+          start = `${y}-${pad(m)}-01`; end = `${y}-${pad(m)}-${pad(last)}`;
+        } else if (y) {
+          start = `${y}-01-01`; end = `${y}-12-31`;
+        }
+        for (const [name, value] of [["start", start], ["end", end]]) {
           const el = form.elements[name];
-          el.type = on ? "text" : "date";
-          el.value = on ? "" : value;
+          el.type = value ? "date" : "text";
+          el.value = value;
         }
         form.requestSubmit();
         return;
