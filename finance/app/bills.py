@@ -6,7 +6,9 @@ due before the next paycheck, is there still cash left?
 
 from __future__ import annotations
 
+import bisect
 import calendar
+import functools
 import re
 import statistics
 from dataclasses import dataclass
@@ -43,9 +45,13 @@ SKIP_DETAIL = {"LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"}
 SKIP_PRIMARY_SPENDING = {"FOOD_AND_DRINK", "TRANSPORTATION", "GENERAL_MERCHANDISE", "TRAVEL"}
 
 
+_WORDS = re.compile(r"[a-z]+")
+
+
+@functools.lru_cache(maxsize=50000)
 def normalize(name: str) -> str:
     """Merchant key: lowercase words without digits or punctuation."""
-    words = re.findall(r"[a-z]+", (name or "").lower())
+    words = _WORDS.findall((name or "").lower())
     return " ".join(w for w in words if w not in {"inc", "llc", "com", "www", "the", "payment", "autopay"})[:60]
 
 
@@ -148,19 +154,33 @@ def save_detected(db: Database, candidates: list[Candidate]) -> int:
     return added
 
 
+_status_cache: dict = {}
+
+
 def bill_status(db: Database, today: date | None = None) -> list[dict]:
-    """Each bill with its last matching charge and next due date."""
+    """Each bill with its last matching charge and next due date. Reused until transactions,
+    bills, or merchant rules change (the database revision) or the day changes."""
     today = today or date.today()
+    key = (str(db.path), db.revision(), today)
+    if key not in _status_cache:
+        _status_cache.clear()
+        _status_cache[key] = _bill_status(db, today)
+    return [dict(b) for b in _status_cache[key]]
+
+
+def _bill_status(db: Database, today: date) -> list[dict]:
     with db.connect() as conn:
         bills = [dict(r) for r in conn.execute("SELECT * FROM bills ORDER BY name COLLATE NOCASE")]
         rows = [dict(r) for r in conn.execute(
             "SELECT merchant, name, date, amount, account_id, bill_id FROM transactions "
             "WHERE source='plaid' AND amount != 0 ORDER BY date DESC")]
+    for r in rows:
+        r["key"] = normalize(r["merchant"] or r["name"])  # once per row, not once per bill
     for b in bills:
         income = b.get("kind") == "income"
         # (merchant key, date, amount as a positive number, account). Income bills look at money in.
         # A transaction marked "not a bill" or set to another bill is skipped; one set to this bill always counts.
-        charges = [(b["match"] if r["bill_id"] == b["id"] else normalize(r["merchant"] or r["name"]),
+        charges = [(b["match"] if r["bill_id"] == b["id"] else r["key"],
                     r["date"], abs(r["amount"]), r["account_id"]) for r in rows
                    if (r["amount"] < 0) == income and (r["bill_id"] is None or r["bill_id"] == b["id"])]
         if b.get("varies"):
@@ -241,24 +261,55 @@ REPEAT_SAME = 0.02       # a repeat is the same amount within 2% (or 50 cents)
 REPEAT_OLD_PRICE = 0.35  # a repeating amount within 35% counts too (the bill's price before a change)
 
 
-def repeats(series: list[tuple[date, float]], d: date, amount: float, cadence: str, same_amount: bool = True,
+class Series:
+    """A bill's charges, indexed by amount and by date so repeat checks only look at nearby ones
+    (a busy merchant like Amazon has hundreds of charges)."""
+
+    def __init__(self, items: list[tuple[date, float]]):
+        self.by_amount = sorted((a, d.toordinal()) for d, a in items)
+        self.amounts = [a for a, _ in self.by_amount]
+        self.days = sorted(d.toordinal() for d, _ in items)
+
+    def near_amount(self, lo: float, hi: float):
+        start = bisect.bisect_left(self.amounts, lo)
+        end = bisect.bisect_right(self.amounts, hi)
+        return self.by_amount[start:end]
+
+    def days_between(self, lo: int, hi: int):
+        return self.days[bisect.bisect_left(self.days, lo):bisect.bisect_right(self.days, hi)]
+
+
+def repeats(series: "Series | list", d: date, amount: float, cadence: str, same_amount: bool = True,
             exact: bool = False, cycles: tuple[int, ...] = (1, 2, 3)) -> bool:
     """Whether another charge in the series is one to three cycles before or after this one
     (with the same amount, unless same_amount is False, as for varying bills)."""
+    if not isinstance(series, Series):
+        series = Series(series)
     period, slack = PERIOD_DAYS.get(cadence, PERIOD_DAYS["monthly"])
-    for d2, a2 in series:
-        gap = abs((d - d2).days)
+    day = d.toordinal()
+
+    def cycle_away(other: int) -> bool:
+        gap = abs(day - other)
         # One to three cycles away (a skipped month, or a yearly repeat of a twice-a-year bill).
-        if gap == 0 or not any(abs(gap - n * period) <= slack + 3 * (n - 1) for n in cycles):
+        return gap != 0 and any(abs(gap - n * period) <= slack + 3 * (n - 1) for n in cycles)
+
+    if not same_amount:
+        reach = int(max(cycles) * period + slack + 3 * (max(cycles) - 1)) + 1
+        return any(cycle_away(o) for o in series.days_between(day - reach, day + reach))
+    if exact:
+        lo, hi = amount - 0.005, amount + 0.005
+    else:
+        lo = min(amount - 0.50, amount * (1 - REPEAT_SAME)) if amount > 0 else amount - 0.50
+        hi = max(amount + 0.50, amount / (1 - REPEAT_SAME))
+    for a2, other in series.near_amount(lo, hi):
+        if not exact and abs(a2 - amount) > max(0.50, REPEAT_SAME * max(amount, a2)):
             continue
-        if not same_amount:
-            return True
-        if abs(a2 - amount) <= (0.005 if exact else max(0.50, REPEAT_SAME * max(amount, a2))):
+        if cycle_away(other):
             return True
     return False
 
 
-def bill_matches(bill: dict, key: str, amount: float, d: date, series: list[tuple[date, float]] | None = None) -> bool:
+def bill_matches(bill: dict, key: str, amount: float, d: date, series: "Series | list | None" = None) -> bool:
     """Automatic tagging. The merchant must match, then:
     - fixed bills: the amount is close and the charge either repeats a cycle away or falls on the
       bill's schedule; or the exact amount repeats one cycle away and is within 35% (an older price).
@@ -280,8 +331,19 @@ def bill_matches(bill: dict, key: str, amount: float, d: date, series: list[tupl
             and repeats(series, d, amount, cadence, exact=True, cycles=(1,)))
 
 
+_series_cache: dict = {}
+
+
 def bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, float]]]:
     """Posted charges (deposits for income) from each bill's merchant, for repeat checks."""
+    key = (str(db.path), db.revision(), tuple((b["id"], b["match"], b.get("kind")) for b in bills))
+    if key not in _series_cache:
+        _series_cache.clear()
+        _series_cache[key] = {bid: Series(items) for bid, items in _bill_series(db, bills).items()}
+    return _series_cache[key]
+
+
+def _bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, float]]]:
     with db.connect() as conn:
         rows = [dict(r) for r in conn.execute(
             "SELECT merchant, name, date, amount, bill_id FROM transactions "

@@ -131,21 +131,41 @@ class Database:
             self._migrate(conn)
             conn.executescript(SCHEMA)
             self._add_columns(conn)
+            self._revision_triggers(conn)
+
+    @staticmethod
+    def _revision_triggers(conn: sqlite3.Connection) -> None:
+        """A counter that goes up whenever transactions, bills, or merchant rules change, so
+        computed results (bill schedules) can be reused until something they depend on changes."""
+        conn.execute("CREATE TABLE IF NOT EXISTS revision (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL)")
+        conn.execute("INSERT OR IGNORE INTO revision VALUES (1, 0)")
+        for table in ("transactions", "bills", "merchant_rules"):
+            for event in ("INSERT", "UPDATE", "DELETE"):
+                conn.execute(f"CREATE TRIGGER IF NOT EXISTS rev_{table}_{event.lower()} AFTER {event} ON {table} "
+                             "BEGIN UPDATE revision SET n = n + 1 WHERE id = 1; END")
+
+    def revision(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT n FROM revision WHERE id = 1").fetchone()[0]
 
     @staticmethod
     def _add_columns(conn: sqlite3.Connection) -> None:
         """Columns added after the first release (0.4.0)."""
         wanted = {
-            "transactions": [("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL"),
-                             ("transfer_peer", "TEXT"),
-                             ("name_override", "TEXT"),
-                             ("bill_id", "INTEGER")],  # NULL: matched by rule; 0: not a bill; >0: this bill  # one-off name (from YNAB) for this transaction only  # id of the other side of a transfer or card payment,
+            "transactions": [
+                ("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL"),
+                ("transfer_peer", "TEXT"),   # id of the other side of a transfer or card payment
+                ("name_override", "TEXT"),   # one-off name for this transaction only
+                ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
+            ],
             "accounts": [("display_name", "TEXT")],
-            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
-                  ("account_id", "TEXT"),
-                  ("kind", "TEXT NOT NULL DEFAULT 'bill'"),
-                  ("is_payday", "INTEGER NOT NULL DEFAULT 0"),
-                  ("archived_on", "TEXT")],  # set when archived: tags charges up to this date only  # the paycheck that sets paydays  # 'bill' (money out) or 'income' (money in)  # chosen card; NULL means the card of the last charge,
+            "bills": [
+                ("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
+                ("account_id", "TEXT"),                     # chosen card; NULL means the card of the last charge
+                ("kind", "TEXT NOT NULL DEFAULT 'bill'"),   # 'bill' (money out) or 'income' (money in)
+                ("is_payday", "INTEGER NOT NULL DEFAULT 0"),  # the paycheck that sets paydays
+                ("archived_on", "TEXT"),                    # set when archived: tags charges up to this date only
+            ],
         }
         for table, cols in wanted.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

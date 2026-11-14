@@ -20,7 +20,7 @@
       </select>
     </label>
     <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ v.due_day if v and v.due_day else '' }}"></label>
-    <label>Matches transactions containing<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as title"></label>
+    <label>Match text<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as title"></label>
     <label>Next date (optional)<input name="next_due" type="date" value="{{ v.next_due_override if v and v.next_due_override else '' }}"></label>
   </div>
   {% set labels = {} %}{% for a in accounts %}{% set _ = labels.update({a.account_id: a.label}) %}{% endfor %}
