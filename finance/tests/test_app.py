@@ -1071,3 +1071,21 @@ def test_amazon_link_only_for_amazon(tmp_path, monkeypatch):
         c.cookies.set("finance_session", "tok")
         links = {i: c.get(f"/api/transactions/plaid/{i}").json()["details"]["amazon"] for i in ("z1", "z2", "n1")}
     assert links["z1"] == links["z2"] == "https://www.amazon.com/cpe/yourpayments/transactions" and links["n1"] is None
+
+
+def test_plaid_link_gets_a_per_page_style_nonce(tmp_path, monkeypatch):
+    import re
+    settings = make_settings(tmp_path, monkeypatch, plaid_client_id="cid", plaid_secret="sec")
+    db = Database(tmp_path / "finance.db")
+    seed(db, [], accounts=[])
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        pages = [c.get("/accounts"), c.get("/accounts")]
+    nonces = []
+    for r in pages:
+        tag = re.search(r'link-initialize\.js" nonce="([^"]+)"', r.text)
+        assert tag, "Plaid script tag has a nonce"
+        policy = r.headers["content-security-policy"]
+        assert f"style-src 'self' 'nonce-{tag.group(1)}'" in policy and "unsafe-inline" not in policy
+        nonces.append(tag.group(1))
+    assert nonces[0] != nonces[1]  # a new nonce for every page

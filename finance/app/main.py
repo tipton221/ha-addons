@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import csv
 import io
 import json
+import secrets
 import sqlite3
 from datetime import date, datetime, timedelta
 from urllib.parse import quote, urlencode
@@ -40,14 +41,17 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify"}
 
-CSP = (
-    "default-src 'self'; "
-    "script-src 'self' https://cdn.plaid.com; "
-    "frame-src https://cdn.plaid.com; "
-    "connect-src 'self' https://*.plaid.com; "
-    "img-src 'self' data: https://*.plaid.com; style-src 'self'; base-uri 'none'; form-action 'self'; "
-    "frame-ancestors 'none'"
-)
+def csp(nonce: str) -> str:
+    """Content Security Policy. Plaid Link adds one <style> element when it opens and copies the
+    nonce from its own <script> tag onto it, so that nonce is allowed for styles (nothing else is)."""
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.plaid.com; "
+        "frame-src https://cdn.plaid.com; "
+        "connect-src 'self' https://*.plaid.com; "
+        f"img-src 'self' data: https://*.plaid.com; style-src 'self' 'nonce-{nonce}'; base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
 
 
 def shortdate(d: str | None, today: datetime | None = None) -> str:
@@ -157,6 +161,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        request.state.nonce = secrets.token_urlsafe(16)
         # Layer 1: Cloudflare Access.
         token = request.headers.get("cf-access-jwt-assertion") or request.cookies.get("CF_Authorization")
         if not await run_in_threadpool(cf_access.verify, token):
@@ -177,7 +182,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 return RedirectResponse(target, status_code=303)
 
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = CSP
+        response.headers["Content-Security-Policy"] = csp(request.state.nonce)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
