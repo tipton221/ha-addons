@@ -62,7 +62,8 @@ class Plaid:
         return (await self._post("/accounts/get", {"access_token": access_token}))["accounts"]
 
     async def transactions_sync(self, access_token: str, cursor: str | None) -> dict:
-        body: dict = {"access_token": access_token, "count": 500}
+        body: dict = {"access_token": access_token, "count": 500,
+                      "options": {"include_original_description": True}}
         if cursor:
             body["cursor"] = cursor
         return await self._post("/transactions/sync", body)

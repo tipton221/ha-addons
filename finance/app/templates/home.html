@@ -48,9 +48,13 @@
   {% if accounts | length > 1 %}
   <div class="filters" id="filters" role="radiogroup" aria-label="Show transactions from">
     <button class="filter {% if not selected %}on{% endif %}" data-account="" role="radio" aria-checked="{{ 'false' if selected else 'true' }}">All accounts</button>
-    {% for a in accounts %}
-    <button class="filter {% if a.account_id == selected %}on{% endif %}" data-account="{{ a.account_id }}" role="radio" aria-checked="{{ 'true' if a.account_id == selected else 'false' }}">{{ a.label }}</button>
+    {% set ns = namespace(less=0) %}
+    {% for a in accounts if a.visibility != "archived" or a.account_id == selected %}
+    {% set extra = a.visibility != "everyday" and a.account_id != selected %}
+    {% if extra %}{% set ns.less = ns.less + 1 %}{% endif %}
+    <button class="filter {% if a.account_id == selected %}on{% endif %}{% if extra %} less-used{% endif %}" data-account="{{ a.account_id }}" role="radio" aria-checked="{{ 'true' if a.account_id == selected else 'false' }}" title="{{ a.label }}"{% if extra %} hidden{% endif %}>{{ a.pill }}</button>
     {% endfor %}
+    {% if ns.less %}<button class="filter more-filters" id="more-filters" aria-expanded="false">More ({{ ns.less }})</button>{% endif %}
   </div>
   {% endif %}
   <div id="scheduled-wrap">

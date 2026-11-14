@@ -598,11 +598,8 @@ def test_notes_account_names_and_filters(tmp_path, monkeypatch):
         page = c.get("/").text
         assert "Birthday gift for a friend" in page and "Everyday Card" in page
         # Narrow the list to one account, then back to all.
-        assert c.post("/api/view/account-filter", json={"account": "bogus"}, headers=H).status_code == 400
-        c.post("/api/view/account-filter", json={"account": "bank"}, headers=H)
-        all_html = c.get("/").text.split('id="all"')[1]
+        all_html = c.get("/?account=bank").text.split('id="all"')[1]
         assert "Shop Two" in all_html and "Shop One" not in all_html
-        c.post("/api/view/account-filter", json={"account": ""}, headers=H)
         all_html = c.get("/").text.split('id="all"')[1]
         assert "Shop One" in all_html and "Shop Two" in all_html
         assert "Shop One" in c.get("/search?q=birthday").text
@@ -762,8 +759,7 @@ def test_scheduled_all_bills_reverse_order_and_filtered(tmp_path, monkeypatch):
         sched = c.get("/").text.split('id="scheduled"')[1].split("</details>")[0]
         # The yearly bill is ~65 days out (beyond 30) and listed first; the next one is last.
         assert "Stream Box" in sched and sched.index("Stream Box") < sched.index("Phone Co")
-        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
-        sched = c.get("/").text.split('id="scheduled-wrap"')[1].split("</details>")[0]
+        sched = c.get("/?account=card").text.split('id="scheduled-wrap"')[1].split("</details>")[0]
         assert "Phone Co" in sched and "Stream Box" not in sched
 
 
@@ -781,14 +777,11 @@ def test_bill_account_choice_overrides_last_charge(tmp_path, monkeypatch):
         assert "Automatic (Card A)" in c.get("/bills").text
         body = {"id": bid, "name": "Phone Co", "amount": "50", "cadence": "monthly", "account_id": "card2"}
         assert c.post("/api/bills", json=body, headers=H).status_code == 200
-        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
-        assert "Phone Co" not in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
-        c.post("/api/view/account-filter", json={"account": "card2"}, headers=H)
-        assert "Phone Co" in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        assert "Phone Co" not in c.get("/?account=card").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        assert "Phone Co" in c.get("/?account=card2").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
         assert c.post("/api/bills", json={**body, "account_id": "nope"}, headers=H).status_code == 400
         assert c.post("/api/bills", json={**body, "account_id": ""}, headers=H).status_code == 200  # back to automatic
-        c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
-        assert "Phone Co" in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        assert "Phone Co" in c.get("/?account=card").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
 
 
 # ---------------------------------------------------------------- 1.1.0: transfers and card payments
@@ -924,10 +917,8 @@ def test_paycheck_sets_payday_and_pending_filter(tmp_path, monkeypatch):
         assert coverage(db, {"kind": "semimonthly", "days": [1, 15]}, t)["payday"].isoformat() == expected
         assert "From your paycheck" in c.get("/bills").text
         # Pending only: just the pending transaction in the list.
-        c.post("/api/view/pending", json={"on": True}, headers=H)
-        all_list = c.get("/").text.split('id="all"')[1]
+        all_list = c.get("/?pending=1").text.split('id="all"')[1]
         assert "Corner Cafe" in all_list and "Book Barn" not in all_list
-        c.post("/api/view/pending", json={"on": False}, headers=H)
         all_list = c.get("/").text.split('id="all"')[1]
         assert "Book Barn" in all_list
 
@@ -1025,3 +1016,45 @@ def test_tips_manual_automatic_and_cleared(tmp_path, monkeypatch):
         page = c.get("/").text
         assert "Tip +$7.20" not in page and "+$7.20 since pending" in page
         assert "tip" in c.get("/export.csv").text.splitlines()[0]
+
+
+
+def test_filters_reset_accounts_short_names_visibility_and_details(tmp_path, monkeypatch):
+    import json as _json
+    rows = [("a1", "card", "2026-11-01", "SQ *CORNER CAFE", "Corner Cafe", 6.5, 0, "FOOD_AND_DRINK", "X", 1),
+            ("b1", "old", "2026-10-01", "BOOK BARN", "Book Barn", 12.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Acme Rewards Visa Signature", "credit", 0, None),
+                                                       ("old", "Old Store Card", "credit", 25.0, None),
+                                                       ("ira", "Retirement IRA", "investment", 0, None)])
+    raw = {"transaction_id": "a1", "authorized_datetime": "2026-11-01T18:42:00Z", "payment_channel": "in store",
+           "location": {"address": "100 Main St", "city": "Springfield", "region": "WA", "postal_code": "98000",
+                        "lat": 47.1, "lon": -122.2, "store_number": "42"},
+           "website": "cornercafe.example", "logo_url": "https://plaid-merchant-logos.plaid.com/cafe.png",
+           "counterparties": [{"name": "Square", "type": "payment_terminal"}],
+           "original_description": "SQ *CORNER CAFE 0042 SPRINGFIELD WA"}
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET raw=? WHERE id='a1'", (_json.dumps(raw),))
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        # Short name on the pill, full name elsewhere; less used goes behind More; archived is hidden.
+        c.post("/api/accounts/card/rename", json={"name": "", "short_name": "Rewards", "visibility": "everyday"}, headers=H)
+        c.post("/api/accounts/ira/rename", json={"name": "", "visibility": "less"}, headers=H)
+        c.post("/api/accounts/old/rename", json={"name": "", "visibility": "archived"}, headers=H)
+        home = c.get("/").text
+        pills = home.split('id="filters"')[1].split("</div>")[0]
+        assert ">Rewards<" in pills and "less-used" in pills and "Retirement IRA" in pills
+        assert "Old Store Card" not in pills and "More (1)" in pills
+        assert "Acme Rewards Visa Signature" in home.split('id="all"')[1]
+        # Filters come from the request only, so a plain reload shows everything.
+        assert "Book Barn" not in c.get("/?account=card").text.split('id="all"')[1]
+        assert "Book Barn" in c.get("/").text.split('id="all"')[1]
+        # The archived account with a balance is flagged on Accounts.
+        assert "still counts in coverage" in c.get("/accounts").text
+        # Details from Plaid's record.
+        d = c.get("/api/transactions/plaid/a1").json()["details"]
+        assert d["time"] == "10:42\u202fam" and d["channel"] == "In store" and d["store"] == "42"
+        assert d["street"] == "100 Main St" and d["place"] == "Springfield, WA 98000"
+        assert d["maps"].startswith("https://maps.apple.com/?ll=47.1,-122.2")
+        assert d["logo"].endswith("cafe.png") and d["counterparties"] == [{"name": "Square", "type": "payment terminal"}]
+        assert d["original"].startswith("SQ *CORNER CAFE 0042")
+        assert "https://*.plaid.com" in c.get("/").headers["content-security-policy"]

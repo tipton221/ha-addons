@@ -232,9 +232,19 @@ document.addEventListener("focusin", (ev) => {
 
 // ---------- refresh without reloading (keeps the scroll position) ----------
 
+// The home list's filters live only in the page, so a reload starts from All accounts.
+const view = { account: "", pending: false };
+function viewQuery() {
+  const q = new URLSearchParams();
+  if (view.account) q.set("account", view.account);
+  if (view.pending) q.set("pending", "1");
+  return q.toString();
+}
+
 // Swap in fresh copies of sections of the home page.
 async function swapSections(ids) {
-  const r = await fetch("/", { credentials: "same-origin" });
+  const q = viewQuery();
+  const r = await fetch(q ? `/?${q}` : "/", { credentials: "same-origin" });
   const doc = new DOMParser().parseFromString(await r.text(), "text/html");
   const wasOpen = document.getElementById("scheduled")?.open;
   for (const id of ids) {
@@ -486,10 +496,58 @@ const sheet = {
       this.updateHint();
       document.getElementById("sheet-bank").textContent =
         t.bank_name && t.bank_name !== t.display_name ? `Bank description: ${t.bank_name}` : "";
+      this.showDetails(t);
       suggest.hide();
       openSheet(el);
       this.li = li;
     } catch (e) { toast("Could not open this transaction", true); }
+  },
+
+  // Plaid's extra facts (time, place, website, payment details), only the ones that exist.
+  showDetails(t) {
+    const d = t.details || {};
+    const logo = document.getElementById("sheet-logo");
+    logo.hidden = !d.logo;
+    if (d.logo) { logo.src = d.logo; logo.onerror = () => { logo.hidden = true; }; } else logo.removeAttribute("src");
+    const fmt = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const rows = [];
+    if (d.time) rows.push(["Time", d.time]);
+    if (d.authorized_date) rows.push(["Purchased", fmt(d.authorized_date)]);
+    if (d.authorized_date) rows.push(["Posted", fmt(d.posted_date)]);
+    if (d.channel) rows.push(["Paid", d.channel]);
+    if (d.street || d.place) {
+      rows.push(["Where", [d.street, d.place, d.country].filter(Boolean).join("\n") + (d.store ? `\nStore ${d.store}` : "")]);
+    }
+    if (d.website) rows.push(["Website", d.website, `https://${d.website.replace(/^https?:\/\//, "")}`]);
+    for (const c of d.counterparties || []) rows.push([c.type ? c.type[0].toUpperCase() + c.type.slice(1) : "Via", c.name]);
+    if (d.payee) rows.push(["Payee", d.payee]);
+    if (d.payer) rows.push(["Payer", d.payer]);
+    if (d.processor) rows.push(["Processor", d.processor]);
+    if (d.reference) rows.push(["Reference", d.reference]);
+    if (d.check) rows.push(["Check", `#${d.check}`]);
+    if (d.mcc) rows.push(["Merchant code", d.mcc]);
+    if (d.confidence) rows.push(["Category confidence", d.confidence]);
+    if (d.original && d.original !== t.bank_name) rows.push(["Original description", d.original]);
+    const list = document.getElementById("sheet-details-list");
+    list.innerHTML = "";
+    for (const [label, value, href] of rows) {
+      const row = document.createElement("div");
+      row.className = "row detail";
+      const l = document.createElement("span");
+      l.className = "detail-label"; l.textContent = label;
+      const v = document.createElement(href ? "a" : "span");
+      v.className = "detail-value"; v.textContent = value;
+      if (href) { v.href = href; v.target = "_blank"; v.rel = "noopener noreferrer"; }
+      row.append(l, v);
+      list.appendChild(row);
+    }
+    if (d.maps) {
+      const a = document.createElement("a");
+      a.className = "maps-btn"; a.href = d.maps; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span>Show in Maps</span>';
+      list.appendChild(a);
+    }
+    document.getElementById("sheet-details").hidden = !list.children.length;
   },
 
   updateHint() {
@@ -580,7 +638,8 @@ function bindLoadMore(container) {
     btn.disabled = true;
     btn.textContent = "Loading…";
     try {
-      const r = await fetch(`/api/transactions/page?before=${encodeURIComponent(btn.dataset.before)}`, { credentials: "same-origin" });
+      const q = viewQuery();
+      const r = await fetch(`/api/transactions/page?before=${encodeURIComponent(btn.dataset.before)}${q ? "&" + q : ""}`, { credentials: "same-origin" });
       const html = await r.text();
       const tmp = document.createElement("div");
       tmp.innerHTML = html;
@@ -647,7 +706,9 @@ const forms = {
                                    color: colorValue(form) });
   },
   async "acct-form"(form) {
-    await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`, { name: form.elements.title.value });
+    const f = form.elements;
+    await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`,
+              { name: f.title.value, short_name: f.short.value, visibility: f.visibility.value });
   },
   async "payday-form"(form) {
     const f = form.elements;
@@ -811,6 +872,15 @@ const pages = {
     });
 
     document.addEventListener("click", async (ev) => {
+      const more = ev.target.closest("#more-filters");
+      if (more) {
+        const open = more.getAttribute("aria-expanded") !== "true";
+        more.setAttribute("aria-expanded", open ? "true" : "false");
+        document.querySelectorAll("#filters .less-used").forEach((b) => { b.hidden = !open; });
+        if (!more.dataset.label) more.dataset.label = more.textContent;
+        more.textContent = open ? "Fewer" : more.dataset.label;
+        return;
+      }
       const btn = ev.target.closest("#filters .filter");
       if (!btn || btn.classList.contains("on")) return;
       const filters = btn.closest("#filters");
@@ -822,7 +892,7 @@ const pages = {
       const dim = ["all", "scheduled-wrap"].map((id) => document.getElementById(id));
       dim.forEach((el) => { el.style.transition = "opacity .15s"; el.style.opacity = "0.25"; });
       try {
-        await api("/api/view/account-filter", { account: btn.dataset.account });
+        view.account = btn.dataset.account || "";
         await refresh(["all-head", "scheduled-wrap", "all"]);
       } catch (e) { dim.forEach((el) => { el.style.opacity = "1"; }); toast(e.message, true); }
     });
@@ -837,7 +907,7 @@ const pages = {
       cur.style.transition = "opacity .15s";
       cur.style.opacity = "0.25";
       try {
-        await api("/api/view/pending", { on });
+        view.pending = on;
         await refresh(["all-head", "all"]);
       } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
     });

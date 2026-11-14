@@ -15,7 +15,11 @@
     <label>Account
       <select name="account">
         <option value="">All accounts</option>
-        {% for a in accounts %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+        {% for a in accounts if a.visibility == "everyday" %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+        {% set less = accounts | selectattr("visibility", "ne", "everyday") | list %}
+        {% if less %}<optgroup label="Less used and archived">
+        {% for a in less %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.label }}{% if a.visibility == "archived" %} (archived){% endif %}</option>{% endfor %}
+        </optgroup>{% endif %}
       </select>
     </label>
     <label>Category

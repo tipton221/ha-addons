@@ -159,7 +159,11 @@ class Database:
                 ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
                 ("tip", "REAL"),             # tip entered by hand (part of the amount); NULL: automatic; 0: no tip
             ],
-            "accounts": [("display_name", "TEXT")],
+            "accounts": [
+                ("display_name", "TEXT"),
+                ("short_name", "TEXT"),      # shown on filter pills
+                ("visibility", "TEXT NOT NULL DEFAULT 'everyday'"),  # everyday, less (used), archived
+            ],
             "bills": [
                 ("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
                 ("account_id", "TEXT"),                     # chosen card; NULL means the card of the last charge

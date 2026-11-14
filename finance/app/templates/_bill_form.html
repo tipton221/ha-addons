@@ -27,9 +27,13 @@
   <label><span class="kind-bill" {% if income %}hidden{% endif %}>Paid with</span><span class="kind-income" {% if not income %}hidden{% endif %}>Deposited to</span>
     <select name="account_id">
       <option value="">{% if b and b.auto_account_id in labels %}Automatic ({{ labels[b.auto_account_id] }}){% else %}Automatic (account of the last one){% endif %}</option>
-      {% for a in accounts if a.type in ("credit", "depository") %}
+      {% for a in accounts if a.type in ("credit", "depository") and a.visibility == "everyday" %}
       <option value="{{ a.account_id }}" {% if v and v.account_choice == a.account_id %}selected{% endif %}>{{ a.label }}</option>
       {% endfor %}
+      {% set less = [] %}{% for a in accounts if a.type in ("credit", "depository") and (a.visibility == "less" or (v and v.account_choice == a.account_id and a.visibility == "archived")) %}{% set _ = less.append(a) %}{% endfor %}
+      {% if less %}<optgroup label="Less used">
+      {% for a in less %}<option value="{{ a.account_id }}" {% if v and v.account_choice == a.account_id %}selected{% endif %}>{{ a.label }}{% if a.visibility == "archived" %} (archived){% endif %}</option>{% endfor %}
+      </optgroup>{% endif %}
     </select>
   </label>
   <label>Tag color</label>

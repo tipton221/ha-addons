@@ -26,22 +26,31 @@
 
 <section class="card">
   <div class="card-head"><h2>Accounts</h2></div>
-  <p class="muted small">Tap an account to rename it. The new name is used everywhere in the app.</p>
+  <p class="muted small">Tap an account to rename it, give it a short name for the filter pills, or mark it less used or archived.</p>
   {% if accounts %}
   <ul class="list">
     {% for a in accounts %}
     <li class="edit-row" role="button" tabindex="0" data-editor="acct-{{ loop.index }}">
       <div class="grow">
-        <strong>{{ a.label }}</strong>
-        <span class="muted small">{{ a.institution }} · {{ (a.subtype or a.type or "") | capitalize }}{% if a.display_name %} · bank name: {{ a.name }}{% endif %}</span>
+        <strong>{{ a.label }}{% if a.visibility == "less" %} <span class="pill">Less used</span>{% elif a.visibility == "archived" %} <span class="pill">Archived</span>{% endif %}</strong>
+        <span class="muted small">{{ a.institution }} · {{ (a.subtype or a.type or "") | capitalize }}{% if a.short_name %} · pill: {{ a.short_name }}{% endif %}{% if a.display_name %} · bank name: {{ a.name }}{% endif %}</span>
+        {% if a.visibility == "archived" and (a.current_balance or 0) | abs >= 0.005 %}<span class="small warn-text">Archived but the balance is not zero, so it still counts in coverage.</span>{% endif %}
       </div>
       <span class="amount">{{ a.current_balance | money }}</span>
       <span class="chev" aria-hidden="true">›</span>
       <template id="acct-{{ loop.index }}">
-        <h3 class="sheet-title">Rename account</h3>
+        <h3 class="sheet-title">Edit account</h3>
         <form class="acct-form editor-form" data-account="{{ a.account_id }}">
           <label>Title<input type="text" name="title" value="{{ a.label }}" maxlength="60"></label>
-          <p class="hint">Bank name: {{ a.name }}. Leave the field empty to use it.</p>
+          <p class="hint">Bank name: {{ a.name }}. Leave the title empty to use it.</p>
+          <label>Short name (filter pills)<input type="text" name="short" value="{{ a.short_name or '' }}" maxlength="24" placeholder="Same as title"></label>
+          <label>Show</label>
+          <div class="scope" role="radiogroup" aria-label="Show">
+            <label><input type="radio" name="visibility" value="everyday" {% if a.visibility == "everyday" %}checked{% endif %}><span>Everyday</span></label>
+            <label><input type="radio" name="visibility" value="less" {% if a.visibility == "less" %}checked{% endif %}><span>Less used</span></label>
+            <label><input type="radio" name="visibility" value="archived" {% if a.visibility == "archived" %}checked{% endif %}><span>Archived</span></label>
+          </div>
+          <p class="hint">Less used: behind "More" in the filters and last in lists. Archived: hidden from filters and lists; its transactions stay in your history and search.</p>
           <div class="sheet-actions">
             <button type="button" class="sheet-close">Cancel</button>
             <button type="submit" class="primary">Save</button>
