@@ -10,7 +10,7 @@
     <label><input type="radio" name="kind" value="income" {% if income %}checked{% endif %}><span>Income</span></label>
   </div>
   <div class="grid2">
-    <label>Name<input name="name" type="text" required maxlength="80" value="{{ v.name if v else '' }}"></label>
+    <label>Title<input name="title" type="text" required maxlength="80" value="{{ v.name if v else '' }}"></label>
     <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="{{ 'Average of recent ones' if v and v.varies else '0.00' }}" value="{{ '%.2f' % v.amount if v and v.amount else '' }}" {% if v and v.varies %}disabled{% endif %}></label>
     <label>Repeats
       <select name="cadence">
@@ -20,7 +20,7 @@
       </select>
     </label>
     <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ v.due_day if v and v.due_day else '' }}"></label>
-    <label>Matches transactions containing<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as name"></label>
+    <label>Matches transactions containing<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as title"></label>
     <label>Next date (optional)<input name="next_due" type="date" value="{{ v.next_due_override if v and v.next_due_override else '' }}"></label>
   </div>
   {% set labels = {} %}{% for a in accounts %}{% set _ = labels.update({a.account_id: a.label}) %}{% endfor %}

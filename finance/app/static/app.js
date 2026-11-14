@@ -264,7 +264,7 @@ const suggest = {
   names: null,
   active: -1,
   list() { return document.getElementById("name-suggest"); },
-  input() { return document.getElementById("sheet-name"); },
+  input() { return document.getElementById("sheet-merchant"); },
   async load() {
     if (this.names) return this.names;
     try {
@@ -416,7 +416,7 @@ const sheet = {
         [d.toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric", year: "numeric" }),
          t.account, t.pending ? "Pending" : null].filter(Boolean).join(" · ");
       const form = document.getElementById("sheet-form");
-      form.display_name.value = t.display_name;
+      form.merchant.value = t.display_name;
       form.note.value = t.note;
       const sel = form.category_id;
       sel.innerHTML = "";
@@ -479,8 +479,8 @@ const sheet = {
     const wasThis = t.category_is_override || t.name_is_override;
     const scopeChanged = (scope === "this") !== wasThis;
     // A one-off name becomes the merchant's name when "All from this merchant" is chosen.
-    if (form.display_name.value.trim() !== t.display_name || (scope === "merchant" && t.name_is_override)) {
-      body.display_name = form.display_name.value;
+    if (form.merchant.value.trim() !== t.display_name || (scope === "merchant" && t.name_is_override)) {
+      body.display_name = form.merchant.value;
     }
     const cid = Number(form.category_id.value);
     if (cid !== t.category_id || scopeChanged) body.category_id = cid;
@@ -590,7 +590,7 @@ const forms = {
   async "bill-form"(form) {
     const f = form.elements;
     await api("/api/bills", {
-      id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
+      id: form.dataset.id || null, name: f.title.value, amount: f.amount.value,
       cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
       next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
       varies: f.varies.checked, account_id: f.account_id.value, kind: f.kind.value,
@@ -599,11 +599,11 @@ const forms = {
     });
   },
   async "cat-form"(form) {
-    await api("/api/categories", { id: form.dataset.id || null, name: form.elements.name.value,
+    await api("/api/categories", { id: form.dataset.id || null, name: form.elements.title.value,
                                    color: colorValue(form) });
   },
   async "acct-form"(form) {
-    await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`, { name: form.elements.name.value });
+    await api(`/api/accounts/${encodeURIComponent(form.dataset.account)}/rename`, { name: form.elements.title.value });
   },
   async "payday-form"(form) {
     const f = form.elements;
@@ -827,7 +827,20 @@ const pages = {
   },
 };
 
+// Keep browsers (Safari's Contacts AutoFill in particular) from offering personal details in app fields.
+function noAutofill(root) {
+  root.querySelectorAll("input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea").forEach((el) => {
+    if (!el.hasAttribute("autocomplete")) el.setAttribute("autocomplete", "off");  // explicit values (sign-in) are kept
+    el.setAttribute("data-1p-ignore", "");
+    el.setAttribute("data-lpignore", "true");
+  });
+}
+new MutationObserver((muts) => {
+  for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) noAutofill(n);
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 document.addEventListener("DOMContentLoaded", () => {
+  noAutofill(document);
   sheet.init();
   editor.init();
   suggest.init();

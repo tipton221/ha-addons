@@ -40,7 +40,7 @@
       <template id="acct-{{ loop.index }}">
         <h3 class="sheet-title">Rename account</h3>
         <form class="acct-form editor-form" data-account="{{ a.account_id }}">
-          <label>Name<input type="text" name="name" value="{{ a.label }}" maxlength="60"></label>
+          <label>Title<input type="text" name="title" value="{{ a.label }}" maxlength="60"></label>
           <p class="hint">Bank name: {{ a.name }}. Leave the field empty to use it.</p>
           <div class="sheet-actions">
             <button type="button" class="sheet-close">Cancel</button>
@@ -97,7 +97,7 @@
       <template id="cat-{{ c.id }}">
         <h3 class="sheet-title">Edit category</h3>
         <form class="cat-form editor-form" data-id="{{ c.id }}">
-          <label>Name<input type="text" name="name" value="{{ c.name }}" maxlength="40" required></label>
+          <label>Title<input type="text" name="title" value="{{ c.name }}" maxlength="40" required></label>
           <label>Color</label>
           {{ color_picker(c.color, colors) }}
           <button type="button" class="danger delete-cat wide-btn" data-id="{{ c.id }}">Remove category</button>
@@ -114,7 +114,7 @@
   <template id="cat-new">
     <h3 class="sheet-title">Add a category</h3>
     <form class="cat-form editor-form" data-id="">
-      <label>Name<input type="text" name="name" maxlength="40" required placeholder="Name"></label>
+      <label>Title<input type="text" name="title" maxlength="40" required placeholder="Category title"></label>
       <label>Color</label>
       {{ color_picker("blue", colors) }}
       <div class="sheet-actions">
