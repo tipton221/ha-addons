@@ -325,7 +325,7 @@ const suggest = {
     if (!input) return;
     input.addEventListener("input", () => this.show());
     input.addEventListener("focus", () => this.load());
-    input.addEventListener("blur", () => setTimeout(() => this.hide(), 150));
+    input.addEventListener("blur", () => setTimeout(() => this.hide(), 250));
     input.addEventListener("keydown", (ev) => {
       if (this.list().hidden) return;
       if (ev.key === "ArrowDown") { ev.preventDefault(); this.move(1); }
@@ -333,12 +333,12 @@ const suggest = {
       else if (ev.key === "Enter" && this.active >= 0) { ev.preventDefault(); this.choose(this.list().children[this.active].textContent); }
       else if (ev.key === "Escape") { ev.preventDefault(); this.hide(); }
     });
-    // pointerdown keeps the input focused, so the keyboard stays up on phones
-    this.list().addEventListener("pointerdown", (ev) => {
+    // Pick on a completed tap (click), never on touch start, so scrolling or dismissing the
+    // keyboard over the list cannot choose a name. mousedown is cancelled to keep focus on desktop.
+    this.list().addEventListener("mousedown", (ev) => ev.preventDefault());
+    this.list().addEventListener("click", (ev) => {
       const li = ev.target.closest("li");
-      if (!li) return;
-      ev.preventDefault();
-      this.choose(li.textContent);
+      if (li) this.choose(li.textContent);
     });
   },
 };
@@ -439,12 +439,24 @@ const sheet = {
       }
       bill.value = t.bill_choice === null ? "" : String(t.bill_choice);
       form.scope.value = t.category_is_override || t.name_is_override ? "this" : "merchant";
-      const sim = document.getElementById("sheet-similar");
-      form.similar.checked = false;
-      if (t.similar.length) {
-        const n = t.similar.reduce((a, s) => a + s.count, 0);
-        document.getElementById("sheet-similar-text").textContent =
-          `Also apply to ${t.similar.length} similar merchant${t.similar.length > 1 ? "s" : ""} (${n} transaction${n > 1 ? "s" : ""}), like ${t.similar[0].sample}`;
+      // Similar merchants: each one is its own choice, and none is included unless checked.
+      const list = document.getElementById("sheet-similar-list");
+      list.innerHTML = "";
+      for (const s of t.similar) {
+        const row = document.createElement("label");
+        row.className = "similar-row";
+        const box = document.createElement("input");
+        box.type = "checkbox"; box.name = "similar"; box.value = s.key;
+        const text = document.createElement("span");
+        text.className = "grow";
+        const name = document.createElement("strong");
+        name.textContent = s.name;
+        const meta = document.createElement("span");
+        meta.className = "muted small";
+        meta.textContent = `${s.count} transaction${s.count > 1 ? "s" : ""}${s.sample !== s.name ? ` · bank: ${s.sample}` : ""}`;
+        text.append(name, meta);
+        row.append(box, text);
+        list.appendChild(row);
       }
       this.updateHint();
       document.getElementById("sheet-bank").textContent =
@@ -464,6 +476,11 @@ const sheet = {
       ? `Changes apply to ${t.merchant_count > 1 ? `all ${t.merchant_count} transactions` : "every transaction"} from this merchant, past and future.`
       : "Only this transaction changes.";
     document.getElementById("sheet-similar").hidden = !merchant || !t.similar.length;
+    const picked = [...form.querySelectorAll('input[name="similar"]:checked')].map((b) => b.value);
+    const n = t.similar.filter((s) => picked.includes(s.key)).reduce((a, s) => a + s.count, 0);
+    document.getElementById("sheet-similar-sum").textContent = picked.length
+      ? `${picked.length} more merchant${picked.length > 1 ? "s" : ""} (${n} transaction${n > 1 ? "s" : ""}) will get the same name and category.`
+      : "Only this merchant changes. Check others to include them.";
   },
 
   close() {
@@ -487,7 +504,8 @@ const sheet = {
     if (form.note.value.trim() !== t.note) body.note = form.note.value;
     const bill = form.bill_id.value;
     if (bill !== "new" && bill !== (t.bill_choice === null ? "" : String(t.bill_choice))) body.bill_id = bill;
-    if (scope === "merchant" && form.similar.checked) body.similar = t.similar.map((s) => s.key);
+    const picked = [...form.querySelectorAll('input[name="similar"]:checked')].map((b) => b.value);
+    if (scope === "merchant" && picked.length) body.similar = picked;
     if (Object.keys(body).length) body.scope = scope;
     try {
       if (Object.keys(body).length) await api(`/api/transactions/${t.source}/${encodeURIComponent(t.id)}`, body);
@@ -566,7 +584,7 @@ document.addEventListener("change", (ev) => {
     t.form.querySelectorAll(".kind-bill").forEach((el) => { el.hidden = income; });
     t.form.querySelectorAll(".kind-income").forEach((el) => { el.hidden = !income; });
   }
-  if (t.matches('#sheet-form input[name="scope"]')) sheet.updateHint();
+  if (t.matches('#sheet-form input[name="scope"], #sheet-form input[name="similar"]')) sheet.updateHint();
   if (t.matches('.bill-form input[name="varies"]')) {
     const amount = t.form.elements.amount;
     amount.disabled = t.checked;
@@ -628,6 +646,17 @@ document.addEventListener("submit", async (ev) => {
     if (key === "bill-form") await refreshInPlace();
     else setTimeout(() => location.reload(), 600);
   } catch (e) { if (btn) btn.disabled = false; toast(e.message, true); }
+});
+
+document.addEventListener("click", async (ev) => {
+  const undo = ev.target.closest(".undo-rule");
+  if (!undo) return;
+  if (!confirm("Undo this rename? Its transactions go back to the bank's name and default category.")) return;
+  try {
+    await api("/api/rules/delete", { key: undo.dataset.key });
+    await fold(undo.closest("li"), 0);
+    toast("Undone");
+  } catch (e) { toast(e.message, true); }
 });
 
 document.addEventListener("click", async (ev) => {

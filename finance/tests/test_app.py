@@ -930,3 +930,27 @@ def test_paycheck_sets_payday_and_pending_filter(tmp_path, monkeypatch):
         c.post("/api/view/pending", json={"on": False}, headers=H)
         all_list = c.get("/").text.split('id="all"')[1]
         assert "Book Barn" in all_list
+
+
+
+def test_similar_merchants_are_chosen_one_by_one_and_renames_can_be_undone(tmp_path, monkeypatch):
+    rows = [("d1", "card", "2026-11-01", "WASHINGTON DOL", "Washington DOL", 50.0, 0, "GOVERNMENT_AND_NON_PROFIT", "X", 1),
+            ("f1", "card", "2026-11-02", "WASHINGTON STATE FERRIES", "Washington State Ferries", 18.0, 0, "TRAVEL", "X", 1),
+            ("p1", "card", "2026-11-03", "WASHINGTON STATE PARKS", "Washington State Parks", 10.0, 0, "TRAVEL", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/transactions/plaid/d1").json()
+        assert {s["name"] for s in d["similar"]} == {"Washington State Ferries", "Washington State Parks"}
+        # Rename DOL and include only the parks.
+        c.post("/api/transactions/plaid/d1", json={"display_name": "Washington Department of Licensing",
+                                                    "scope": "merchant", "similar": ["washington state parks"]}, headers=H)
+        names = {i: c.get(f"/api/transactions/plaid/{i}").json()["display_name"] for i in ("d1", "f1", "p1")}
+        assert names == {"d1": "Washington Department of Licensing", "f1": "Washington State Ferries",
+                         "p1": "Washington Department of Licensing"}
+        # The rename shows up in the list on Accounts, and undoing it restores the bank's name.
+        page = c.get("/accounts").text
+        assert "Renamed merchants" in page and 'data-key="washington state parks"' in page
+        c.post("/api/rules/delete", json={"key": "washington state parks"}, headers=H)
+        assert c.get("/api/transactions/plaid/p1").json()["display_name"] == "Washington State Parks"
+        assert c.get("/api/transactions/plaid/d1").json()["display_name"] == "Washington Department of Licensing"

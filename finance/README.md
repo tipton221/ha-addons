@@ -43,7 +43,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.3.2:
+Version 1.4.0:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
@@ -53,8 +53,9 @@ Version 1.3.2:
 - When a pending charge posts, its review, note, and one-off category carry over; a changed final amount shows as a tip (restaurants) or a difference, and a jump of more than 30% goes back to the inbox.
 - Card payments and transfers between your accounts are paired (same amount, opposite sides, within 5 days, at least one side checking): both show a ⇄ tag naming the other account, reviewing one reviews both, and search totals leave them out.
 - YNAB names: posted transactions on linked accounts take the payee and memo of the matching YNAB transaction (runs once after upgrading; Compare has Apply again). Merchants with two or more matches on one payee are renamed for the future; others get one-off names. Your own renames and notes win.
-- Transaction editor: one choice ("All from this merchant" or "Just this one") covers the name and category, an option to include similar merchants (same first word, for bank descriptions with order numbers), name suggestions while typing, and a Bill or income picker (automatic, none, a specific one, or a new one filled in from the transaction). Saving updates the list in place without losing your scroll position.
+- Transaction editor: one choice ("All from this merchant" or "Just this one") covers the name and category, a list of similar merchants (same first word) you can include one by one, unchecked by default, name suggestions while typing, and a Bill or income picker (automatic, none, a specific one, or a new one filled in from the transaction). Saving updates the list in place without losing your scroll position.
 - Recurring income (paychecks every 2 weeks, interest) next to bills, with averages for varying amounts. Income shows in Scheduled and never changes coverage. Mark one as your paycheck and its dates become your paydays for coverage (the manual payday setting is the fallback).
 - A "Pending only" toggle on the home list shows every pending transaction, reviewed or not, for the chosen account.
+- Accounts lists every renamed merchant with the bank's name and transaction count, and Undo restores the bank's name.
 - Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), the card each bill is paid with (the card of its last charge unless you pick one), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.

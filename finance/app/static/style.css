@@ -332,9 +332,17 @@ button svg { width: 18px; height: 18px; }
 .suggest li { padding: 10px 12px; border-radius: 10px; cursor: pointer; color: var(--text); font-size: 0.98rem; }
 .suggest li.active, .suggest li:hover { background: rgba(255,255,255,0.08); }
 .suggest + .row { border-top: 1px solid var(--hairline); }
-.similar { margin: -2px 6px 14px; }
-.similar label.inline { margin: 0; font-size: 0.88rem; color: var(--text-2); align-items: flex-start; }
-.similar label.inline input { margin-top: 1px; }
+.similar { margin: 0 0 6px; }
+.similar-list { padding: 2px 14px; margin-bottom: 8px; }
+.similar-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 0; margin: 0; cursor: pointer; color: var(--text); }
+.similar-row + .similar-row { border-top: 1px solid var(--hairline); }
+.similar-row input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--blue); }
+.similar-row .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.similar-row strong { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-row { overflow: hidden; max-height: 160px; transition: max-height .35s var(--ease), opacity .3s var(--ease); }
+.rule-row.leaving { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+.rule-row .grow { display: flex; flex-direction: column; gap: 4px; }
+#rules .scheduled { border-bottom: 0; margin: 0; }
 .kind-scope { margin: 0 0 16px; }
 .scope { display: flex; gap: 4px; padding: 3px; margin: 0 0 8px; background: rgba(255,255,255,0.06); border-radius: var(--r-pill); }
 .scope label { flex: 1; margin: 0; text-align: center; padding: 8px; border-radius: var(--r-pill); font-size: 0.85rem; font-weight: 600; color: var(--text-2); cursor: pointer; transition: background .25s var(--ease), color .25s var(--ease); }
