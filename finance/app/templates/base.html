@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>{% block title %}Finance{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  {% if nav is defined %}<link rel="stylesheet" href="/colors.css">{% endif %}
   {% block head %}{% endblock %}
   <script src="/static/app.js" defer></script>
 </head>
@@ -46,11 +47,12 @@
         <div class="row"><label for="sheet-name" id="sheet-title">Name</label><input id="sheet-name" name="display_name" maxlength="80"></div>
         <div class="row"><label for="sheet-category">Category</label><select id="sheet-category" name="category_id"></select></div>
       </div>
-      <div class="scope" role="radiogroup" aria-label="Apply category to">
+      <p class="section-label">Apply the category to</p>
+      <div class="scope" role="radiogroup" aria-label="Apply the category to">
         <label><input type="radio" name="scope" value="merchant" checked><span>All from this merchant</span></label>
         <label><input type="radio" name="scope" value="this"><span>Just this one</span></label>
       </div>
-      <p class="hint" id="sheet-hint">Renaming always applies to every transaction from this merchant, past and future.</p>
+      <p class="hint" id="sheet-hint">A new name always applies to every transaction from this merchant, past and future.</p>
       <div class="group">
         <div class="row stack"><label for="sheet-note">Note</label><textarea id="sheet-note" name="note" maxlength="500" placeholder="Add a note"></textarea></div>
       </div>

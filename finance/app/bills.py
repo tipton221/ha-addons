@@ -56,6 +56,10 @@ class Candidate:
     cadence: str
     last_seen: date
     count: int
+    varies: bool = False
+
+VARIES_SPREAD = 0.08    # recent charges more than 8% apart: treat the amount as varying
+VARIES_SAMPLES = 6      # average the last six charges for a varying bill
 
 
 def _cadence(dates: list[date]) -> str | None:
@@ -104,8 +108,10 @@ def detect(db: Database, today: date | None = None) -> list[Candidate]:
         if statistics.median(recent) < MIN_BILL:
             continue
         name = series[-1]["merchant"] or series[-1]["name"]
-        out.append(Candidate(name=name, match=key, amount=round(statistics.median(recent), 2),
-                             cadence=cadence, last_seen=last, count=len(series)))
+        varies = (max(recent) - min(recent)) > VARIES_SPREAD * max(recent)
+        amount = statistics.mean([t["amount"] for t in series[-VARIES_SAMPLES:]]) if varies else statistics.median(recent)
+        out.append(Candidate(name=name, match=key, amount=round(amount, 2),
+                             cadence=cadence, last_seen=last, count=len(series), varies=varies))
     return sorted(out, key=lambda c: (-c.amount))
 
 
@@ -119,8 +125,9 @@ def save_detected(db: Database, candidates: list[Candidate]) -> int:
             if c.match in existing or c.match in dismissed:
                 continue
             conn.execute(
-                "INSERT INTO bills (name, match, amount, cadence, due_day, source) VALUES (?, ?, ?, ?, ?, 'detected')",
-                (c.name, c.match, c.amount, c.cadence, c.last_seen.day))
+                "INSERT INTO bills (name, match, amount, cadence, due_day, source, varies) "
+                "VALUES (?, ?, ?, ?, ?, 'detected', ?)",
+                (c.name, c.match, c.amount, c.cadence, c.last_seen.day, 1 if c.varies else 0))
             added += 1
     return added
 
@@ -134,9 +141,18 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
             "SELECT merchant, name, date, amount FROM transactions WHERE source='plaid' AND amount > 0 "
             "ORDER BY date DESC")]
     for b in bills:
-        # Same merchant and a similar amount, so one Amazon Prime bill does not match every Amazon order.
-        hit = next((c for c in charges if b["match"] and b["match"] in c[0]
-                    and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])), None)
+        if b.get("varies"):
+            # Varying bills (utilities): any charge from the merchant counts, and the expected
+            # amount is the average of the most recent ones.
+            hits = [c for c in charges if b["match"] and b["match"] in c[0]][:VARIES_SAMPLES]
+            hit = hits[0] if hits else None
+            if hits:
+                b["amount"] = round(statistics.mean(h[2] for h in hits), 2)
+            b["samples"] = len(hits)
+        else:
+            # Same merchant and a similar amount, so one Amazon Prime bill does not match every Amazon order.
+            hit = next((c for c in charges if b["match"] and b["match"] in c[0]
+                        and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])), None)
         row = {"date": hit[1], "amount": hit[2]} if hit else None
         b["last_date"] = row["date"] if row else None
         b["last_amount"] = row["amount"] if row else None

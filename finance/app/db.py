@@ -138,7 +138,7 @@ class Database:
         wanted = {
             "transactions": [("note", "TEXT"), ("category_id", "INTEGER")],
             "accounts": [("display_name", "TEXT")],
-            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'")],
+            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0")],
         }
         for table, cols in wanted.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

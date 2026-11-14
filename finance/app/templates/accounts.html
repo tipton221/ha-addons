@@ -3,6 +3,7 @@
 {% block title %}Accounts{% endblock %}
 {% block page %}accounts{% endblock %}
 {% block head %}{% if plaid_ready %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>{% endif %}{% endblock %}
+{% from "_color.html" import color_picker %}
 {% block content %}
 <header class="top">
   <h1>Accounts</h1>
@@ -82,12 +83,10 @@
     {% for c in categories %}
     <li>
       <details>
-        <summary class="plain-row"><span class="chip c-{{ c.color }}">{{ c.name }}</span></summary>
-        <form class="cat-form" data-id="{{ c.id }}">
+        <summary class="plain-row"><span class="chip cat-{{ c.id }}">{{ c.name }}</span><span class="muted small edit-hint">Edit</span></summary>
+        <form class="cat-form editor" data-id="{{ c.id }}">
           <input type="text" name="name" value="{{ c.name }}" maxlength="40" required aria-label="Category name">
-          <div class="swatches">
-            {% for color in colors %}<label><input type="radio" name="color" value="{{ color }}" {% if color == c.color %}checked{% endif %}><span class="c-{{ color }}"></span></label>{% endfor %}
-          </div>
+          {{ color_picker(c.color, colors) }}
           <div class="row-actions">
             <button type="submit" class="primary">Save</button>
             <button type="button" class="danger delete-cat" data-id="{{ c.id }}">Remove</button>
@@ -99,11 +98,9 @@
   </ul>
   <details class="add">
     <summary>Add a category</summary>
-    <form class="cat-form" data-id="">
+    <form class="cat-form editor" data-id="">
       <input type="text" name="name" maxlength="40" required placeholder="Name" aria-label="Category name">
-      <div class="swatches">
-        {% for color in colors %}<label><input type="radio" name="color" value="{{ color }}" {% if loop.first %}checked{% endif %}><span class="c-{{ color }}"></span></label>{% endfor %}
-      </div>
+      {{ color_picker("blue", colors) }}
       <div class="row-actions"><button type="submit" class="primary">Add</button></div>
     </form>
   </details>

@@ -13,7 +13,36 @@ from datetime import date, timedelta
 from .bills import AMOUNT_TOLERANCE, normalize
 from .db import Database
 
+import re
+
 COLORS = ["blue", "green", "orange", "red", "purple", "pink", "teal", "yellow", "indigo", "gray"]
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def valid_color(value, default: str = "gray") -> str:
+    """A named palette color or a custom #rrggbb hex code."""
+    value = str(value or "").strip()
+    if value in COLORS:
+        return value
+    if HEX.match(value):
+        return value.lower()
+    if re.match(r"^[0-9a-fA-F]{6}$", value):
+        return "#" + value.lower()
+    return default
+
+
+def css_color(value: str) -> str:
+    return f"var(--{value})" if value in COLORS else value
+
+
+def colors_css(db: Database) -> str:
+    """Per-category and per-bill color classes, so templates need no inline styles (blocked by the CSP)."""
+    with db.connect() as conn:
+        cats = conn.execute("SELECT id, color FROM categories").fetchall()
+        bills = conn.execute("SELECT id, color FROM bills").fetchall()
+    lines = [f".cat-{r['id']} {{ --c: {css_color(valid_color(r['color']))}; }}" for r in cats]
+    lines += [f".bill-{r['id']} {{ --c: {css_color(valid_color(r['color'], 'purple'))}; }}" for r in bills]
+    return "\n".join(lines) + "\n"
 
 STARTER_CATEGORIES = [
     ("Rent", "blue"), ("Utilities", "teal"), ("Insurance", "indigo"), ("Loans", "indigo"),
@@ -85,7 +114,7 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
     with db.connect() as conn:
         cats = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM categories")}
         rules = {r["merchant_key"]: dict(r) for r in conn.execute("SELECT * FROM merchant_rules")}
-        bills = [dict(r) for r in conn.execute("SELECT id, name, match, amount, color FROM bills WHERE active=1")]
+        bills = [dict(r) for r in conn.execute("SELECT id, name, match, amount, color, varies FROM bills WHERE active=1")]
     by_name = {c["name"]: cid for cid, c in cats.items()}
     for t in txns:
         key = merchant_key(t)
@@ -98,14 +127,14 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         t["bill"] = None
         if t["amount"] > 0:
             for b in bills:
-                if b["match"] and b["match"] in key and \
-                        abs(t["amount"] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], t["amount"]):
+                if b["match"] and b["match"] in key and (b["varies"] or
+                        abs(t["amount"] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], t["amount"])):
                     t["bill"] = b
                     break
     return txns
 
 
-def list_transactions(db: Database, *, reviewed: bool | None = None, hidden_accounts: list[str] = (),
+def list_transactions(db: Database, *, reviewed: bool | None = None, account: str | None = None,
                       before: tuple[str, str] | None = None, limit: int = 60,
                       where: str = "", params: tuple = ()) -> list[dict]:
     """Plaid transactions, newest first, with account and institution columns."""
@@ -113,9 +142,9 @@ def list_transactions(db: Database, *, reviewed: bool | None = None, hidden_acco
     if reviewed is not None:
         clauses.append("t.reviewed = ?")
         args.append(1 if reviewed else 0)
-    if hidden_accounts:
-        clauses.append(f"t.account_id NOT IN ({','.join('?' * len(hidden_accounts))})")
-        args += list(hidden_accounts)
+    if account:
+        clauses.append("t.account_id = ?")
+        args.append(account)
     if before:
         clauses.append("(t.date < ? OR (t.date = ? AND t.rowid < ?))")
         args += [before[0], before[0], int(before[1])]

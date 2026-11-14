@@ -42,15 +42,16 @@
 <section class="card">
   <div class="card-head"><h2>All transactions</h2></div>
   {% if accounts | length > 1 %}
-  <div class="filters" id="filters" aria-label="Show accounts">
+  <div class="filters" id="filters" role="radiogroup" aria-label="Show transactions from">
+    <button class="filter {% if not selected %}on{% endif %}" data-account="" role="radio" aria-checked="{{ 'false' if selected else 'true' }}">All accounts</button>
     {% for a in accounts %}
-    <button class="filter {% if a.account_id in hidden %}off{% endif %}" data-account="{{ a.account_id }}" aria-pressed="{{ 'false' if a.account_id in hidden else 'true' }}">{{ a.label }}</button>
+    <button class="filter {% if a.account_id == selected %}on{% endif %}" data-account="{{ a.account_id }}" role="radio" aria-checked="{{ 'true' if a.account_id == selected else 'false' }}">{{ a.label }}</button>
     {% endfor %}
   </div>
   {% endif %}
   <div id="all">
     {% include "_rows.html" %}
-    {% if not groups %}<p class="empty">No reviewed transactions{% if hidden %} in the selected accounts{% endif %}.</p>{% endif %}
+    {% if not groups %}<p class="empty">No reviewed transactions{% if selected %} for this account{% endif %}.</p>{% endif %}
   </div>
 </section>
 {% if last_sync %}<p class="muted small center">Last synced {{ last_sync | local }}</p>{% endif %}

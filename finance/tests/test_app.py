@@ -597,10 +597,14 @@ def test_notes_account_names_and_filters(tmp_path, monkeypatch):
         assert c.post("/api/accounts/nope/rename", json={"name": "X"}, headers=H).status_code == 404
         page = c.get("/").text
         assert "Birthday gift for a friend" in page and "Everyday Card" in page
-        c.post("/api/view/hidden-accounts", json={"hidden": ["bank", "bogus"]}, headers=H)
+        # Narrow the list to one account, then back to all.
+        assert c.post("/api/view/account-filter", json={"account": "bogus"}, headers=H).status_code == 400
+        c.post("/api/view/account-filter", json={"account": "bank"}, headers=H)
         all_html = c.get("/").text.split('id="all"')[1]
-        assert "Shop One" in all_html and "Shop Two" not in all_html
-        assert db.get_kv("hidden_accounts") == '["bank"]'
+        assert "Shop Two" in all_html and "Shop One" not in all_html
+        c.post("/api/view/account-filter", json={"account": ""}, headers=H)
+        all_html = c.get("/").text.split('id="all"')[1]
+        assert "Shop One" in all_html and "Shop Two" in all_html
         assert "Shop One" in c.get("/search?q=birthday").text
 
 
@@ -628,7 +632,7 @@ def test_paging_and_bill_tag(tmp_path, monkeypatch):
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
         page = c.get("/").text
-        assert page.count('class="txn-item"') == 60 and 'class="pill tag c-teal">↻ Phone' in page
+        assert page.count('class="txn-item"') == 60 and 'class="pill tag bill-1">↻ Phone' in page
         cursor = page.split('data-before="')[1].split('"')[0]
         more = c.get(f"/api/transactions/page?before={cursor}").text
         assert more.count('class="txn-item"') == 60 and 'data-before="' in more
@@ -650,3 +654,46 @@ def test_new_columns_added_to_old_database(tmp_path):
     with db.connect() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(transactions)")}
     assert {"note", "category_id"} <= cols
+
+
+# ---------------------------------------------------------------- 0.4.1: colors and varying bills
+
+def test_custom_hex_colors_and_stylesheet(tmp_path, monkeypatch):
+    from app.ledger import valid_color
+    assert valid_color("teal") == "teal" and valid_color("#A1B2C3") == "#a1b2c3"
+    assert valid_color("a1b2c3") == "#a1b2c3" and valid_color("red; }") == "gray"
+    db, app = client_with(tmp_path, monkeypatch, [], [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        cid = c.post("/api/categories", json={"name": "Hobbies", "color": "#12AB34"}, headers=H).json()["id"]
+        css = c.get("/colors.css")
+        assert css.headers["content-type"].startswith("text/css")
+        assert f".cat-{cid} {{ --c: #12ab34; }}" in css.text
+        assert ".cat-1 { --c: var(--blue); }" in css.text
+
+
+def test_varying_bill(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed(db, [("e1", "card", "2026-08-16", "CITY POWER", "City Power", 164.25, 0, "RENT_AND_UTILITIES", "X", 1),
+              ("e2", "card", "2026-09-16", "CITY POWER", "City Power", 174.77, 0, "RENT_AND_UTILITIES", "X", 1),
+              ("e3", "card", "2026-10-16", "CITY POWER", "City Power", 217.01, 0, "RENT_AND_UTILITIES", "X", 1)],
+         accounts=[("card", "Card A", "credit", 0, None)])
+    found = {x.name: x for x in detect(db, D(2026, 11, 13))}
+    assert found["City Power"].varies and found["City Power"].amount == round((164.25 + 174.77 + 217.01) / 3, 2)
+    save_detected(db, list(found.values()))
+    b = bill_status(db, D(2026, 11, 13))[0]
+    assert b["varies"] == 1 and b["amount"] == 185.34 and b["next_due"] == D(2026, 11, 16)
+    # A much higher winter bill still gets the bill's tag, because the amount varies.
+    from app.ledger import resolve
+    tagged = resolve(db, [{"source": "plaid", "id": "e4", "merchant": "City Power", "name": "CITY POWER",
+                           "amount": 320.0, "category": None, "category_detail": None, "category_id": None}])
+    assert tagged[0]["bill"]["name"] == "City Power"
+
+
+def test_bill_amount_required_unless_varies(tmp_path, monkeypatch):
+    db, app = client_with(tmp_path, monkeypatch, [], [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/bills", json={"name": "Power", "amount": ""}, headers=H).status_code == 400
+        assert c.post("/api/bills", json={"name": "Power", "varies": True, "color": "#ff00aa"}, headers=H).status_code == 200
+        assert "≈" in c.get("/bills").text

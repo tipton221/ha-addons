@@ -4,8 +4,8 @@
     <div class="main">
       <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}</div>
       <div class="meta">
-        {% if t.category_info %}<span class="chip c-{{ t.category_info.color }}">{{ t.category_info.name }}</span>{% endif %}
-        {% if t.bill %}<span class="pill tag c-{{ t.bill.color }}">↻ {{ t.bill.name }}</span>{% endif %}
+        {% if t.category_info %}<span class="chip cat-{{ t.category_info.id }}">{{ t.category_info.name }}</span>{% endif %}
+        {% if t.bill %}<span class="pill tag bill-{{ t.bill.id }}">↻ {{ t.bill.name }}</span>{% endif %}
         <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
       </div>
       {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
