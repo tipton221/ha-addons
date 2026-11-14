@@ -860,6 +860,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             rows = [t for t in rows if (t["note"] or "").strip()]
         if q.get("billed"):
             rows = [t for t in rows if t["bill"]]
+        if q.get("tipped"):
+            rows = [t for t in rows if t["tip_info"]]
         return rows
 
     def quick_ranges(today_: date, q: dict) -> dict:
