@@ -91,7 +91,7 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 .card {
   position: relative;
   /* A frosted fill that does the blur's job without the blur's cost. */
-  background: linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.04)), rgba(16, 17, 24, 0.8);
+  background: linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.04)), rgba(17, 18, 25, 0.96);
   border: 1px solid var(--glass-border);
   border-radius: var(--r-xl);
   padding: 18px;
@@ -554,3 +554,11 @@ a.detail-value { color: var(--blue); text-decoration: none; }
   font-weight: 600; text-decoration: none; }
 .maps-btn svg { width: 18px; height: 18px; }
 .maps-btn:active { opacity: 0.7; }
+
+/* Tip: dollars or percent, side by side */
+.tip-inputs { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: 1; min-width: 0; }
+.tip-inputs .unit { color: var(--text-2); }
+.tip-inputs .tip-or { color: var(--text-3); font-size: 0.85rem; margin: 0 8px; }
+.tip-inputs { align-items: baseline; }
+.group .row .tip-inputs input#sheet-tip { flex: 0 1 64px; width: 64px; text-align: left; }
+.group .row .tip-inputs input#sheet-tip-pct { flex: 0 0 40px; width: 40px; text-align: right; }

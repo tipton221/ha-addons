@@ -404,6 +404,19 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                            "venmo", "zelle", "atm", "fee", "interest", "mobile", "point", "sale", "pp"}
 
     AMAZON_TRANSACTIONS = "https://www.amazon.com/cpe/yourpayments/transactions"
+    APPLE_PURCHASES = "https://reportaproblem.apple.com/?s=6"
+
+    def store_link(t: dict) -> dict | None:
+        """A button to the store's own purchase history (Amazon orders, Apple subscriptions and apps)."""
+        words = t["merchant_key"].split(" ")
+        if t.get("transfer_peer"):
+            return None
+        if words[0] in ("amazon", "amzn"):
+            return {"label": "Open Amazon transactions", "url": AMAZON_TRANSACTIONS}
+        # App Store and subscription charges, not Apple Card payments, Apple Cash, or Apple Store retail.
+        if words[0] == "apple" and not set(words[1:2]) & {"card", "cash", "store"}:
+            return {"label": "Open Apple purchases", "url": APPLE_PURCHASES}
+        return None
 
     def local_time(value: str | None) -> str | None:
         """A Plaid timestamp as Pacific time, or None when missing or a placeholder midnight."""
@@ -448,8 +461,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "website": raw.get("website"),
             "logo": logo_ok(raw.get("logo_url")),
             "counterparties": counterparties,
-            # Amazon purchases: a link to Amazon's payment history, which lists each charge with its order.
-            "amazon": AMAZON_TRANSACTIONS if t["merchant_key"].split(" ")[0] in ("amazon", "amzn") else None,
+            "shop": store_link(t),
             "payee": meta.get("payee"), "payer": meta.get("payer"),
             "reference": meta.get("reference_number"), "processor": meta.get("payment_processor"),
             "check": raw.get("check_number"),

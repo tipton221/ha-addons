@@ -1058,19 +1058,25 @@ def test_filters_reset_accounts_short_names_visibility_and_details(tmp_path, mon
         assert d["logo"].endswith("cafe.png") and d["counterparties"] == [{"name": "Square", "type": "payment terminal"}]
         assert d["original"].startswith("SQ *CORNER CAFE 0042")
         assert "https://*.plaid.com" in c.get("/").headers["content-security-policy"]
-        assert d["amazon"] is None and "mcc" not in d and "confidence" not in d
+        assert d["shop"] is None and "mcc" not in d and "confidence" not in d
 
 
 
-def test_amazon_link_only_for_amazon(tmp_path, monkeypatch):
+def test_store_links_for_amazon_and_apple(tmp_path, monkeypatch):
     rows = [("z1", "card", "2026-11-01", "AMZN Mktp US*AB12", "AMZN Mktp US", 15.06, 0, "GENERAL_MERCHANDISE", "X", 1),
             ("z2", "card", "2026-11-01", "Amazon.com*CD34", "Amazon.com", 2.97, 0, "GENERAL_MERCHANDISE", "X", 1),
-            ("n1", "card", "2026-11-01", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1)]
+            ("n1", "card", "2026-11-01", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("p1", "card", "2026-11-01", "APPLE.COM/BILL", "Apple", 13.99, 0, "ENTERTAINMENT", "X", 1),
+            ("p2", "card", "2026-11-01", "APPLECARD GSBANK PAYMENT", "Apple Card", 50.0, 0, "LOAN_PAYMENTS", "X", 1),
+            ("p3", "card", "2026-11-01", "APPLE STORE R123", "Apple Store", 99.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
     db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
-        links = {i: c.get(f"/api/transactions/plaid/{i}").json()["details"]["amazon"] for i in ("z1", "z2", "n1")}
+        links = {i: (c.get(f"/api/transactions/plaid/{i}").json()["details"]["shop"] or {}).get("url")
+                 for i in ("z1", "z2", "n1", "p1", "p2", "p3")}
     assert links["z1"] == links["z2"] == "https://www.amazon.com/cpe/yourpayments/transactions" and links["n1"] is None
+    assert links["p1"] == "https://reportaproblem.apple.com/?s=6"  # App Store and subscriptions
+    assert links["p2"] is None and links["p3"] is None  # Apple Card payment, Apple Store retail
 
 
 def test_plaid_link_gets_a_per_page_style_nonce(tmp_path, monkeypatch):
