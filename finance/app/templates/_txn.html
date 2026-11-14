@@ -1,5 +1,5 @@
 {% macro txn_row(t, review=False) %}
-<li class="txn-item" data-source="{{ t.source }}" data-id="{{ t.id }}">
+<li class="txn-item" data-source="{{ t.source }}" data-id="{{ t.id }}"{% if t.transfer_peer %} data-peer="{{ t.transfer_peer }}"{% endif %}>
   <div class="txn" role="button" tabindex="0" aria-label="Edit {{ t.display_name }}">
     <div class="main">
       <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}</div>
@@ -10,6 +10,7 @@
         {% set food = t.category == "FOOD_AND_DRINK" or (t.category_info and t.category_info.name == "Restaurants") %}
         <span class="pill tag {{ 'c-green' if food and diff > 0 else 'c-gray' }}" title="Pending amount was {{ t.pending_amount | money }}">{% if food and diff > 0 %}Tip +{{ diff | money }} · {{ ((diff / t.pending_amount) * 100) | round | int }}%{% else %}{{ "+" if diff > 0 else "" }}{{ diff | money }} since pending{% endif %}</span>
         {% endif %}
+        {% if t.transfer %}<span class="pill tag c-gray">⇄ {{ "To" if t.transfer.out else "From" }} {{ t.transfer.account }}</span>{% endif %}
         {% if t.bill %}<span class="pill tag bill-{{ t.bill.id }}">↻ {{ t.bill.name }}</span>{% endif %}
         <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
       </div>

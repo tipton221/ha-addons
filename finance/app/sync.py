@@ -7,6 +7,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from .db import Database
+from .ledger import pair_transfers
 from .plaid import Plaid, PlaidError
 
 log = logging.getLogger("finance.sync")
@@ -160,6 +161,8 @@ async def sync_all(db: Database, plaid: Plaid) -> dict:
                     (status, e.error_code, item["item_id"]),
                 )
             results[name] = {"error": e.error_code}
+    with db.connect() as conn:
+        pair_transfers(conn)
     db.set_kv("last_sync_at", datetime.now(timezone.utc).isoformat())
     return results
 

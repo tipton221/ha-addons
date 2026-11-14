@@ -115,6 +115,11 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         cats = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM categories")}
         rules = {r["merchant_key"]: dict(r) for r in conn.execute("SELECT * FROM merchant_rules")}
         bills = [dict(r) for r in conn.execute("SELECT id, name, match, amount, color, varies FROM bills WHERE active=1")]
+        peer_ids = [t["transfer_peer"] for t in txns if t.get("transfer_peer")]
+        peers = {r["id"]: r["label"] for r in conn.execute(
+            "SELECT t.id, COALESCE(a.display_name, a.name) AS label FROM transactions t "
+            "JOIN accounts a ON a.account_id = t.account_id WHERE t.source='plaid' AND t.id IN "
+            f"({','.join('?' * len(peer_ids))})", peer_ids)} if peer_ids else {}
     by_name = {c["name"]: cid for cid, c in cats.items()}
     for t in txns:
         key = merchant_key(t)
@@ -125,7 +130,11 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         t["category_info"] = cats.get(cid)
         t["account_label"] = t.get("account_display_name") or t.get("account_name") or ""
         t["bill"] = None
-        if t["amount"] > 0:
+        t["transfer"] = None
+        if t.get("transfer_peer"):
+            peer = peers.get(t["transfer_peer"])
+            t["transfer"] = {"account": peer or "another account", "out": t["amount"] > 0}
+        elif t["amount"] > 0:
             for b in bills:
                 if b["match"] and b["match"] in key and (b["varies"] or
                         abs(t["amount"] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], t["amount"])):
@@ -198,3 +207,56 @@ def set_merchant_rule(db: Database, key: str, *, display_name: str | None = ...,
                 "SELECT rowid, merchant, name FROM transactions WHERE source='plaid' AND category_id IS NOT NULL")]
             ids = [r["rowid"] for r in keys if normalize(r["merchant"] or r["name"]) == key]
             conn.executemany("UPDATE transactions SET category_id=NULL WHERE rowid=?", [(i,) for i in ids])
+
+
+# ---------------------------------------------------------------- transfers
+
+TRANSFER_PRIMARY = {"TRANSFER_IN", "TRANSFER_OUT"}
+TRANSFER_CATEGORY = "Transfers and payments"
+TRANSFER_WINDOW_DAYS = 5
+
+
+def _transfer_like(t) -> bool:
+    return t["category"] in TRANSFER_PRIMARY or (t["category_detail"] or "").startswith("LOAN_PAYMENTS_CREDIT_CARD")
+
+
+def pair_transfers(conn) -> int:
+    """Link the two sides of a card payment or account to account transfer.
+
+    A pair is one posted charge and one posted credit of the same amount, on two different
+    checking, card, or investment accounts (at least one of them checking), within a few days, where Plaid
+    calls at least one side a transfer or payment. Returns the number of new pairs.
+    """
+    # The other side was removed (for example, a pending row replaced when it posted).
+    conn.execute("UPDATE transactions SET transfer_peer=NULL WHERE source='plaid' AND transfer_peer IS NOT NULL "
+                 "AND transfer_peer NOT IN (SELECT id FROM transactions WHERE source='plaid')")
+    rows = [dict(r) for r in conn.execute(
+        "SELECT t.id, t.account_id, t.date, t.amount, t.category, t.category_detail, a.type FROM transactions t "
+        "JOIN accounts a ON a.account_id = t.account_id WHERE t.source='plaid' AND t.pending=0 "
+        "AND t.transfer_peer IS NULL AND a.type IN ('depository', 'credit', 'investment') AND t.amount != 0 "
+        "ORDER BY t.date, t.rowid")]
+    credits: dict[int, list[dict]] = {}
+    for r in rows:
+        if r["amount"] < 0:
+            credits.setdefault(round(-r["amount"] * 100), []).append(r)
+    taken: set[str] = set()
+    pairs = []
+    for out in (r for r in rows if r["amount"] > 0):
+        best, gap = None, None
+        for inn in credits.get(round(out["amount"] * 100), []):
+            if inn["id"] in taken or inn["account_id"] == out["account_id"]:
+                continue
+            if "depository" not in (out["type"], inn["type"]):
+                continue
+            if not (_transfer_like(out) or _transfer_like(inn)):
+                continue
+            g = abs((date.fromisoformat(out["date"]) - date.fromisoformat(inn["date"])).days)
+            if g <= TRANSFER_WINDOW_DAYS and (gap is None or g < gap):
+                best, gap = inn, g
+        if best:
+            taken.add(best["id"])
+            pairs.append((out["id"], best["id"]))
+    for a, b in pairs:
+        conn.execute("UPDATE transactions SET transfer_peer=? WHERE source='plaid' AND id=?", (b, a))
+        conn.execute("UPDATE transactions SET transfer_peer=? WHERE source='plaid' AND id=?", (a, b))
+    return len(pairs)

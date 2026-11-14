@@ -26,8 +26,8 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCE_MONTHS, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
-from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, resolve, seed_categories,
-                     set_merchant_rule, valid_color)
+from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, pair_transfers, resolve,
+                     seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import sync_all, sync_ynab
 from .ynab import YNAB
 
@@ -71,6 +71,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     sync_lock = asyncio.Lock()
 
     seed_categories(db)
+    with db.connect() as conn:
+        pair_transfers(conn)  # existing history, and after upgrading
 
     if db.get_kv("inbox_initialized") != "1":
         # Before 0.3.0 every transaction started unreviewed; start the inbox with the last week only.
@@ -452,7 +454,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         body = await request.json()
         ids = [str(i) for i in body.get("ids", [])][:1000]
         with db.connect() as conn:
-            conn.executemany("UPDATE transactions SET reviewed=1 WHERE source='plaid' AND id=?", [(i,) for i in ids])
+            conn.executemany("UPDATE transactions SET reviewed=1 WHERE source='plaid' AND (id=? OR transfer_peer=?)",
+                             [(i, i) for i in ids])
         return {"ok": True, "count": len(ids)}
 
     # ---------- bills ----------
@@ -565,17 +568,23 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             rows = [t for t in rows if str((t["category_info"] or {}).get("id")) == q["category"]]
         return rows
 
+    def is_transfer(t: dict) -> bool:
+        return bool(t.get("transfer")) or (t["category_info"] or {}).get("name") == TRANSFER_CATEGORY
+
     @app.get("/search", response_class=HTMLResponse)
     async def search_page(request: Request):
         q = {k: v for k, v in request.query_params.items() if v}
         rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
         more = len(rows) > 1000
-        out = sum(t["amount"] for t in rows if t["amount"] > 0)
-        inflow = -sum(t["amount"] for t in rows if t["amount"] < 0)
+        # Totals leave out money moving between your own accounts, unless you searched that category.
+        counted = rows if q.get("category") else [t for t in rows if not is_transfer(t)]
+        out = sum(t["amount"] for t in counted if t["amount"] > 0)
+        inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
             "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
             "total_out": out, "total_in": inflow, "export_query": urlencode(q),
+            "excluded": len(rows) - len(counted),
         })
 
     @app.get("/export.csv")
@@ -682,7 +691,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             conn.execute("UPDATE transactions SET reviewed=?, flagged=? WHERE source=? AND id=?",
                          (1 if body.get("reviewed") else 0, 1 if body.get("flagged") else 0, source, tid))
-        return {"ok": True}
+            row = conn.execute("SELECT transfer_peer FROM transactions WHERE source=? AND id=?", (source, tid)).fetchone()
+            peer = row["transfer_peer"] if row else None
+            if peer:  # reviewing one side of a transfer reviews the other
+                conn.execute("UPDATE transactions SET reviewed=? WHERE source=? AND id=?",
+                             (1 if body.get("reviewed") else 0, source, peer))
+        return {"ok": True, "peer": peer}
 
     return app
 

@@ -789,3 +789,27 @@ def test_bill_account_choice_overrides_last_charge(tmp_path, monkeypatch):
         assert c.post("/api/bills", json={**body, "account_id": ""}, headers=H).status_code == 200  # back to automatic
         c.post("/api/view/account-filter", json={"account": "card"}, headers=H)
         assert "Phone Co" in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+
+
+# ---------------------------------------------------------------- 1.1.0: transfers and card payments
+
+def test_card_payment_pairs_reviews_together_and_skips_search_totals(tmp_path, monkeypatch):
+    rows = [("pay", "chk", "2026-11-03", "CARD A AUTOPAY", None, 500.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 0),
+            ("rcv", "card", "2026-11-04", "PAYMENT THANK YOU", None, -500.0, 0, "TRANSFER_IN", "TRANSFER_IN_ACCOUNT_TRANSFER", 0),
+            ("buy", "card", "2026-11-04", "HARDWARE BARN", "Hardware Barn", 40.0, 0, "GENERAL_MERCHANDISE", "X", 0),
+            # Same amount as a purchase refund: neither side is a transfer, so no pair.
+            ("ref", "card", "2026-11-05", "HARDWARE BARN", "Hardware Barn", -40.0, 0, "GENERAL_MERCHANDISE", "X", 0)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 1000, 1000),
+                                                       ("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:  # startup pairs existing history
+        c.cookies.set("finance_session", "tok")
+        with db.connect() as conn:
+            peer = {r["id"]: r["transfer_peer"] for r in conn.execute("SELECT id, transfer_peer FROM transactions")}
+        assert peer == {"pay": "rcv", "rcv": "pay", "buy": None, "ref": None}
+        page_html = c.get("/").text
+        assert "⇄ To Card A" in page_html and "⇄ From Checking" in page_html
+        assert c.post("/api/transactions/plaid/pay/review", json={"reviewed": True}, headers=H).json()["peer"] == "rcv"
+        with db.connect() as conn:
+            assert conn.execute("SELECT reviewed FROM transactions WHERE id='rcv'").fetchone()[0] == 1
+        s = c.get("/search?start=2026-11-01").text
+        assert "out $40.00 · in $40.00 · not counting 2 transfers" in s
