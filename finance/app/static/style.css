@@ -65,6 +65,8 @@ body::before {
   background-size: 100px 20px;
   opacity: 0.1;
 }
+/* Phones draw the thin wave lines at 3x density, which makes them read fainter than on desktop. */
+@media (max-width: 700px) { body::before { opacity: 0.2; } }
 .wrap { position: relative; z-index: 1; }
 
 .wrap {
