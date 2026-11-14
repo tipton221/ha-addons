@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from .bills import AMOUNT_TOLERANCE, normalize
+from .bills import bill_matches, bill_series, bill_status, normalize
 from .db import Database
 
 import re
@@ -114,8 +114,12 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
     with db.connect() as conn:
         cats = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM categories")}
         rules = {r["merchant_key"]: dict(r) for r in conn.execute("SELECT * FROM merchant_rules")}
-        all_bills = {r["id"]: dict(r) for r in conn.execute("SELECT id, name, match, amount, color, varies, kind, active FROM bills")}
-        bills = [b for b in all_bills.values() if b["active"]]
+    # Bills with their schedules (next date, average amount for varying ones) for automatic tags.
+    # Ended (stale) bills still tag their old charges.
+    all_bills = {b["id"]: b for b in bill_status(db)}
+    bills = [b for b in all_bills.values() if b["active"]]
+    series = bill_series(db, bills) if bills else {}
+    with db.connect() as conn:
         peer_ids = [t["transfer_peer"] for t in txns if t.get("transfer_peer")]
         peers = {r["id"]: r["label"] for r in conn.execute(
             "SELECT t.id, COALESCE(a.display_name, a.name) AS label FROM transactions t "
@@ -140,9 +144,11 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
             t["bill"] = all_bills.get(t["bill_id"])  # chosen in the editor
         elif t.get("bill_id") is None and not t["transfer"] and t["amount"] != 0:
             amount, income = abs(t["amount"]), t["amount"] < 0
+            d = date.fromisoformat(t["date"])
             for b in bills:
-                if (b["kind"] == "income") == income and b["match"] and b["match"] in key and (b["varies"] or
-                        abs(amount - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], amount)):
+                if b.get("archived_on") and t["date"] > b["archived_on"]:
+                    continue  # archived: keeps tagging old charges, not new ones
+                if (b["kind"] == "income") == income and bill_matches(b, key, amount, d, series.get(b["id"])):
                     t["bill"] = b
                     break
     return txns

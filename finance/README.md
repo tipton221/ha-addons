@@ -43,7 +43,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.4.0:
+Version 1.5.0:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
@@ -57,5 +57,7 @@ Version 1.4.0:
 - Recurring income (paychecks every 2 weeks, interest) next to bills, with averages for varying amounts. Income shows in Scheduled and never changes coverage. Mark one as your paycheck and its dates become your paydays for coverage (the manual payday setting is the fallback).
 - A "Pending only" toggle on the home list shows every pending transaction, reviewed or not, for the chosen account.
 - Accounts lists every renamed merchant with the bank's name and transaction count, and Undo restores the bank's name.
+- Automatic bill tags check amount and timing, not just the merchant: a fixed bill needs a close amount plus a repeat about one cycle away (or its scheduled date), or the exact amount repeating one cycle away (an older price). Varying bills need their scheduled date or a charge about a cycle away. One-off orders from the same merchant are not tagged.
+- Archive a bill or income when it ends: it leaves coverage and Scheduled, moves to an Archived list, and keeps tagging charges up to the archive date. Restore brings it back; Delete removes it and its tags.
 - Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), the card each bill is paid with (the card of its last charge unless you pick one), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.

@@ -494,6 +494,9 @@ details:not(.add) > summary { padding: 6px 0; font-weight: 600; }
 .editor-form .sheet-actions { margin-top: 22px; }
 .editor-form label.inline { margin: 16px 0 6px; }
 .wide-btn { width: 100%; margin-top: 18px; }
+.bill-manage { display: flex; gap: 10px; }
+.bill-manage .wide-btn { flex: 1; }
+.bill-manage + .hint { margin-top: 10px; }
 #edit-sheet { padding-top: 10px; }
 [hidden] { display: none !important; }
 

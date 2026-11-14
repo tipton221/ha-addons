@@ -312,7 +312,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                                          + ("AND account_id=?" if selected else ""),
                                          (selected,) if selected else ()).fetchone()["n"]
         # Every scheduled bill, furthest out first so the next one sits at the bottom (like YNAB).
-        upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"]
+        upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"] and not b["archived_on"]
                            and (not selected or b["account_id"] == selected)),
                           key=lambda b: b["next_due"], reverse=True)
         return templates.TemplateResponse(request, "home.html", {
@@ -434,9 +434,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     def bill_choices(income: bool) -> list[dict]:
         with db.connect() as conn:
-            return [{"id": r["id"], "name": r["name"]} for r in conn.execute(
-                "SELECT id, name FROM bills WHERE kind=? ORDER BY name COLLATE NOCASE",
-                ("income" if income else "bill",))]
+            return [{"id": r["id"], "name": r["name"] + (" (archived)" if r["archived_on"] else "")}
+                    for r in conn.execute("SELECT id, name, archived_on FROM bills WHERE kind=? "
+                                          "ORDER BY archived_on IS NOT NULL, name COLLATE NOCASE",
+                                          ("income" if income else "bill",))]
 
     @app.post("/api/transactions/{source}/{tid}")
     async def edit_transaction(source: str, tid: str, request: Request):
@@ -611,10 +612,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def bills_page(request: Request):
         today = datetime.now(PACIFIC).date()
         everything = bill_status(db, today)
+        archived = [b for b in everything if b["archived_on"]]
+        everything = [b for b in everything if not b["archived_on"]]
         bills = [b for b in everything if b["kind"] != "income"]
         income = [b for b in everything if b["kind"] == "income"]
         return templates.TemplateResponse(request, "bills.html", {
-            "bills": bills, "income": income, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
+            "bills": bills, "income": income, "archived": archived, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
             "cov": coverage(db, schedule(), today),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
@@ -681,6 +684,17 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 conn.execute("UPDATE transactions SET bill_id=? WHERE source='plaid' AND id=?",
                              (bill_id, str(body["from_txn"])))
         return {"ok": True, "id": bill_id}
+
+    @app.post("/api/bills/{bill_id}/archive")
+    async def archive_bill(bill_id: int, request: Request):
+        """Archive (keep tagging charges up to today, drop from coverage and Scheduled) or restore."""
+        body = await request.json()
+        with db.connect() as conn:
+            if body.get("restore"):
+                conn.execute("UPDATE bills SET archived_on=NULL WHERE id=?", (bill_id,))
+            else:
+                conn.execute("UPDATE bills SET archived_on=?, is_payday=0 WHERE id=?", (today().isoformat(), bill_id))
+        return {"ok": True}
 
     @app.post("/api/bills/{bill_id}/delete")
     async def delete_bill(bill_id: int):
