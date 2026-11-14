@@ -522,7 +522,6 @@ const sheet = {
     if (d.time) rows.push(["Time", d.time]);
     if (d.authorized_date) rows.push(["Purchased", fmt(d.authorized_date)]);
     if (d.authorized_date) rows.push(["Posted", fmt(d.posted_date)]);
-    if (d.channel) rows.push(["Paid", d.channel]);
     if (d.street || d.place) {
       rows.push(["Where", [d.street, d.place, d.country].filter(Boolean).join("\n") + (d.store ? `\nStore ${d.store}` : "")]);
     }

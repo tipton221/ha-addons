@@ -403,7 +403,6 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                            "ach", "deposit", "withdrawal", "web", "card", "recurring", "aplpay", "applepay",
                            "venmo", "zelle", "atm", "fee", "interest", "mobile", "point", "sale", "pp"}
 
-    PAYMENT_CHANNELS = {"in store": "In store", "online": "Online"}
     AMAZON_TRANSACTIONS = "https://www.amazon.com/cpe/yourpayments/transactions"
 
     def local_time(value: str | None) -> str | None:
@@ -443,7 +442,6 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "time": local_time(raw.get("authorized_datetime")) or local_time(raw.get("datetime")),
             "authorized_date": t.get("authorized_date") if t.get("authorized_date") != t["date"] else None,
             "posted_date": t["date"],
-            "channel": PAYMENT_CHANNELS.get(raw.get("payment_channel")),
             "street": street, "place": place or None, "store": loc.get("store_number"),
             "country": loc.get("country") if loc.get("country") not in (None, "US") else None,
             "maps": maps,

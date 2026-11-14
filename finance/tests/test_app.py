@@ -1052,7 +1052,7 @@ def test_filters_reset_accounts_short_names_visibility_and_details(tmp_path, mon
         assert "still counts in coverage" in c.get("/accounts").text
         # Details from Plaid's record.
         d = c.get("/api/transactions/plaid/a1").json()["details"]
-        assert d["time"] == "10:42\u202fam" and d["channel"] == "In store" and d["store"] == "42"
+        assert d["time"] == "10:42\u202fam" and "channel" not in d and d["store"] == "42"
         assert d["street"] == "100 Main St" and d["place"] == "Springfield, WA 98000"
         assert d["maps"].startswith("https://maps.apple.com/?ll=47.1,-122.2")
         assert d["logo"].endswith("cafe.png") and d["counterparties"] == [{"name": "Square", "type": "payment terminal"}]
