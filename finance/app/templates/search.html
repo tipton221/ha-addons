@@ -5,30 +5,59 @@
 {% block content %}
 <header class="top"><h1>Search</h1></header>
 
-<form class="card search" method="get" action="/search">
+<form class="card search" method="get" action="/search" id="search-form">
   <label class="wide">Merchant, description, or note<input name="q" type="search" value="{{ q.q or '' }}" placeholder="Amazon"></label>
+
+  <p class="filter-label">When</p>
+  <div class="chips" id="quick-dates">
+    {% for r in quick.months %}<button type="button" class="filter quick {% if q.start == r.start and q.end == r.end %}on{% endif %}" data-start="{{ r.start }}" data-end="{{ r.end }}">{{ r.label }}</button>{% endfor %}
+  </div>
+  <div class="chips">
+    {% for r in quick.years %}<button type="button" class="filter quick {% if q.start == r.start and q.end == r.end %}on{% endif %}" data-start="{{ r.start }}" data-end="{{ r.end }}">{{ r.label }}</button>{% endfor %}
+  </div>
   <div class="grid2">
-    <label>From<input name="start" type="date" value="{{ q.start or '' }}"></label>
-    <label>To<input name="end" type="date" value="{{ q.end or '' }}"></label>
+    {# Text fields until tapped, so an empty date shows "Any" instead of a grayed-out today. #}
+    <label>From<input name="start" type="{{ 'date' if q.start else 'text' }}" class="lazy-date" value="{{ q.start or '' }}" placeholder="Any"></label>
+    <label>To<input name="end" type="{{ 'date' if q.end else 'text' }}" class="lazy-date" value="{{ q.end or '' }}" placeholder="Any"></label>
     <label>Min amount<input name="min" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ q.min or '' }}"></label>
     <label>Max amount<input name="max" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ q.max or '' }}"></label>
-    <label>Account
-      <select name="account">
-        <option value="">All accounts</option>
-        {% for a in accounts if a.visibility == "everyday" %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
-        {% set less = accounts | selectattr("visibility", "ne", "everyday") | list %}
-        {% if less %}<optgroup label="Less used and archived">
-        {% for a in less %}<option value="{{ a.account_id }}" {% if q.account == a.account_id %}selected{% endif %}>{{ a.label }}{% if a.visibility == "archived" %} (archived){% endif %}</option>{% endfor %}
-        </optgroup>{% endif %}
-      </select>
-    </label>
-    <label>Category
-      <select name="category">
-        <option value="">All categories</option>
-        {% for c in categories %}<option value="{{ c.id }}" {% if q.category == c.id | string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
-      </select>
-    </label>
   </div>
+
+  <p class="filter-label">Money</p>
+  <div class="scope" role="radiogroup" aria-label="Money in or out">
+    <label><input type="radio" name="flow" value="" {% if not q.flow %}checked{% endif %}><span>Both</span></label>
+    <label><input type="radio" name="flow" value="out" {% if q.flow == "out" %}checked{% endif %}><span>Spent</span></label>
+    <label><input type="radio" name="flow" value="in" {% if q.flow == "in" %}checked{% endif %}><span>Received</span></label>
+  </div>
+  <div class="chips">
+    <label class="filter toggle-chip"><input type="checkbox" name="noted" value="1" {% if q.noted %}checked{% endif %}><span>Has a note</span></label>
+    <label class="filter toggle-chip"><input type="checkbox" name="billed" value="1" {% if q.billed %}checked{% endif %}><span>↻ Bill or income</span></label>
+  </div>
+
+  {% set chosen_accounts = q.account or [] %}
+  <details class="filter-group" {% if chosen_accounts %}open{% endif %}>
+  <summary><span class="filter-label">Accounts</span><span class="muted small">{{ "%d chosen" % chosen_accounts | length if chosen_accounts else "Any" }}</span><span class="chev-down" aria-hidden="true">›</span></summary>
+  <div class="chips">
+    {% set ns = namespace(more=0) %}
+    {% for a in accounts %}
+    {% set extra = a.visibility != "everyday" and a.account_id not in chosen_accounts %}
+    {% if extra %}{% set ns.more = ns.more + 1 %}{% endif %}
+    <label class="filter toggle-chip{% if extra %} less-used{% endif %}" title="{{ a.label }}"{% if extra %} hidden{% endif %}><input type="checkbox" name="account" value="{{ a.account_id }}" {% if a.account_id in chosen_accounts %}checked{% endif %}><span>{{ a.pill }}</span></label>
+    {% endfor %}
+    {% if ns.more %}<button type="button" class="filter more-chips">More ({{ ns.more }})</button>{% endif %}
+  </div>
+  </details>
+
+  {% set chosen_cats = q.category or [] %}
+  <details class="filter-group" {% if chosen_cats %}open{% endif %}>
+  <summary><span class="filter-label">Categories</span><span class="muted small">{{ "%d chosen" % chosen_cats | length if chosen_cats else "Any" }}</span><span class="chev-down" aria-hidden="true">›</span></summary>
+  <div class="chips">
+    {% for c in categories %}
+    <label class="filter toggle-chip cat-chip cat-{{ c.id }}"><input type="checkbox" name="category" value="{{ c.id }}" {% if c.id | string in chosen_cats %}checked{% endif %}><span>{{ c.name }}</span></label>
+    {% endfor %}
+  </div>
+  </details>
+
   <div class="row-actions">
     <button type="submit" class="primary">Search</button>
     <a class="button ghost" href="/search">Clear</a>

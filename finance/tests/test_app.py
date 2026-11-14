@@ -1095,3 +1095,56 @@ def test_plaid_link_gets_a_per_page_style_nonce(tmp_path, monkeypatch):
         assert f"style-src 'self' 'nonce-{tag.group(1)}'" in policy and "unsafe-inline" not in policy
         nonces.append(tag.group(1))
     assert nonces[0] != nonces[1]  # a new nonce for every page
+
+
+def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
+    rows = [("s1", "card", "2026-11-03", "BOOK BARN", "Book Barn", 12.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("s2", "card2", "2026-11-04", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_RESTAURANT", 1),
+            ("s3", "card3", "2026-11-05", "TOY TOWN", "Toy Town", 30.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("s4", "card", "2026-11-06", "REFUND BOOK BARN", "Book Barn", -5.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                       ("card2", "Card B", "credit", 0, None),
+                                                       ("card3", "Card C", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET note='gift' WHERE id='s3'")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        def found(qs):
+            page = c.get("/search?" + qs).text.split("result")[1]
+            return {n for n in ("Book Barn", "Corner Cafe", "Toy Town") if n in page}
+        assert found("account=card&account=card2") == {"Book Barn", "Corner Cafe"}
+        cats = {x["name"]: x["id"] for x in c.get("/api/categories").json()["categories"]}
+        assert found(f"category={cats['Restaurants']}&category={cats['Shopping']}") == {"Book Barn", "Corner Cafe", "Toy Town"}
+        assert found("flow=in") == {"Book Barn"} and found("noted=1") == {"Toy Town"}
+        page = c.get("/search").text
+        assert 'class="filter quick' in page and 'type="text" class="lazy-date"' in page
+        assert "account=card&amp;account=card2" in c.get("/search?account=card&account=card2").text  # export keeps both
+        assert c.get("/export.csv?account=card2").text.count("Corner Cafe") == 1
+
+
+def test_new_connection_lists_accounts_right_away_and_can_choose_accounts(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch, plaid_client_id="cid", plaid_secret="sec")
+    seen = {}
+
+    class LinkPlaid(FakePlaid):
+        async def exchange(self, public_token):
+            return "access-1", "item-1"
+
+        async def link_token(self, access_token=None, choose_accounts=False):
+            seen["args"] = (access_token, choose_accounts)
+            return "link-token"
+
+    fake = LinkPlaid([page(cursor="c1")], accounts=[{"account_id": "new1", "name": "Spare Card", "mask": "0001",
+                                                    "type": "credit", "balances": {"current": 0}}])
+    db = Database(tmp_path / "finance.db")
+    seed(db, [], accounts=[])
+    app = create_app(settings, plaid=fake, background_sync=False)
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/plaid/exchange", json={"public_token": "p", "institution": {"name": "Acme Bank"}},
+                      headers=H).status_code == 200
+        with db.connect() as conn:
+            assert conn.execute("SELECT name FROM accounts WHERE account_id='new1'").fetchone()[0] == "Spare Card"
+        c.post("/api/plaid/link-token", json={"item_id": "item-1", "accounts": True}, headers=H)
+        assert seen["args"] == ("access-1", True)
+        assert 'class="ghost choose-accounts"' in c.get("/accounts").text

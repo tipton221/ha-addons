@@ -19,9 +19,20 @@
     <div class="total {{ 'ok' if cov.ok else 'short' }}"><dt>Left</dt><dd>{{ cov.left | money }}</dd></div>
   </dl>
   {% if cov.due %}
-  <ul class="list">
+  <div class="due-head">
+    <h3>Due before payday</h3>
+    <span class="muted small">{{ cov.due | length }} bill{{ "" if cov.due | length == 1 else "s" }} · {{ cov.due_total | money }}</span>
+  </div>
+  <ul class="list due-list">
     {% for b in cov.due %}
-    <li class="plain-row"><div class="grow"><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span><span class="muted small">{{ b.next_due.isoformat() | shortdate }}</span></div><span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span></li>
+    <li class="edit-row" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
+      <div class="due-date"><span>{{ b.next_due.strftime("%b") }}</span><strong>{{ b.next_due.day }}</strong></div>
+      <div class="grow">
+        <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
+        <span class="muted small">{{ cadence_label[b.cadence] }}{% if b.varies %} · {% if b.samples %}average of the last {{ b.samples }}{% else %}no charges found yet{% endif %}{% endif %}{% for a in accounts if a.account_id == b.account_id %} · {{ a.pill }}{% endfor %}</span>
+      </div>
+      <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>
+    </li>
     {% endfor %}
   </ul>
   {% endif %}

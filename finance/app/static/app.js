@@ -93,8 +93,9 @@ function plaidHandler(token, extra) {
         } else {
           await api("/api/plaid/exchange", { public_token: publicToken, institution: metadata.institution });
         }
-        say("Connected. The first sync can take a few minutes.");
-        setTimeout(() => { location.href = "/"; }, 1500);
+        say(state.itemId ? "Updated. New accounts are listed now; their transactions follow in a few minutes."
+                         : "Connected. Accounts are listed now; the first transactions can take a few minutes.");
+        setTimeout(() => { location.href = "/accounts"; }, 1500);
       } catch (e) { say(e.message, true); }
     },
     onExit: (err) => {
@@ -104,10 +105,11 @@ function plaidHandler(token, extra) {
   });
 }
 
-async function openLink(itemId) {
+async function openLink(itemId, chooseAccounts) {
   say("");
   try {
-    const { link_token } = await api("/api/plaid/link-token", itemId ? { item_id: itemId } : {});
+    const { link_token } = await api("/api/plaid/link-token",
+                                     itemId ? { item_id: itemId, accounts: !!chooseAccounts } : {});
     // Saved so the OAuth return page can resume the same Link session.
     localStorage.setItem(LINK_KEY, JSON.stringify({ token: link_token, itemId: itemId || null }));
     plaidHandler(link_token).open();
@@ -958,10 +960,50 @@ const pages = {
     on("sync", syncNow);
     document.querySelectorAll(".reconnect").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item)));
+    document.querySelectorAll(".choose-accounts").forEach((b) =>
+      b.addEventListener("click", () => openLink(b.dataset.item, true)));
   },
 
   search() {
     bindLoadMore(document.body);
+    const form = document.getElementById("search-form");
+    if (!form) return;
+    // Date fields stay plain text ("Any") until tapped, then become date pickers.
+    form.querySelectorAll(".lazy-date").forEach((el) => {
+      el.addEventListener("focus", () => {
+        if (el.type === "date") return;
+        el.type = "date";
+        try { el.showPicker(); } catch (e) { /* not supported or not allowed */ }
+      });
+      el.addEventListener("blur", () => { if (!el.value) el.type = "text"; });
+    });
+    // Quick month and year picks fill the dates and search.
+    form.addEventListener("click", (ev) => {
+      const quick = ev.target.closest(".quick");
+      if (quick) {
+        const on = quick.classList.contains("on");
+        form.querySelectorAll(".quick").forEach((b) => b.classList.remove("on"));
+        for (const [name, value] of [["start", quick.dataset.start], ["end", quick.dataset.end]]) {
+          const el = form.elements[name];
+          el.type = on ? "text" : "date";
+          el.value = on ? "" : value;
+        }
+        form.requestSubmit();
+        return;
+      }
+      const more = ev.target.closest(".more-chips");
+      if (more) {
+        more.closest(".chips").querySelectorAll(".less-used").forEach((c) => { c.hidden = false; });
+        more.remove();
+      }
+    });
+    // Leave empty fields out of the address.
+    form.addEventListener("submit", () => {
+      form.querySelectorAll("input[name], select[name]").forEach((el) => {
+        if ((el.type === "text" || el.type === "search" || el.type === "date") && !el.value) el.disabled = true;
+        if (el.type === "radio" && el.checked && !el.value) el.disabled = true;
+      });
+    });
   },
 
   compare() {

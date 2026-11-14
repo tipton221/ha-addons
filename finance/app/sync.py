@@ -151,8 +151,8 @@ async def sync_all(db: Database, plaid: Plaid) -> dict:
     for item in items:
         name = item["institution"] or item["item_id"]
         try:
+            await refresh_accounts(db, plaid, item)  # first, so a new account appears even if transactions fail
             results[name] = await sync_item(db, plaid, item)
-            await refresh_accounts(db, plaid, item)
         except PlaidError as e:
             log.warning("Plaid sync failed for %s: %s", name, e)
             status = "login_required" if e.error_code in LOGIN_ERRORS else "error"
