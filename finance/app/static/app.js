@@ -286,6 +286,9 @@ const sheet = {
         sel.appendChild(o);
       }
       form.scope.value = t.category_is_override ? "this" : "merchant";
+      document.getElementById("sheet-hint").textContent = t.name_is_override
+        ? "This name came from YNAB and applies to just this transaction."
+        : "A new name always applies to every transaction from this merchant, past and future.";
       document.getElementById("sheet-bank").textContent =
         t.bank_name && t.bank_name !== t.display_name ? `Bank description: ${t.bank_name}` : "";
       openSheet(el);
@@ -314,7 +317,7 @@ const sheet = {
     try {
       await api(`/api/transactions/${t.source}/${encodeURIComponent(t.id)}`, body);
       this.close();
-      toast(body.display_name !== undefined || scope === "merchant" && body.category_id !== undefined
+      toast((body.display_name !== undefined && !t.name_is_override) || scope === "merchant" && body.category_id !== undefined
         ? "Saved for every transaction from this merchant" : "Saved");
       setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, true); }
@@ -601,6 +604,15 @@ const pages = {
         if (sel.value) list.push(sel.value);
       });
       try { await api("/api/links", { links }); location.reload(); } catch (e) { say(e.message, true); }
+    });
+    const names = document.getElementById("ynab-names");
+    if (names) names.addEventListener("click", async () => {
+      names.disabled = true;
+      try {
+        const r = await api("/api/ynab-names");
+        toast(`${r.merchants} merchants renamed, ${r.one_off} one-off names, ${r.notes} notes`);
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) { toast(e.message, true); names.disabled = false; }
     });
   },
 

@@ -137,7 +137,8 @@ class Database:
         """Columns added after the first release (0.4.0)."""
         wanted = {
             "transactions": [("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL"),
-                             ("transfer_peer", "TEXT")],  # id of the other side of a transfer or card payment,
+                             ("transfer_peer", "TEXT"),
+                             ("name_override", "TEXT")],  # one-off name (from YNAB) for this transaction only  # id of the other side of a transfer or card payment,
             "accounts": [("display_name", "TEXT")],
             "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
                   ("account_id", "TEXT")],  # chosen card; NULL means the card of the last charge,

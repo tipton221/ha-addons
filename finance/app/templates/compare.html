@@ -50,6 +50,12 @@
   {% endif %}
 </section>
 
+<section class="card">
+  <div class="card-head"><h2>YNAB names</h2><button id="ynab-names" class="ghost">Apply again</button></div>
+  <p class="muted small">Posted transactions on linked accounts take the payee and memo of the matching YNAB transaction (same amount, within 4 days). A merchant with at least two matches that all use one payee is renamed for past and future transactions; mixed ones get a name per transaction. Merchants you renamed yourself and existing notes are kept.</p>
+  {% if names %}<p class="small" id="ynab-names-result">Last run: {{ names.matched }} matched · {{ names.merchants }} merchants renamed · {{ names.one_off }} one-off names · {{ names.notes }} notes added</p>{% endif %}
+</section>
+
 {% if c.pairs %}
 <p class="muted small">Compared from each account's first Plaid transaction through {{ c.end | shortdate }}. The last few days are left out because either source may not have them yet. Pending charges are not compared.</p>
 {% endif %}

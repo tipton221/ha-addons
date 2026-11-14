@@ -813,3 +813,40 @@ def test_card_payment_pairs_reviews_together_and_skips_search_totals(tmp_path, m
             assert conn.execute("SELECT reviewed FROM transactions WHERE id='rcv'").fetchone()[0] == 1
         s = c.get("/search?start=2026-11-01").text
         assert "out $40.00 · in $40.00 · not counting 2 transfers" in s
+
+
+# ---------------------------------------------------------------- 1.2.0: YNAB names
+
+def test_ynab_names_rename_merchants_one_offs_and_memos(tmp_path, monkeypatch):
+    import json as _json
+    rows = [("c1", "card", "2026-10-01", "SQ *BEAN CFE 0042", None, 4.5, 0, "FOOD_AND_DRINK", "X", 1),
+            ("c2", "card", "2026-10-08", "SQ *BEAN CFE 0042", None, 5.25, 0, "FOOD_AND_DRINK", "X", 1),
+            ("m1", "card", "2026-10-03", "MKTPLACE PMTS", None, 20.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("m2", "card", "2026-10-04", "MKTPLACE PMTS", None, 31.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("k1", "card", "2026-10-05", "KEPT NAME CO", None, 9.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("s1", "card", "2026-10-06", "PAYPAL *XYZ", None, 12.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    ynab = [("y1", "2026-10-02", 4.5, "Bean Cafe", "oat latte"), ("y2", "2026-10-08", 5.25, "Bean Cafe", ""),
+            ("y3", "2026-10-03", 20.0, "Book Shop", ""), ("y4", "2026-10-05", 31.0, "Toy Store", "gift"),
+            ("y5", "2026-10-05", 9.0, "Other Name", ""), ("y6", "2026-10-07", 12.0, "Music App", "")]
+    with db.connect() as conn:
+        conn.execute("INSERT INTO accounts (account_id, source, name, type) VALUES ('ynab:a', 'ynab', 'Card A', 'creditCard')")
+        conn.execute("INSERT INTO account_links VALUES ('card', 'ynab:a')")
+        for i, d, amt, payee, memo in ynab:
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, merchant, amount, pending, raw, reviewed) "
+                         "VALUES ('ynab', ?, 'ynab:a', ?, ?, ?, ?, 0, ?, 1)", (i, d, payee, payee, amt, _json.dumps({"memo": memo})))
+        conn.execute("INSERT INTO merchant_rules (merchant_key, display_name) VALUES ('kept name co', 'My Name')")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/ynab-names", json={}, headers=H).json()
+        assert r == {"matched": 6, "merchants": 1, "one_off": 3, "notes": 2}
+        assert c.get("/api/transactions/plaid/s1").json()["name_is_override"]  # single match: one-off only
+        names = {i: c.get(f"/api/transactions/plaid/{i}").json() for i in ("c1", "c2", "m1", "m2", "k1")}
+        assert [names[i]["display_name"] for i in ("c1", "c2", "m1", "m2", "k1")] == \
+            ["Bean Cafe", "Bean Cafe", "Book Shop", "Toy Store", "My Name"]
+        assert names["c1"]["note"] == "oat latte" and names["m2"]["note"] == "gift"
+        assert names["m1"]["name_is_override"] and not names["c1"]["name_is_override"]
+        # Renaming a one-off name changes only that transaction.
+        c.post("/api/transactions/plaid/m1", json={"display_name": "Used Books"}, headers=H)
+        assert c.get("/api/transactions/plaid/m2").json()["display_name"] == "Toy Store"
+        assert "Used Books" in c.get("/search?q=used").text
