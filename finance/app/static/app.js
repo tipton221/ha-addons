@@ -525,7 +525,10 @@ const pages = {
       btn.disabled = true;
       try {
         await api(`/api/transactions/${li.dataset.source}/${encodeURIComponent(li.dataset.id)}/review`, { reviewed: true });
-        await fold(li, 250);
+        // The other side of a transfer is reviewed with it.
+        const peer = li.dataset.peer && document.querySelector(`#inbox .txn-item[data-id="${CSS.escape(li.dataset.peer)}"]`);
+        if (peer) peer.querySelector(".tick")?.classList.add("checked");
+        await Promise.all([fold(li, 250), peer ? fold(peer, 250) : null]);
         updateCount();
         refresh(["all"]);  // the reviewed transaction now belongs in All transactions
       } catch (e) { btn.classList.remove("checked"); btn.disabled = false; toast(e.message, true); }

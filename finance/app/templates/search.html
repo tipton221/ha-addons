@@ -35,7 +35,7 @@
 <section class="card">
   <div class="card-head">
     <h2>{% if searched %}{{ count }} result{{ "" if count == 1 else "s" }}{% else %}Latest transactions{% endif %}</h2>
-    {% if searched %}<span class="muted small">out {{ total_out | money }} · in {{ total_in | money }}</span>{% endif %}
+    {% if searched %}<span class="muted small">out {{ total_out | money }} · in {{ total_in | money }}{% if excluded %} · not counting {{ excluded }} transfer{{ "" if excluded == 1 else "s" }}{% endif %}</span>{% endif %}
   </div>
   {% if truncated %}<p class="muted small">Showing the first 1,000. Narrow the search, or export to get everything.</p>{% endif %}
   {% if groups %}{% include "_rows.html" %}{% else %}<p class="empty">Nothing found.</p>{% endif %}
