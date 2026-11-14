@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
 from .db import Database
 from .ledger import pair_transfers
@@ -142,6 +145,12 @@ async def refresh_accounts(db: Database, plaid: Plaid, item: dict) -> None:
                  a.get("mask"), a.get("type"), a.get("subtype"), b.get("current"),
                  b.get("available"), b.get("iso_currency_code")),
             )
+            # Today's balance for the history (the last sync of the day wins).
+            conn.execute(
+                "INSERT INTO balance_history (account_id, day, current_balance, available_balance) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(account_id, day) DO UPDATE SET current_balance=excluded.current_balance, "
+                "available_balance=excluded.available_balance",
+                (a["account_id"], datetime.now(PACIFIC).date().isoformat(), b.get("current"), b.get("available")))
 
 
 async def sync_all(db: Database, plaid: Plaid) -> dict:

@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS plaid_items (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One balance per account per day (Pacific), kept from every sync, for net worth trends.
+CREATE TABLE IF NOT EXISTS balance_history (
+    account_id      TEXT NOT NULL,
+    day             TEXT NOT NULL,          -- YYYY-MM-DD, Pacific
+    current_balance REAL,
+    available_balance REAL,
+    PRIMARY KEY (account_id, day)
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     account_id      TEXT PRIMARY KEY,
     source          TEXT NOT NULL,

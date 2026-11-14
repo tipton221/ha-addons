@@ -43,7 +43,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.9.1:
+Version 1.10.0:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time; filters reset when the page reloads).
@@ -65,5 +65,6 @@ Version 1.9.1:
 - Bills shows the bills due before payday with their date, frequency, and card.
 - Each bank connection has an Accounts button to share another account from that bank (Plaid account selection). New connections list their accounts right away.
 - Moving between Inbox, Bills, Search, and Accounts slides the tab highlight (view transitions where supported).
+- Every sync keeps each account's balance for the day (balance_history), for net worth trends.
 - Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), the card each bill is paid with (the card of its last charge unless you pick one), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.

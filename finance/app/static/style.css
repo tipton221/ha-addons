@@ -609,3 +609,7 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 .filter-group[open] .chips { animation: drop .3s var(--ease); }
 
 .search .grid2 { grid-template-columns: 1fr 1fr; }  /* dates and amounts pair up even on phones */
+
+/* A card title stays on one line; side details (search totals) wrap below it when there is no room. */
+.card-head { flex-wrap: wrap; row-gap: 4px; }
+.card-head h2 { white-space: nowrap; }

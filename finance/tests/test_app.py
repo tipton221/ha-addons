@@ -1159,3 +1159,18 @@ def test_new_connection_lists_accounts_right_away_and_can_choose_accounts(tmp_pa
         fake._accounts.append({"account_id": "new2", "name": "Other Card", "mask": "0002", "type": "credit",
                                "balances": {"current": 0}})
         assert c.post("/api/plaid/updated", json={"item_id": "item-1", "selected": 2}, headers=H).json()["added"] == 1
+
+
+
+def test_each_sync_keeps_one_balance_per_account_per_day(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    acct = {"account_id": "acct1", "name": "Gold", "mask": "1001", "type": "credit",
+            "balances": {"current": 52.5, "available": 900.0, "iso_currency_code": "USD"}}
+    plaid = FakePlaid([page(cursor="c1"), page(cursor="c2")], accounts=[acct])
+    asyncio.run(sync_all(db, plaid))
+    acct["balances"]["current"] = 60.0
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM balance_history")]
+    assert len(rows) == 1 and rows[0]["current_balance"] == 60.0 and rows[0]["available_balance"] == 900.0
