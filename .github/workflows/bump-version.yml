@@ -13,6 +13,11 @@ on:
 permissions:
   contents: write
 
+# One bump at a time, so two quick merges do not race each other.
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
 jobs:
   bump:
     runs-on: ubuntu-latest
@@ -34,4 +39,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Finance $new: dependency updates"
-          git push
+          # main may have moved since this run started (another merge); rebase and retry.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            git pull --rebase origin main
+          done
+          exit 1

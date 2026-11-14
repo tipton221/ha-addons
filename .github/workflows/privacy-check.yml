@@ -15,7 +15,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Scan for personal terms
         env:
           PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
