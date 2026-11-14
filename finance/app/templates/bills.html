@@ -52,31 +52,40 @@
   </template>
 </section>
 
-<section class="card">
-  <div class="card-head">
-    <h2>Recurring bills</h2>
-    <button id="detect" class="ghost">Find new bills</button>
-  </div>
-  {% if bills %}
+{% macro bill_rows(items, income=False) %}
   <ul class="list bills">
-    {% for b in bills %}
-    <li class="edit-row {{ '' if b.active and not b.stale else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
+    {% for b in items %}
+    <li class="edit-row {{ '' if (b.active or income) and not b.stale else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
       <div class="grow">
         <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-        <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
+        <span class="muted small">{{ cadence_label[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · {{ "none found yet" if income else "no charge found" }}{% endif %}{% if not b.active and not income %} · not counted{% endif %}</span>
         {% for a in accounts if a.account_id == b.account_id %}<span class="muted small">{{ a.label }}</span>{% endfor %}
-        {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}
+        {% if b.stale %}<span class="small warn-text">None since {{ b.last_date | shortdate }}. {{ "Remove it if it ended." if income else "Not counted; remove it if it ended." }}</span>{% endif %}
       </div>
-      <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>
+      <span class="amount {% if income %}inflow{% endif %}">{% if b.varies %}≈ {% endif %}{% if income %}+{% endif %}{{ b.amount | money }}</span>
       <span class="chev" aria-hidden="true">›</span>
       <template id="bill-{{ b.id }}">{{ bill_form(b) }}</template>
     </li>
     {% endfor %}
   </ul>
-  {% else %}
+{% endmacro %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>Recurring bills</h2>
+    <button id="detect" class="ghost">Find new bills</button>
+  </div>
+  {% if bills %}{{ bill_rows(bills) }}{% else %}
   <p class="muted">No bills yet. They are detected after the first sync, or add one.</p>
   {% endif %}
-  <button class="add-btn" data-editor="bill-new">＋ Add a bill</button>
+  <button class="add-btn" data-editor="bill-new">＋ Add a bill or income</button>
   <template id="bill-new">{{ bill_form() }}</template>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Recurring income</h2>{% if income %}<span class="muted small">≈ +{{ monthly_income | money }} a month</span>{% endif %}</div>
+  {% if income %}{{ bill_rows(income, True) }}{% else %}
+  <p class="muted small">Paychecks, interest, and other regular deposits. Add one with "Add a bill or income" and choose Income, or open a deposit and pick "Make it recurring income" under Bill or income. Income shows in Scheduled but never changes coverage.</p>
+  {% endif %}
 </section>
 {% endblock %}

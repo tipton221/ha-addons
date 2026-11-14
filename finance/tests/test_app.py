@@ -846,7 +846,62 @@ def test_ynab_names_rename_merchants_one_offs_and_memos(tmp_path, monkeypatch):
             ["Bean Cafe", "Bean Cafe", "Book Shop", "Toy Store", "My Name"]
         assert names["c1"]["note"] == "oat latte" and names["m2"]["note"] == "gift"
         assert names["m1"]["name_is_override"] and not names["c1"]["name_is_override"]
-        # Renaming a one-off name changes only that transaction.
-        c.post("/api/transactions/plaid/m1", json={"display_name": "Used Books"}, headers=H)
+        # "Just this one" renames only that transaction.
+        c.post("/api/transactions/plaid/m1", json={"display_name": "Used Books", "scope": "this"}, headers=H)
         assert c.get("/api/transactions/plaid/m2").json()["display_name"] == "Toy Store"
         assert "Used Books" in c.get("/search?q=used").text
+        # "All from this merchant" replaces the one-off names on every transaction from it.
+        c.post("/api/transactions/plaid/m1", json={"display_name": "Marketplace", "scope": "merchant"}, headers=H)
+        assert [c.get(f"/api/transactions/plaid/{i}").json()["display_name"] for i in ("m1", "m2")] == ["Marketplace"] * 2
+
+
+
+# ---------------------------------------------------------------- 1.3.0: editor, bills from transactions, income
+
+def test_similar_merchants_bill_choice_income_and_rows(tmp_path, monkeypatch):
+    from datetime import timedelta
+    t = D.today()
+    day = lambda n: (t - timedelta(days=n)).isoformat()
+    rows = [("a1", "card", day(3), "AMAZON MKTPL*AB12CD", None, 20.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("a2", "card", day(4), "AMAZON MKTPL*ZZ98YX", None, 30.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("a3", "card", day(5), "AMAZON PRIME", None, 14.99, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("g1", "card", day(6), "GYM CLUB", None, 45.0, 0, "PERSONAL_CARE", "X", 1),
+            ("p1", "chk", day(9), "ACME HOSPITAL PAYROLL", None, -2000.0, 0, "INCOME", "INCOME_WAGES", 1),
+            ("p2", "chk", day(23), "ACME HOSPITAL PAYROLL", None, -2100.0, 0, "INCOME", "INCOME_WAGES", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                       ("chk", "Checking", "depository", 5000, 5000)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/transactions/plaid/a1").json()
+        assert {s["key"] for s in d["similar"]} == {"amazon mktpl zz yx", "amazon prime"}
+        # Rename with the similar merchants included: all three become Amazon.
+        c.post("/api/transactions/plaid/a1", json={"display_name": "Amazon", "scope": "merchant",
+                                                    "similar": [s["key"] for s in d["similar"]] + ["not a real key"]}, headers=H)
+        assert {c.get(f"/api/transactions/plaid/{i}").json()["display_name"] for i in ("a1", "a2", "a3")} == {"Amazon"}
+        # Make the gym charge a bill from the transaction; the form is filled in.
+        form = c.get("/api/bills/form?source=plaid&id=g1").text
+        assert 'value="Gym Club"' in form.replace("GYM CLUB", "Gym Club") or 'value="GYM CLUB"' in form
+        assert 'data-from-txn="g1"' in form and 'value="45.00"' in form
+        bid = c.post("/api/bills", json={"name": "Gym", "match": "gym club", "amount": "45", "from_txn": "g1"},
+                     headers=H).json()["id"]
+        assert c.get("/api/transactions/plaid/g1").json()["bill"] == "Gym"
+        # Mark it "not a bill": the tag goes away, and the bill no longer sees that charge.
+        c.post("/api/transactions/plaid/g1", json={"bill_id": "0"}, headers=H)
+        assert c.get("/api/transactions/plaid/g1").json()["bill"] is None
+        assert "no charge found" in c.get("/bills").text
+        # Recurring income: biweekly paycheck averaging the deposits, shown apart from bills.
+        c.post("/api/bills", json={"name": "Paycheck", "match": "acme hospital payroll", "kind": "income",
+                                   "cadence": "biweekly", "varies": True}, headers=H)
+        page = c.get("/bills").text
+        assert "Recurring income" in page and "+$2,050.00" in page
+        assert c.get("/api/transactions/plaid/p1").json()["bill"] == "Paycheck"
+        home = c.get("/").text
+        assert "Paycheck" in home.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        # Rows render for in-place refresh.
+        r = c.post("/api/rows", json={"rows": [{"id": "a1"}, {"id": "p1", "review": True}]}, headers=H).json()["rows"]
+        assert "Amazon" in r["a1"] and 'class="tick"' in r["p1"]
+        names = c.get("/api/merchant-names").json()["names"]
+        assert names[0] == "Amazon"
+        # Categories are alphabetical.
+        cats = [x["name"] for x in c.get("/api/categories").json()["categories"]]
+        assert cats == sorted(cats, key=str.lower)

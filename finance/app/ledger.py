@@ -95,7 +95,7 @@ def seed_categories(db: Database) -> None:
 
 def categories(db: Database) -> list[dict]:
     with db.connect() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM categories ORDER BY sort, name COLLATE NOCASE")]
+        return [dict(r) for r in conn.execute("SELECT * FROM categories ORDER BY name COLLATE NOCASE")]
 
 
 def merchant_key(t: dict) -> str:
@@ -114,7 +114,8 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
     with db.connect() as conn:
         cats = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM categories")}
         rules = {r["merchant_key"]: dict(r) for r in conn.execute("SELECT * FROM merchant_rules")}
-        bills = [dict(r) for r in conn.execute("SELECT id, name, match, amount, color, varies FROM bills WHERE active=1")]
+        all_bills = {r["id"]: dict(r) for r in conn.execute("SELECT id, name, match, amount, color, varies, kind, active FROM bills")}
+        bills = [b for b in all_bills.values() if b["active"]]
         peer_ids = [t["transfer_peer"] for t in txns if t.get("transfer_peer")]
         peers = {r["id"]: r["label"] for r in conn.execute(
             "SELECT t.id, COALESCE(a.display_name, a.name) AS label FROM transactions t "
@@ -135,10 +136,13 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
         if t.get("transfer_peer"):
             peer = peers.get(t["transfer_peer"])
             t["transfer"] = {"account": peer or "another account", "out": t["amount"] > 0}
-        elif t["amount"] > 0:
+        if t.get("bill_id"):
+            t["bill"] = all_bills.get(t["bill_id"])  # chosen in the editor
+        elif t.get("bill_id") is None and not t["transfer"] and t["amount"] != 0:
+            amount, income = abs(t["amount"]), t["amount"] < 0
             for b in bills:
-                if b["match"] and b["match"] in key and (b["varies"] or
-                        abs(t["amount"] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], t["amount"])):
+                if (b["kind"] == "income") == income and b["match"] and b["match"] in key and (b["varies"] or
+                        abs(amount - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], amount)):
                     t["bill"] = b
                     break
     return txns

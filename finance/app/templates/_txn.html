@@ -14,7 +14,7 @@
         {% if t.bill %}<span class="pill tag bill-{{ t.bill.id }}">↻ {{ t.bill.name }}</span>{% endif %}
         <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
       </div>
-      {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+      {% if t.note %}<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg><span>{{ t.note }}</span></div>{% endif %}
     </div>
     <span class="amount {% if t.amount < 0 %}inflow{% elif t.pending %}pending{% endif %}">{{ (0 - t.amount) | money }}</span>
     {% if review %}

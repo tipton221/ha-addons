@@ -49,17 +49,26 @@
     </div>
     <form id="sheet-form" autocomplete="off">
       <div class="group">
-        <div class="row"><label for="sheet-name" id="sheet-title">Name</label><input id="sheet-name" name="display_name" maxlength="80"></div>
+        <div class="row name-row"><label for="sheet-name" id="sheet-title">Name</label><input id="sheet-name" name="display_name" maxlength="80" autocomplete="off" autocapitalize="words" role="combobox" aria-autocomplete="list" aria-controls="name-suggest" aria-expanded="false"></div>
+        <ul class="suggest" id="name-suggest" role="listbox" hidden></ul>
         <div class="row"><label for="sheet-category">Category</label><select id="sheet-category" name="category_id"></select></div>
       </div>
-      <p class="section-label">Apply the category to</p>
-      <div class="scope" role="radiogroup" aria-label="Apply the category to">
+      <p class="section-label">Apply name and category to</p>
+      <div class="scope" role="radiogroup" aria-label="Apply name and category to">
         <label><input type="radio" name="scope" value="merchant" checked><span>All from this merchant</span></label>
         <label><input type="radio" name="scope" value="this"><span>Just this one</span></label>
       </div>
-      <p class="hint" id="sheet-hint">A new name always applies to every transaction from this merchant, past and future.</p>
+      <p class="hint" id="sheet-hint"></p>
+      <div class="similar" id="sheet-similar" hidden>
+        <label class="inline"><input type="checkbox" name="similar"> <span id="sheet-similar-text"></span></label>
+      </div>
+      <p class="section-label">Recurring</p>
       <div class="group">
-        <div class="row stack"><label for="sheet-note">Note</label><textarea id="sheet-note" name="note" maxlength="500" placeholder="Add a note"></textarea></div>
+        <div class="row"><label for="sheet-bill">Bill or income</label><select id="sheet-bill" name="bill_id"></select></div>
+      </div>
+      <p class="section-label"><label for="sheet-note">Note</label></p>
+      <div class="group note-group">
+        <textarea id="sheet-note" name="note" maxlength="500" placeholder="Add a note"></textarea>
       </div>
       <p class="hint" id="sheet-bank"></p>
       <div class="sheet-actions">

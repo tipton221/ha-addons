@@ -1,35 +1,42 @@
 {% from "_color.html" import color_picker %}
-{% macro bill_form(b=None) %}
-<h3 class="sheet-title">{{ "Edit bill" if b else "Add a bill" }}</h3>
-<form class="bill-form editor-form" data-id="{{ b.id if b else '' }}" autocomplete="off">
+{# b: the bill being edited. prefill: values for a new bill (for example, from a transaction). #}
+{% macro bill_form(b=None, prefill=None) %}
+{% set v = b or prefill %}
+{% set income = v and v.kind == "income" %}
+<h3 class="sheet-title">{{ ("Edit income" if income else "Edit bill") if b else "Add recurring" }}</h3>
+<form class="bill-form editor-form" data-id="{{ b.id if b else '' }}"{% if prefill and prefill.from_txn %} data-from-txn="{{ prefill.from_txn }}"{% endif %} autocomplete="off">
+  <div class="scope kind-scope" role="radiogroup" aria-label="Type">
+    <label><input type="radio" name="kind" value="bill" {% if not income %}checked{% endif %}><span>Bill</span></label>
+    <label><input type="radio" name="kind" value="income" {% if income %}checked{% endif %}><span>Income</span></label>
+  </div>
   <div class="grid2">
-    <label>Name<input name="name" type="text" required maxlength="80" value="{{ b.name if b else '' }}"></label>
-    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '%.2f' % b.amount if b else '' }}" {% if b and b.varies %}disabled placeholder="Average of recent charges"{% endif %}></label>
+    <label>Name<input name="name" type="text" required maxlength="80" value="{{ v.name if v else '' }}"></label>
+    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="{{ 'Average of recent ones' if v and v.varies else '0.00' }}" value="{{ '%.2f' % v.amount if v and v.amount else '' }}" {% if v and v.varies %}disabled{% endif %}></label>
     <label>Repeats
       <select name="cadence">
-        {% for c in ["monthly", "quarterly", "semiannual", "yearly"] %}
-        <option value="{{ c }}" {% if b and b.cadence == c %}selected{% endif %}>{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[c] }}</option>
+        {% for c in ["monthly", "biweekly", "quarterly", "semiannual", "yearly"] %}
+        <option value="{{ c }}" {% if v and v.cadence == c %}selected{% endif %}>{{ {"monthly": "Monthly", "biweekly": "Every 2 weeks", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[c] }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ b.due_day if b and b.due_day else '' }}"></label>
-    <label>Matches charges containing<input name="match" type="text" value="{{ b.match if b else '' }}" placeholder="same as name"></label>
-    <label>Next due (optional)<input name="next_due" type="date" value="{{ b.next_due_override if b and b.next_due_override else '' }}"></label>
+    <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ v.due_day if v and v.due_day else '' }}"></label>
+    <label>Matches transactions containing<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as name"></label>
+    <label>Next date (optional)<input name="next_due" type="date" value="{{ v.next_due_override if v and v.next_due_override else '' }}"></label>
   </div>
   {% set labels = {} %}{% for a in accounts %}{% set _ = labels.update({a.account_id: a.label}) %}{% endfor %}
-  <label>Paid with
+  <label><span class="kind-bill" {% if income %}hidden{% endif %}>Paid with</span><span class="kind-income" {% if not income %}hidden{% endif %}>Deposited to</span>
     <select name="account_id">
-      <option value="">{% if b and b.auto_account_id in labels %}Automatic ({{ labels[b.auto_account_id] }}){% else %}Automatic (card of the last charge){% endif %}</option>
+      <option value="">{% if b and b.auto_account_id in labels %}Automatic ({{ labels[b.auto_account_id] }}){% else %}Automatic (account of the last one){% endif %}</option>
       {% for a in accounts if a.type in ("credit", "depository") %}
-      <option value="{{ a.account_id }}" {% if b and b.account_choice == a.account_id %}selected{% endif %}>{{ a.label }}</option>
+      <option value="{{ a.account_id }}" {% if v and v.account_choice == a.account_id %}selected{% endif %}>{{ a.label }}</option>
       {% endfor %}
     </select>
   </label>
   <label>Tag color</label>
-  {{ color_picker(b.color if b else "purple", colors, "purple") }}
-  <label class="inline"><input name="varies" type="checkbox" {% if b and b.varies %}checked{% endif %}> Amount varies (use the average of recent charges)</label>
-  <label class="inline"><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
-  {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove bill</button>{% endif %}
+  {{ color_picker(v.color if v and v.color else ("green" if income else "purple"), colors, "purple") }}
+  <label class="inline"><input name="varies" type="checkbox" {% if v and v.varies %}checked{% endif %}> Amount varies (use the average of recent ones)</label>
+  <label class="inline kind-bill" {% if income %}hidden{% endif %}><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
+  {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove</button>{% endif %}
   <div class="sheet-actions">
     <button type="button" class="sheet-close">Cancel</button>
     <button type="submit" class="primary">Save</button>
