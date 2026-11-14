@@ -530,3 +530,12 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .scheduled .list { animation: drop .3s var(--ease); }
 @keyframes drop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .scheduled .amount { color: var(--text-2); }
+
+/* Inputs inside an editor row stay inline (like Merchant), even when typed as text fields:
+   the general input[type=...] rules come later and would otherwise box them. */
+.group .row input[type=text], .group .row input[type=number], .group .row input.money {
+  height: auto; padding: 0; margin: 0; text-align: right; font: inherit; font-size: 1rem;
+  color: var(--text); background: transparent; border: 0; border-radius: 0; box-shadow: none;
+}
+.group .row input[type=text]:focus, .group .row input.money:focus { background: transparent; border: 0; box-shadow: none; }
+.group .row input.money::placeholder { color: var(--text-3); }
