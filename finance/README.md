@@ -43,7 +43,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.9.0:
+Version 1.9.1:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time; filters reset when the page reloads).
@@ -61,7 +61,7 @@ Version 1.9.0:
 - Archive a bill or income when it ends: it leaves coverage and Scheduled, moves to an Archived list, and keeps tagging charges up to the archive date. Restore brings it back; Delete removes it and its tags.
 - Accounts can have a short name (used on filter pills) and be marked Everyday, Less used (behind More in the filters, last in lists), or Archived (hidden from filters and lists; history stays).
 - The transaction editor shows Plaid's details when the bank provides them: time, purchase and posted dates, address with a Show in Maps button (Apple Maps), website, merchant logo, payment app, transfer details, and the original bank description. Amazon purchases link to Amazon's payment history and Apple App Store and subscription charges to Apple's purchase history.
-- Search: quick picks for the last 12 months and each year, dates that stay empty until tapped, several accounts or categories at once, spent or received, has a note, and tagged as a bill or income.
+- Search: quick picks for each month and the last five years (a month and a year together mean that month of that year), dates that stay empty until tapped, several accounts or categories at once, spent or received, has a note, and tagged as a bill or income.
 - Bills shows the bills due before payday with their date, frequency, and card.
 - Each bank connection has an Accounts button to share another account from that bank (Plaid account selection). New connections list their accounts right away.
 - Moving between Inbox, Bills, Search, and Accounts slides the tab highlight (view transitions where supported).

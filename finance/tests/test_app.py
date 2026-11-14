@@ -1117,7 +1117,13 @@ def test_search_multi_select_flow_and_quick_dates(tmp_path, monkeypatch):
         assert found(f"category={cats['Restaurants']}&category={cats['Shopping']}") == {"Book Barn", "Corner Cafe", "Toy Town"}
         assert found("flow=in") == {"Book Barn"} and found("noted=1") == {"Toy Town"}
         page = c.get("/search").text
-        assert 'class="filter quick' in page and 'type="text" class="lazy-date"' in page
+        assert page.count('class="filter quick-month') == 12 and page.count('class="filter quick-year') == 5
+        assert 'type="text" class="lazy-date"' in page
+        # A month and a year together read back as both chosen; a whole year as just the year.
+        both = c.get("/search?start=2024-01-01&end=2024-01-31").text
+        assert 'quick-month on" data-month="1"' in both and 'quick-year on" data-year="2024"' in both
+        year = c.get("/search?start=2025-01-01&end=2025-12-31").text
+        assert 'quick-year on" data-year="2025"' in year and "quick-month on" not in year
         assert "account=card&amp;account=card2" in c.get("/search?account=card&account=card2").text  # export keeps both
         assert c.get("/export.csv?account=card2").text.count("Corner Cafe") == 1
 
@@ -1148,3 +1154,8 @@ def test_new_connection_lists_accounts_right_away_and_can_choose_accounts(tmp_pa
         c.post("/api/plaid/link-token", json={"item_id": "item-1", "accounts": True}, headers=H)
         assert seen["args"] == ("access-1", True)
         assert 'class="ghost choose-accounts"' in c.get("/accounts").text
+        # Choosing accounts again: the app reports how many new accounts Plaid now shares.
+        assert c.post("/api/plaid/updated", json={"item_id": "item-1", "selected": 2}, headers=H).json()["added"] == 0
+        fake._accounts.append({"account_id": "new2", "name": "Other Card", "mask": "0002", "type": "credit",
+                               "balances": {"current": 0}})
+        assert c.post("/api/plaid/updated", json={"item_id": "item-1", "selected": 2}, headers=H).json()["added"] == 1
