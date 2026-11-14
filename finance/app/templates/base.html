@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/static/style.css">
   {% if nav is defined %}<link rel="stylesheet" href="/colors.css">{% endif %}
   {% block head %}{% endblock %}
+  {% if nav is defined %}<script src="/static/start.js"></script>{% endif %}
   <script src="/static/app.js" defer></script>
 </head>
 <body data-page="{% block page %}{% endblock %}">
