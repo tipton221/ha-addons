@@ -5,6 +5,11 @@
       <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}</div>
       <div class="meta">
         {% if t.category_info %}<span class="chip cat-{{ t.category_info.id }}">{{ t.category_info.name }}</span>{% endif %}
+        {% if t.pending_amount is not none and t.pending_amount != t.amount %}
+        {% set diff = t.amount - t.pending_amount %}
+        {% set food = t.category == "FOOD_AND_DRINK" or (t.category_info and t.category_info.name == "Restaurants") %}
+        <span class="pill tag {{ 'c-green' if food and diff > 0 else 'c-gray' }}" title="Pending amount was {{ t.pending_amount | money }}">{% if food and diff > 0 %}Tip +{{ diff | money }} · {{ ((diff / t.pending_amount) * 100) | round | int }}%{% else %}{{ "+" if diff > 0 else "" }}{{ diff | money }} since pending{% endif %}</span>
+        {% endif %}
         {% if t.bill %}<span class="pill tag bill-{{ t.bill.id }}">↻ {{ t.bill.name }}</span>{% endif %}
         <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
       </div>

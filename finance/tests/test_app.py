@@ -697,3 +697,49 @@ def test_bill_amount_required_unless_varies(tmp_path, monkeypatch):
         assert c.post("/api/bills", json={"name": "Power", "amount": ""}, headers=H).status_code == 400
         assert c.post("/api/bills", json={"name": "Power", "varies": True, "color": "#ff00aa"}, headers=H).status_code == 200
         assert "≈" in c.get("/bills").text
+
+
+# ---------------------------------------------------------------- 0.4.3: pending to posted, scheduled, icons
+
+def test_posted_charge_keeps_edits_and_records_tip(tmp_path):
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    pend = dict(txn("p1", 18.94, pending=True), merchant_name="Taco Spot",
+                personal_finance_category={"primary": "FOOD_AND_DRINK", "detailed": "FOOD_AND_DRINK_RESTAURANT"})
+    plaid = FakePlaid([page(added=[pend], cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET reviewed=1, note='Dinner with friends', category_id=7 WHERE id='p1'")
+    posted = dict(txn("t1", 21.78, pending_id="p1"), merchant_name="Taco Spot",
+                  personal_finance_category=pend["personal_finance_category"])
+    big = dict(txn("p2", 10.0, pending=True))
+    plaid.pages = [page(added=[posted, big], removed=["p1"], cursor="c2")]
+    asyncio.run(sync_all(db, plaid))
+    plaid.pages = [page(added=[txn("t2", 40.0, pending_id="p2")], removed=["p2"], cursor="c3")]
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET reviewed=1 WHERE id='p2'")
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        t1 = dict(conn.execute("SELECT * FROM transactions WHERE id='t1'").fetchone())
+        t2 = dict(conn.execute("SELECT * FROM transactions WHERE id='t2'").fetchone())
+    assert (t1["reviewed"], t1["note"], t1["category_id"], t1["pending_amount"]) == (1, "Dinner with friends", 7, 18.94)
+    assert t2["reviewed"] == 0 and t2["pending_amount"] == 10.0  # 4x the pending amount: back to the inbox
+
+
+def test_tip_badge_scheduled_section_and_icons(tmp_path, monkeypatch):
+    rows = [("t1", "card", D.today().isoformat(), "TACO SPOT", "Taco Spot", 21.78, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_RESTAURANT", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET pending_amount=18.94 WHERE id='t1'")
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES ('Phone Co', 'phone co', 99, 'monthly', ?)",
+                     ((D.today() + __import__("datetime").timedelta(days=3)).day,))
+    with TestClient(app) as c:
+        assert c.get("/", follow_redirects=False).status_code == 303  # signed out: redirected
+        c.cookies.set("finance_session", "tok")
+        page_html = c.get("/").text
+        assert "Tip +$2.84 · 15%" in page_html
+        assert 'id="scheduled"' in page_html and "Phone Co" in page_html.split('id="scheduled"')[1]
+        c.cookies.clear()
+        assert c.get("/manifest.json").json()["display"] == "standalone"  # reachable before signing in
+        assert c.get("/favicon.ico").headers["content-type"] == "image/png"
+        assert c.get("/static/icons/apple-touch-icon.png").status_code == 200

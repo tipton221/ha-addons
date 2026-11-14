@@ -43,11 +43,13 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 0.4.2:
+Version 0.4.3:
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
-- Inbox: unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
+- Inbox: a collapsed Scheduled list of bills due in the next 30 days, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time).
 - Every edit or add (transactions, bills, paydays, categories, account names) opens in the same pop-up sheet. Amount fields fill in from the cents as you type (1500 becomes 15.00).
 - Tap a transaction to rename the merchant, change its category (for every transaction from that merchant, or just this one), and add a note. Merchant renames and categories apply to past and future transactions.
 - Your own categories (a starter list mapped from Plaid's categories, then fully editable, with named or custom hex colors), renamable accounts, and colored recurring tags for transactions that match a bill.
+- When a pending charge posts, its review, note, and one-off category carry over; a changed final amount shows as a tip (restaurants) or a difference, and a jump of more than 30% goes back to the inbox.
+- Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.

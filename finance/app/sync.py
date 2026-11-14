@@ -57,6 +57,26 @@ ON CONFLICT(source, id) DO UPDATE SET
 """
 
 
+RECHECK_CHANGE = 0.30   # a posted charge this much above its pending amount goes back to the inbox
+
+
+def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: float) -> None:
+    """When a pending charge posts, keep what the user did to it (review, note, one-off category)
+    and remember the pending amount, so a tip or final total can be shown."""
+    row = conn.execute("SELECT amount, reviewed, note, category_id FROM transactions "
+                       "WHERE source='plaid' AND id=?", (pending_id,)).fetchone()
+    if not row:
+        return
+    reviewed = row["reviewed"]
+    if row["amount"] > 0 and posted_amount - row["amount"] > RECHECK_CHANGE * row["amount"]:
+        reviewed = 0  # far more than a tip: worth a second look
+    conn.execute(
+        "UPDATE transactions SET reviewed = MAX(reviewed, ?), note = COALESCE(note, ?), "
+        "category_id = COALESCE(category_id, ?), pending_amount = ? WHERE source='plaid' AND id=?",
+        (reviewed, row["note"], row["category_id"],
+         row["amount"] if abs(row["amount"] - posted_amount) >= 0.005 else None, posted_id))
+
+
 async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
     """Run /transactions/sync to completion for one item. Returns counts."""
     start_cursor = item["cursor"]
@@ -90,12 +110,7 @@ async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
             # When a pending charge posts, Plaid sends the posted one with a
             # link back to the pending one, and removes the pending one.
             if t.get("pending_transaction_id"):
-                conn.execute(
-                    "UPDATE transactions SET reviewed = MAX(reviewed, "
-                    "(SELECT reviewed FROM transactions WHERE source='plaid' AND id=?)) "
-                    "WHERE source='plaid' AND id=?",
-                    (t["pending_transaction_id"], t["transaction_id"]),
-                )
+                carry_from_pending(conn, t["pending_transaction_id"], t["transaction_id"], t["amount"])
         for tid in removed:
             conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=?", (tid,))
         conn.execute(
