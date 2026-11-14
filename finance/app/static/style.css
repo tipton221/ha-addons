@@ -131,8 +131,9 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 .tab-pill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: rgba(255, 255, 255, 0.12);
   view-transition-name: tab-pill; }
 .tabbar a:active { transform: scale(0.94); }
-/* Wide screens: the top bar stays in view while the page scrolls. */
-@media (min-width: 641px) { .tabbar { position: sticky; top: 12px; } }
+/* Wide screens: the top bar stays in view while the page scrolls. It sticks at the same offset it
+   starts at (the body's top padding), so it never shifts before sticking. */
+@media (min-width: 641px) { .tabbar { position: sticky; top: calc(env(safe-area-inset-top) + 18px); } }
 
 @media (max-width: 640px) {
   .tabbar {
