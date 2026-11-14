@@ -137,8 +137,8 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
     today = today or date.today()
     with db.connect() as conn:
         bills = [dict(r) for r in conn.execute("SELECT * FROM bills ORDER BY name COLLATE NOCASE")]
-        charges = [(normalize(r["merchant"] or r["name"]), r["date"], r["amount"]) for r in conn.execute(
-            "SELECT merchant, name, date, amount FROM transactions WHERE source='plaid' AND amount > 0 "
+        charges = [(normalize(r["merchant"] or r["name"]), r["date"], r["amount"], r["account_id"]) for r in conn.execute(
+            "SELECT merchant, name, date, amount, account_id FROM transactions WHERE source='plaid' AND amount > 0 "
             "ORDER BY date DESC")]
     for b in bills:
         if b.get("varies"):
@@ -156,6 +156,10 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
         row = {"date": hit[1], "amount": hit[2]} if hit else None
         b["last_date"] = row["date"] if row else None
         b["last_amount"] = row["amount"] if row else None
+        # The card it is paid with: the one chosen in the editor, else the card of the last charge.
+        b["auto_account_id"] = hit[3] if hit else None
+        b["account_choice"] = b.get("account_id")
+        b["account_id"] = b["account_choice"] or b["auto_account_id"]
         step = CADENCE_MONTHS.get(b["cadence"], 1)
         if b["next_due_override"]:
             due = date.fromisoformat(b["next_due_override"])

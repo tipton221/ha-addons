@@ -138,7 +138,8 @@ class Database:
         wanted = {
             "transactions": [("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL")],
             "accounts": [("display_name", "TEXT")],
-            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0")],
+            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
+                  ("account_id", "TEXT")],  # chosen card; NULL means the card of the last charge,
         }
         for table, cols in wanted.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
