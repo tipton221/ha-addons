@@ -210,6 +210,139 @@ function swipeToClose(el) {
   el.addEventListener("touchcancel", end);
 }
 
+// ---------- refresh without reloading (keeps the scroll position) ----------
+
+// Swap in fresh copies of sections of the home page.
+async function swapSections(ids) {
+  const r = await fetch("/", { credentials: "same-origin" });
+  const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+  const wasOpen = document.getElementById("scheduled")?.open;
+  for (const id of ids) {
+    const fresh = doc.getElementById(id);
+    const cur = document.getElementById(id);
+    if (fresh && cur) {
+      cur.replaceWith(fresh);
+      fresh.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 220 });
+    }
+  }
+  const sched = document.getElementById("scheduled");
+  if (sched && wasOpen) sched.open = true;
+}
+
+// Re-render every transaction row on the page in place (a merchant rename can change many).
+async function refreshRows() {
+  const items = [...document.querySelectorAll(".txn-item")];
+  if (!items.length) return;
+  const rows = items.map((li) => ({ id: li.dataset.id, review: !!li.closest("#inbox") }));
+  const r = await api("/api/rows", { rows });
+  for (const li of items) {
+    const html = r.rows[li.dataset.id];
+    if (!html) continue;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html.trim();
+    const fresh = tpl.content.firstElementChild;
+    if (fresh && fresh.outerHTML !== li.outerHTML) {
+      li.replaceWith(fresh);
+      fresh.querySelector(".txn")?.animate([{ opacity: 0.5 }, { opacity: 1 }], { duration: 260 });
+    }
+  }
+}
+
+// After an edit: pages with transaction lists update in place; other pages reload.
+async function refreshInPlace() {
+  const page = document.body.dataset.page;
+  if (page !== "home" && page !== "search") { setTimeout(() => location.reload(), 600); return; }
+  try {
+    await refreshRows();
+    if (page === "home") await swapSections(["coverage", "scheduled-wrap"]);
+  } catch (e) { location.reload(); }
+}
+
+// ---------- name suggestions while typing in the transaction editor ----------
+
+const suggest = {
+  names: null,
+  active: -1,
+  list() { return document.getElementById("name-suggest"); },
+  input() { return document.getElementById("sheet-name"); },
+  async load() {
+    if (this.names) return this.names;
+    try {
+      const r = await fetch("/api/merchant-names", { credentials: "same-origin" });
+      this.names = (await r.json()).names || [];
+    } catch (e) { this.names = []; }
+    return this.names;
+  },
+  hide() {
+    const ul = this.list();
+    if (!ul) return;
+    ul.hidden = true;
+    ul.innerHTML = "";
+    this.active = -1;
+    this.input()?.setAttribute("aria-expanded", "false");
+  },
+  async show() {
+    const input = this.input();
+    const q = input.value.trim().toLowerCase();
+    const seq = (this.seq = (this.seq || 0) + 1);
+    if (!q) { this.hide(); return; }
+    const names = await this.load();
+    if (seq !== this.seq) return;  // a newer keystroke already ran
+    const starts = [], has = [];
+    for (const n of names) {
+      const l = n.toLowerCase();
+      if (l === q) continue;
+      if (l.startsWith(q)) starts.push(n);
+      else if (l.includes(q)) has.push(n);
+      if (starts.length >= 6) break;
+    }
+    const pick = [...starts, ...has].slice(0, 6);
+    const ul = this.list();
+    ul.innerHTML = "";
+    this.active = -1;
+    if (!pick.length) { this.hide(); return; }
+    for (const n of pick) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.textContent = n;
+      ul.appendChild(li);
+    }
+    ul.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  },
+  choose(text) {
+    this.input().value = text;
+    this.hide();
+  },
+  move(step) {
+    const items = [...this.list().children];
+    if (!items.length) return;
+    this.active = (this.active + step + items.length) % items.length;
+    items.forEach((li, i) => li.classList.toggle("active", i === this.active));
+  },
+  init() {
+    const input = this.input();
+    if (!input) return;
+    input.addEventListener("input", () => this.show());
+    input.addEventListener("focus", () => this.load());
+    input.addEventListener("blur", () => setTimeout(() => this.hide(), 150));
+    input.addEventListener("keydown", (ev) => {
+      if (this.list().hidden) return;
+      if (ev.key === "ArrowDown") { ev.preventDefault(); this.move(1); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); this.move(-1); }
+      else if (ev.key === "Enter" && this.active >= 0) { ev.preventDefault(); this.choose(this.list().children[this.active].textContent); }
+      else if (ev.key === "Escape") { ev.preventDefault(); this.hide(); }
+    });
+    // pointerdown keeps the input focused, so the keyboard stays up on phones
+    this.list().addEventListener("pointerdown", (ev) => {
+      const li = ev.target.closest("li");
+      if (!li) return;
+      ev.preventDefault();
+      this.choose(li.textContent);
+    });
+  },
+};
+
 // Pop-up editors: any element with data-editor="<template id>" opens that template in a sheet.
 const editor = {
   open(id) {
@@ -219,6 +352,14 @@ const editor = {
     const body = document.getElementById("edit-body");
     body.innerHTML = "";
     body.appendChild(tpl.content.cloneNode(true));
+    sheetEl.scrollTop = 0;
+    openSheet(sheetEl);
+  },
+  openHTML(html) {
+    const sheetEl = document.getElementById("edit-sheet");
+    const body = document.getElementById("edit-body");
+    if (!sheetEl || !body) return;
+    body.innerHTML = html;
     sheetEl.scrollTop = 0;
     openSheet(sheetEl);
   },
@@ -273,7 +414,7 @@ const sheet = {
       const d = new Date(t.date + "T12:00:00");
       document.getElementById("sheet-sub").textContent =
         [d.toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric", year: "numeric" }),
-         t.account, t.pending ? "Pending" : null, t.bill ? `↻ ${t.bill}` : null].filter(Boolean).join(" · ");
+         t.account, t.pending ? "Pending" : null].filter(Boolean).join(" · ");
       const form = document.getElementById("sheet-form");
       form.display_name.value = t.display_name;
       form.note.value = t.note;
@@ -285,15 +426,44 @@ const sheet = {
         if (c.id === t.category_id) o.selected = true;
         sel.appendChild(o);
       }
-      form.scope.value = t.category_is_override ? "this" : "merchant";
-      document.getElementById("sheet-hint").textContent = t.name_is_override
-        ? "This name came from YNAB and applies to just this transaction."
-        : "A new name always applies to every transaction from this merchant, past and future.";
+      // Bill or income: automatic (by the bill's rule), none, a specific one, or a new one.
+      const bill = form.bill_id;
+      bill.innerHTML = "";
+      const auto = t.bill_choice === null && t.bill ? `Automatic (↻ ${t.bill})` : "Automatic";
+      const opts = [["", t.bill_choice === null && !t.bill ? "None" : auto], ["0", amt > 0 ? "Not recurring income" : "Not a bill"],
+                    ...t.bills.map((b) => [String(b.id), `↻ ${b.name}`]), ["new", amt > 0 ? "＋ Make it recurring income…" : "＋ Make it a bill…"]];
+      for (const [v, label] of opts) {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = label;
+        bill.appendChild(o);
+      }
+      bill.value = t.bill_choice === null ? "" : String(t.bill_choice);
+      form.scope.value = t.category_is_override || t.name_is_override ? "this" : "merchant";
+      const sim = document.getElementById("sheet-similar");
+      form.similar.checked = false;
+      if (t.similar.length) {
+        const n = t.similar.reduce((a, s) => a + s.count, 0);
+        document.getElementById("sheet-similar-text").textContent =
+          `Also apply to ${t.similar.length} similar merchant${t.similar.length > 1 ? "s" : ""} (${n} transaction${n > 1 ? "s" : ""}), like ${t.similar[0].sample}`;
+      }
+      this.updateHint();
       document.getElementById("sheet-bank").textContent =
         t.bank_name && t.bank_name !== t.display_name ? `Bank description: ${t.bank_name}` : "";
+      suggest.hide();
       openSheet(el);
       this.li = li;
     } catch (e) { toast("Could not open this transaction", true); }
+  },
+
+  updateHint() {
+    const t = this.current;
+    if (!t) return;
+    const form = document.getElementById("sheet-form");
+    const merchant = form.scope.value === "merchant";
+    document.getElementById("sheet-hint").textContent = merchant
+      ? `Changes apply to ${t.merchant_count > 1 ? `all ${t.merchant_count} transactions` : "every transaction"} from this merchant, past and future.`
+      : "Only this transaction changes.";
+    document.getElementById("sheet-similar").hidden = !merchant || !t.similar.length;
   },
 
   close() {
@@ -305,21 +475,35 @@ const sheet = {
     const t = this.current;
     const form = ev.target;
     const body = {};
-    if (form.display_name.value.trim() !== t.display_name) body.display_name = form.display_name.value;
-    const cid = Number(form.category_id.value);
     const scope = form.scope.value;
-    if (cid !== t.category_id || (scope === "this") !== t.category_is_override) {
-      body.category_id = cid;
-      body.scope = scope;
+    const wasThis = t.category_is_override || t.name_is_override;
+    const scopeChanged = (scope === "this") !== wasThis;
+    // A one-off name becomes the merchant's name when "All from this merchant" is chosen.
+    if (form.display_name.value.trim() !== t.display_name || (scope === "merchant" && t.name_is_override)) {
+      body.display_name = form.display_name.value;
     }
+    const cid = Number(form.category_id.value);
+    if (cid !== t.category_id || scopeChanged) body.category_id = cid;
     if (form.note.value.trim() !== t.note) body.note = form.note.value;
-    if (!Object.keys(body).length) { this.close(); return; }
+    const bill = form.bill_id.value;
+    if (bill !== "new" && bill !== (t.bill_choice === null ? "" : String(t.bill_choice))) body.bill_id = bill;
+    if (scope === "merchant" && form.similar.checked) body.similar = t.similar.map((s) => s.key);
+    if (Object.keys(body).length) body.scope = scope;
     try {
-      await api(`/api/transactions/${t.source}/${encodeURIComponent(t.id)}`, body);
+      if (Object.keys(body).length) await api(`/api/transactions/${t.source}/${encodeURIComponent(t.id)}`, body);
+      if (bill === "new") {
+        // Open the bill form filled in from this transaction.
+        const r = await fetch(`/api/bills/form?source=${t.source}&id=${encodeURIComponent(t.id)}`, { credentials: "same-origin" });
+        if (!r.ok) throw new Error("Could not open the bill form");
+        this.close();
+        editor.openHTML(await r.text());
+        return;
+      }
       this.close();
-      toast((body.display_name !== undefined && !t.name_is_override) || scope === "merchant" && body.category_id !== undefined
-        ? "Saved for every transaction from this merchant" : "Saved");
-      setTimeout(() => location.reload(), 700);
+      if (!Object.keys(body).length) return;
+      const wide = scope === "merchant" && (body.display_name !== undefined || body.category_id !== undefined);
+      toast(wide ? "Saved for every transaction from this merchant" : "Saved");
+      await refreshInPlace();
     } catch (e) { toast(e.message, true); }
   },
 
@@ -377,6 +561,12 @@ document.addEventListener("change", (ev) => {
   if (t.matches('.color-picker input[name="color"]')) {
     t.closest(".color-picker").querySelector(".hex-row").hidden = t.value !== "custom";
   }
+  if (t.matches('.bill-form input[name="kind"]')) {
+    const income = t.value === "income";
+    t.form.querySelectorAll(".kind-bill").forEach((el) => { el.hidden = income; });
+    t.form.querySelectorAll(".kind-income").forEach((el) => { el.hidden = !income; });
+  }
+  if (t.matches('#sheet-form input[name="scope"]')) sheet.updateHint();
   if (t.matches('.bill-form input[name="varies"]')) {
     const amount = t.form.elements.amount;
     amount.disabled = t.checked;
@@ -403,7 +593,9 @@ const forms = {
       id: form.dataset.id || null, name: f.name.value, amount: f.amount.value,
       cadence: f.cadence.value, due_day: f.due_day.value, match: f.match.value,
       next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
-      varies: f.varies.checked, account_id: f.account_id.value,
+      varies: f.varies.checked, account_id: f.account_id.value, kind: f.kind.value,
+      is_payday: f.is_payday.checked,
+      from_txn: form.dataset.fromTxn || null,
     });
   },
   async "cat-form"(form) {
@@ -433,7 +625,8 @@ document.addEventListener("submit", async (ev) => {
     await forms[key](form);
     closeAllSheets();
     toast("Saved");
-    setTimeout(() => location.reload(), 600);
+    if (key === "bill-form") await refreshInPlace();
+    else setTimeout(() => location.reload(), 600);
   } catch (e) { if (btn) btn.disabled = false; toast(e.message, true); }
 });
 
@@ -446,7 +639,8 @@ document.addEventListener("click", async (ev) => {
     await api(isBill ? `/api/bills/${del.dataset.id}/delete` : `/api/categories/${del.dataset.id}/delete`);
     closeAllSheets();
     toast("Removed");
-    setTimeout(() => location.reload(), 600);
+    if (isBill) await refreshInPlace();
+    else setTimeout(() => location.reload(), 600);
   } catch (e) { toast(e.message, true); }
 });
 
@@ -503,19 +697,7 @@ const pages = {
 
     // Swap in fresh copies of page sections without a reload.
     const refresh = async (ids) => {
-      const r = await fetch("/", { credentials: "same-origin" });
-      const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-      const wasOpen = document.getElementById("scheduled")?.open;
-      for (const id of ids) {
-        const fresh = doc.getElementById(id);
-        const cur = document.getElementById(id);
-        if (fresh && cur) {
-          cur.replaceWith(fresh);
-          fresh.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 220 });
-        }
-      }
-      const sched = document.getElementById("scheduled");
-      if (sched && wasOpen) sched.open = true;
+      await swapSections(ids);
       lastRefresh = Date.now();
     };
 
@@ -533,7 +715,7 @@ const pages = {
         if (peer) peer.querySelector(".tick")?.classList.add("checked");
         await Promise.all([fold(li, 250), peer ? fold(peer, 250) : null]);
         updateCount();
-        refresh(["all"]);  // the reviewed transaction now belongs in All transactions
+        refresh(["all-head", "all"]);  // the reviewed transaction now belongs in All transactions
       } catch (e) { btn.classList.remove("checked"); btn.disabled = false; toast(e.message, true); }
     });
 
@@ -557,7 +739,7 @@ const pages = {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && Date.now() - lastRefresh > 60000 &&
           !document.querySelector(".sheet.open")) {
-        refresh(["coverage", "review-card", "scheduled-wrap", "all"]).catch(() => {});
+        refresh(["coverage", "review-card", "scheduled-wrap", "all-head", "all"]).catch(() => {});
       }
     });
 
@@ -574,8 +756,23 @@ const pages = {
       dim.forEach((el) => { el.style.transition = "opacity .15s"; el.style.opacity = "0.25"; });
       try {
         await api("/api/view/account-filter", { account: btn.dataset.account });
-        await refresh(["scheduled-wrap", "all"]);
+        await refresh(["all-head", "scheduled-wrap", "all"]);
       } catch (e) { dim.forEach((el) => { el.style.opacity = "1"; }); toast(e.message, true); }
+    });
+
+    document.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("#pending-filter");
+      if (!btn) return;
+      const on = !btn.classList.contains("on");
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      const cur = document.getElementById("all");
+      cur.style.transition = "opacity .15s";
+      cur.style.opacity = "0.25";
+      try {
+        await api("/api/view/pending", { on });
+        await refresh(["all-head", "all"]);
+      } catch (e) { cur.style.opacity = "1"; toast(e.message, true); }
     });
     bindLoadMore(document.body);
   },
@@ -633,6 +830,7 @@ const pages = {
 document.addEventListener("DOMContentLoaded", () => {
   sheet.init();
   editor.init();
+  suggest.init();
   const fn = pages[document.body.dataset.page];
   if (fn) fn();
 });

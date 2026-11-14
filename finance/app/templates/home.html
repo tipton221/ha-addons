@@ -41,7 +41,10 @@
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>All transactions</h2></div>
+  <div class="card-head" id="all-head">
+    <h2>{{ "Pending" if pending_only else "All transactions" }}</h2>
+    <button class="filter pending-toggle {% if pending_only %}on{% endif %}" id="pending-filter" aria-pressed="{{ 'true' if pending_only else 'false' }}">Pending only{% if pending_count %}<span class="count {% if not pending_only %}zero{% endif %}">{{ pending_count }}</span>{% endif %}</button>
+  </div>
   {% if accounts | length > 1 %}
   <div class="filters" id="filters" role="radiogroup" aria-label="Show transactions from">
     <button class="filter {% if not selected %}on{% endif %}" data-account="" role="radio" aria-checked="{{ 'false' if selected else 'true' }}">All accounts</button>
@@ -53,15 +56,15 @@
   <div id="scheduled-wrap">
   {% if upcoming %}
   <details class="scheduled" id="scheduled">
-    <summary><span class="chev-down" aria-hidden="true">›</span> Scheduled <span class="count zero">{{ upcoming | length }}</span><span class="muted small sched-total">{{ upcoming_total | money }}</span></summary>
+    <summary><span class="chev-down" aria-hidden="true">›</span> Scheduled <span class="count zero">{{ upcoming | length }}</span><span class="muted small sched-total">-{{ upcoming_out | money }}{% if upcoming_in %} · +{{ upcoming_in | money }}{% endif %}</span></summary>
     <ul class="list">
       {% for b in upcoming %}
       <li class="edit-row" role="button" tabindex="0" data-editor="sched-{{ b.id }}">
         <div class="grow">
           <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-          <span class="muted small">{{ b.next_due.isoformat() | shortdate }} · {{ {"monthly": "Repeats monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Repeats yearly"}[b.cadence] }}</span>
+          <span class="muted small">{{ b.next_due.isoformat() | shortdate }} · {{ cadence_label[b.cadence] }}</span>
         </div>
-        <span class="amount">{% if b.varies %}≈ {% endif %}{{ (0 - b.amount) | money }}</span>
+        <span class="amount {% if b.kind == 'income' %}inflow{% endif %}">{% if b.varies %}≈ {% endif %}{{ (b.amount if b.kind == 'income' else 0 - b.amount) | money }}</span>
         <template id="sched-{{ b.id }}">{{ bill_form(b) }}</template>
       </li>
       {% endfor %}
@@ -71,7 +74,7 @@
   </div>
   <div id="all">
     {% include "_rows.html" %}
-    {% if not groups %}<p class="empty">No reviewed transactions{% if selected %} for this account{% endif %}.</p>{% endif %}
+    {% if not groups %}<p class="empty">No {{ "pending" if pending_only else "reviewed" }} transactions{% if selected %} for this account{% endif %}.</p>{% endif %}
   </div>
 </section>
 {% if last_sync %}<p class="muted small center">Last synced {{ last_sync | local }}</p>{% endif %}

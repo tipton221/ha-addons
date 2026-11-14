@@ -19,6 +19,15 @@ MIN_BILL = 5.00         # ignore tiny recurring charges
 STALE_GRACE_DAYS = 10  # a bill this late with no charge has probably ended
 
 CADENCE_MONTHS = {"monthly": 1, "quarterly": 3, "semiannual": 6, "yearly": 12}
+CADENCES = ("monthly", "biweekly", "quarterly", "semiannual", "yearly")  # biweekly is for paychecks
+PER_MONTH = {"monthly": 1, "biweekly": 26 / 12, "quarterly": 1 / 3, "semiannual": 1 / 6, "yearly": 1 / 12}
+
+
+def advance(d: date, cadence: str, day: int | None = None) -> date:
+    """The next occurrence after d."""
+    if cadence == "biweekly":
+        return d + timedelta(days=14)
+    return add_months(d, CADENCE_MONTHS.get(cadence, 1), day)
 
 # Plaid categories that recur but are not bills: card payments, transfers, income.
 SKIP_PRIMARY = {"TRANSFER_IN", "TRANSFER_OUT", "INCOME", "BANK_FEES"}
@@ -137,10 +146,16 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
     today = today or date.today()
     with db.connect() as conn:
         bills = [dict(r) for r in conn.execute("SELECT * FROM bills ORDER BY name COLLATE NOCASE")]
-        charges = [(normalize(r["merchant"] or r["name"]), r["date"], r["amount"], r["account_id"]) for r in conn.execute(
-            "SELECT merchant, name, date, amount, account_id FROM transactions WHERE source='plaid' AND amount > 0 "
-            "ORDER BY date DESC")]
+        rows = [dict(r) for r in conn.execute(
+            "SELECT merchant, name, date, amount, account_id, bill_id FROM transactions "
+            "WHERE source='plaid' AND amount != 0 ORDER BY date DESC")]
     for b in bills:
+        income = b.get("kind") == "income"
+        # (merchant key, date, amount as a positive number, account). Income bills look at money in.
+        # A transaction marked "not a bill" or set to another bill is skipped; one set to this bill always counts.
+        charges = [(b["match"] if r["bill_id"] == b["id"] else normalize(r["merchant"] or r["name"]),
+                    r["date"], abs(r["amount"]), r["account_id"]) for r in rows
+                   if (r["amount"] < 0) == income and (r["bill_id"] is None or r["bill_id"] == b["id"])]
         if b.get("varies"):
             # Varying bills (utilities): any charge from the merchant counts, and the expected
             # amount is the average of the most recent ones.
@@ -160,26 +175,30 @@ def bill_status(db: Database, today: date | None = None) -> list[dict]:
         b["auto_account_id"] = hit[3] if hit else None
         b["account_choice"] = b.get("account_id")
         b["account_id"] = b["account_choice"] or b["auto_account_id"]
-        step = CADENCE_MONTHS.get(b["cadence"], 1)
+        cadence = b["cadence"]
         if b["next_due_override"]:
             due = date.fromisoformat(b["next_due_override"])
             while due < today:
-                due = add_months(due, step)
+                due = advance(due, cadence)
+        elif row and cadence == "biweekly":
+            due = advance(date.fromisoformat(row["date"]), cadence)
+            while due < today:
+                due = advance(due, cadence)
         elif row:
             last = date.fromisoformat(row["date"])
             if b["due_day"]:
                 last = date(last.year, last.month, min(b["due_day"], calendar.monthrange(last.year, last.month)[1]))
-            due = next_due(last, b["cadence"], today)
+            due = next_due(last, cadence, today)
         else:
             day = b["due_day"] or 1
             due = date(today.year, today.month, min(day, calendar.monthrange(today.year, today.month)[1]))
             while due < today:
-                due = add_months(due, step, day)
+                due = advance(due, cadence, day)
         b["next_due"] = due
         # A bill that skipped its last expected charge has probably ended (for example, an old lease).
         b["stale"] = bool(row) and not b["next_due_override"] and (
-            add_months(date.fromisoformat(row["date"]), step) + timedelta(days=STALE_GRACE_DAYS) < today)
-        b["monthly_equivalent"] = b["amount"] / CADENCE_MONTHS.get(b["cadence"], 1)
+            advance(date.fromisoformat(row["date"]), cadence) + timedelta(days=STALE_GRACE_DAYS) < today)
+        b["monthly_equivalent"] = b["amount"] * PER_MONTH.get(cadence, 1)
     return bills
 
 
@@ -211,7 +230,15 @@ def next_payday(schedule: dict, today: date) -> date:
 
 def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
     today = today or date.today()
-    payday = next_payday(schedule, today)
+    all_bills = bill_status(db, today)
+    # Paydays come from the recurring income marked as the paycheck, if there is one.
+    paycheck = next((b for b in all_bills if b.get("kind") == "income" and b.get("is_payday")), None)
+    if paycheck:
+        payday = paycheck["next_due"]
+        while payday <= today:
+            payday = advance(payday, paycheck["cadence"])
+    else:
+        payday = next_payday(schedule, today)
     with db.connect() as conn:
         cash_accts = [dict(r) for r in conn.execute(
             "SELECT name, mask, available_balance, current_balance FROM accounts "
@@ -224,13 +251,15 @@ def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
     cash = sum((a["available_balance"] if a["available_balance"] is not None else a["current_balance"] or 0)
                for a in cash_accts)
     cards = sum(a["current_balance"] or 0 for a in card_accts)
-    bills = bill_status(db, today)
+    bills = [b for b in all_bills if b.get("kind") != "income"]  # coverage counts money going out
     due = [b for b in bills if b["active"] and not b["stale"] and today <= b["next_due"] < payday]
     due_total = sum(b["amount"] for b in due)
-    reserve = sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"] and b["cadence"] != "monthly")
+    reserve = sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]
+                  and b["cadence"] not in ("monthly", "biweekly"))
     left = cash - cards - pending - due_total
     return {
         "today": today, "payday": payday, "cash": cash, "cash_accounts": cash_accts,
         "cards": cards, "pending": pending, "due": sorted(due, key=lambda b: b["next_due"]),
         "due_total": due_total, "left": left, "ok": left >= 0, "annual_reserve": reserve,
+        "paycheck": paycheck,
     }

@@ -213,14 +213,30 @@ button svg { width: 18px; height: 18px; }
   transition: opacity .2s var(--ease), transform .15s var(--ease);
 }
 .txn:active, .edit-row:active { opacity: 0.6; transform: scale(0.99); }
-@media (hover: hover) { .txn:hover .name > span:first-child, .edit-row:hover strong { color: #fff; text-decoration: underline; text-decoration-color: rgba(255,255,255,0.3); text-underline-offset: 3px; } }
+/* Rows reach a little past the card's text column so the hover highlight has breathing room. */
+.txn, .edit-row { margin: 0 -10px; padding-left: 14px; padding-right: 14px; border-radius: 14px; }
+.edit-row { padding-left: 10px; padding-right: 10px; }
+@media (hover: hover) {
+  .txn, .edit-row { transition: background-color .18s var(--ease), box-shadow .18s var(--ease), opacity .2s var(--ease), transform .15s var(--ease); }
+  .txn:hover, .edit-row:hover {
+    background: linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.035));
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07), 0 6px 18px -10px rgba(0,0,0,0.6);
+  }
+  /* The hairlines above and below a highlighted row would cut through it. */
+  .list > li:has(> .txn:hover), .list > li:has(> .txn:hover) + li,
+  .list > li.edit-row:hover, .list > li.edit-row:hover + li { border-top-color: transparent; }
+}
 .txn .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .txn .name { font-weight: 600; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .txn .name span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .txn .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--text-2); font-size: 0.85rem; }
 .txn .name .pill { height: 18px; padding: 0 7px; font-size: 0.6rem; letter-spacing: 0.05em; font-weight: 700; }
-.txn .note { color: var(--text-2); font-size: 0.86rem; font-style: italic; white-space: pre-wrap; word-break: break-word; }
-.txn .note::before { content: "“"; } .txn .note::after { content: "”"; }
+.txn .note {
+  display: flex; align-items: flex-start; gap: 7px; align-self: flex-start; max-width: 100%;
+  padding: 6px 11px 6px 9px; border-radius: 10px; background: rgba(255,255,255,0.045);
+  color: rgba(235,235,245,0.78); font-size: 0.85rem; line-height: 1.35; white-space: pre-wrap; word-break: break-word;
+}
+.txn .note svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--text-3); }
 .amount { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 1.02rem; }
 .amount.inflow { color: var(--green); }
 .amount.pending { color: var(--text-2); }
@@ -235,6 +251,8 @@ button svg { width: 18px; height: 18px; }
 /* A reviewed row folds away. */
 .txn-item { overflow: hidden; transition: max-height .35s var(--ease), opacity .3s var(--ease), transform .35s var(--ease); max-height: 220px; }
 .txn-item.leaving { opacity: 0; transform: translateX(40px); max-height: 0; }
+/* Clip only while folding away, so the hover highlight's rounded corners are not cut off. */
+.txn-item:not(.leaving) { overflow: visible; }
 
 .day { margin: 22px 4px 6px; color: var(--text-2); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .day:first-child { margin-top: 4px; }
@@ -251,6 +269,9 @@ button svg { width: 18px; height: 18px; }
   color: var(--text-2); background: transparent; border-color: var(--glass-border);
 }
 .filter.on { color: #fff; background: var(--blue); border-color: transparent; }
+.pending-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.pending-toggle .count { margin: 0; }
+.pending-toggle.on .count { background: rgba(255,255,255,0.25); color: #fff; }
 
 /* ---------- sheet (transaction editor) ---------- */
 
@@ -298,6 +319,23 @@ button svg { width: 18px; height: 18px; }
 .row textarea { text-align: left; resize: none; min-height: 72px; padding: 4px 0 12px; }
 .row.stack { flex-direction: column; align-items: stretch; gap: 6px; padding-top: 12px; }
 .row.stack label { margin: 0; }
+.section-label label { margin: 0; color: inherit; font: inherit; }
+.note-group { padding: 0; }
+.note-group textarea {
+  display: block; width: 100%; min-height: 96px; margin: 0; padding: 14px 16px; resize: none;
+  background: transparent; border: 0; border-radius: var(--r-lg); color: var(--text); font: inherit; font-size: 1rem; line-height: 1.4;
+}
+.note-group textarea::placeholder { color: var(--text-3); }
+.note-group:focus-within { box-shadow: inset 0 0 0 1.5px rgba(10,132,255,0.7); }
+.note-group textarea:focus { background: transparent; border: 0; }
+.suggest { list-style: none; margin: 0 -14px; padding: 4px 6px 6px; border-top: 1px solid var(--hairline); }
+.suggest li { padding: 10px 12px; border-radius: 10px; cursor: pointer; color: var(--text); font-size: 0.98rem; }
+.suggest li.active, .suggest li:hover { background: rgba(255,255,255,0.08); }
+.suggest + .row { border-top: 1px solid var(--hairline); }
+.similar { margin: -2px 6px 14px; }
+.similar label.inline { margin: 0; font-size: 0.88rem; color: var(--text-2); align-items: flex-start; }
+.similar label.inline input { margin-top: 1px; }
+.kind-scope { margin: 0 0 16px; }
 .scope { display: flex; gap: 4px; padding: 3px; margin: 0 0 8px; background: rgba(255,255,255,0.06); border-radius: var(--r-pill); }
 .scope label { flex: 1; margin: 0; text-align: center; padding: 8px; border-radius: var(--r-pill); font-size: 0.85rem; font-weight: 600; color: var(--text-2); cursor: pointer; transition: background .25s var(--ease), color .25s var(--ease); }
 .scope input { display: none; }
@@ -437,7 +475,7 @@ details:not(.add) > summary { padding: 6px 0; font-weight: 600; }
 .hex-row input[type=text] { font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: uppercase; }
 
 /* rows that open a pop-up editor */
-.edit-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; cursor: pointer; transition: opacity .2s var(--ease), transform .15s var(--ease); }
+.edit-row { display: flex; align-items: center; gap: 12px; padding-top: 14px; padding-bottom: 14px; cursor: pointer; }
 .edit-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .edit-row .grow strong { font-weight: 600; }
 .edit-row.inactive { opacity: .55; }

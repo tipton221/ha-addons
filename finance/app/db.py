@@ -138,10 +138,13 @@ class Database:
         wanted = {
             "transactions": [("note", "TEXT"), ("category_id", "INTEGER"), ("pending_amount", "REAL"),
                              ("transfer_peer", "TEXT"),
-                             ("name_override", "TEXT")],  # one-off name (from YNAB) for this transaction only  # id of the other side of a transfer or card payment,
+                             ("name_override", "TEXT"),
+                             ("bill_id", "INTEGER")],  # NULL: matched by rule; 0: not a bill; >0: this bill  # one-off name (from YNAB) for this transaction only  # id of the other side of a transfer or card payment,
             "accounts": [("display_name", "TEXT")],
             "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
-                  ("account_id", "TEXT")],  # chosen card; NULL means the card of the last charge,
+                  ("account_id", "TEXT"),
+                  ("kind", "TEXT NOT NULL DEFAULT 'bill'"),
+                  ("is_payday", "INTEGER NOT NULL DEFAULT 0")],  # the paycheck that sets paydays  # 'bill' (money out) or 'income' (money in)  # chosen card; NULL means the card of the last charge,
         }
         for table, cols in wanted.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

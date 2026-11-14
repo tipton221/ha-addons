@@ -24,9 +24,9 @@ from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
-from .bills import CADENCE_MONTHS, bill_status, coverage, detect, normalize, save_detected
+from .bills import CADENCES, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
-from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, pair_transfers, resolve,
+from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import sync_all, sync_ynab
 from .ynab_names import apply_ynab_names
@@ -151,6 +151,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
+    templates.env.globals["cadence_label"] = {
+        "monthly": "Monthly", "biweekly": "Every 2 weeks", "quarterly": "Every 3 months",
+        "semiannual": "Every 6 months", "yearly": "Yearly"}
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -273,6 +276,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         value = db.get_kv("account_filter") or None
         return value if value in {a["account_id"] for a in plaid_accounts()} else None
 
+    def pending_only() -> bool:
+        return db.get_kv("pending_only") == "1"
+
+    def all_list(account: str | None, before=None) -> list[dict]:
+        """The All transactions list: reviewed transactions, or every pending one when that filter is on."""
+        if pending_only():
+            return list_transactions(db, account=account, before=before, limit=PAGE, where="t.pending = 1")
+        return list_transactions(db, reviewed=True, account=account, before=before, limit=PAGE)
+
     def today() -> date:
         return datetime.now(PACIFIC).date()
 
@@ -292,20 +304,26 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def home(request: Request):
         inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
         selected = account_filter()
-        rest = resolve(db, list_transactions(db, reviewed=True, account=selected, limit=PAGE))
+        rest = resolve(db, all_list(selected))
         cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
+            pending_count = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid' AND pending=1 "
+                                         + ("AND account_id=?" if selected else ""),
+                                         (selected,) if selected else ()).fetchone()["n"]
         # Every scheduled bill, furthest out first so the next one sits at the bottom (like YNAB).
         upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"]
                            and (not selected or b["account_id"] == selected)),
                           key=lambda b: b["next_due"], reverse=True)
         return templates.TemplateResponse(request, "home.html", {
-            "upcoming": upcoming, "upcoming_total": sum(b["amount"] for b in upcoming), "colors": COLORS,
+            "upcoming": upcoming, "colors": COLORS,
+            "upcoming_out": sum(b["amount"] for b in upcoming if b["kind"] != "income"),
+            "upcoming_in": sum(b["amount"] for b in upcoming if b["kind"] == "income"),
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
             "groups": group_by_date(rest, today()), "more": page_after(rest),
-            "accounts": plaid_accounts(), "selected": selected,
+            "accounts": plaid_accounts(), "selected": selected, "pending_only": pending_only(),
+            "pending_count": pending_count,
         })
 
     @app.get("/api/transactions/page", response_class=HTMLResponse)
@@ -316,8 +334,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             int(rid)
         except ValueError:
             raise HTTPException(400, "Bad cursor")
-        rows = resolve(db, list_transactions(db, reviewed=True, account=account_filter(),
-                                             before=(d, rid), limit=PAGE))
+        rows = resolve(db, all_list(account_filter(), before=(d, rid)))
         return templates.TemplateResponse(request, "_rows.html", {
             "groups": group_by_date(rows, today()), "more": page_after(rows)})
 
@@ -328,6 +345,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if account and account not in {a["account_id"] for a in plaid_accounts()}:
             raise HTTPException(400, "Unknown account")
         db.set_kv("account_filter", account)
+        return {"ok": True}
+
+    @app.post("/api/view/pending")
+    async def set_pending_filter(request: Request):
+        body = await request.json()
+        db.set_kv("pending_only", "1" if body.get("on") else "0")
         return {"ok": True}
 
     @app.get("/favicon.ico")
@@ -361,6 +384,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     @app.get("/api/transactions/{source}/{tid}")
     async def transaction_detail(source: str, tid: str):
         t = find_txn(source, tid)
+        keys = merchant_keys()
         return {
             "id": t["id"], "source": t["source"], "display_name": t["display_name"],
             "bank_name": t["name"], "merchant": t["merchant"], "merchant_key": t["merchant_key"],
@@ -370,37 +394,117 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "category_is_override": bool(t["category_id"]),
             "name_is_override": bool(t["name_override"]),
             "bill": t["bill"]["name"] if t["bill"] else None, "reviewed": bool(t["reviewed"]),
+            "bill_id": t["bill"]["id"] if t["bill"] else None, "bill_choice": t["bill_id"],
+            "bills": bill_choices(t["amount"] < 0),
+            "merchant_count": len(keys.get(t["merchant_key"], [])),
+            "similar": similar_merchants(t["merchant_key"], keys),
         }
+
+    # Prefixes that say how someone paid, not who they paid, so they do not make merchants "similar".
+    GENERIC_FIRST_WORDS = {"transfer", "sq", "tst", "pos", "paypal", "debit", "purchase", "check", "online",
+                           "ach", "deposit", "withdrawal", "web", "card", "recurring", "aplpay", "applepay",
+                           "venmo", "zelle", "atm", "fee", "interest", "mobile", "point", "sale", "pp"}
+
+    def merchant_keys() -> dict[str, list[dict]]:
+        """Plaid transactions grouped by merchant key."""
+        with db.connect() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT rowid, merchant, name FROM transactions WHERE source='plaid'")]
+        out: dict[str, list[dict]] = {}
+        for r in rows:
+            out.setdefault(merchant_key(r), []).append(r)
+        return out
+
+    def similar_merchants(key: str, keys: dict[str, list[dict]]) -> list[dict]:
+        """Other merchant keys that start with the same word ("amazon mktpl ab", "amazon prime"),
+        so one rename can cover bank descriptions that carry order numbers."""
+        first = key.split(" ")[0] if key else ""
+        if len(first) < 3 or first in GENERIC_FIRST_WORDS:
+            return []
+        out = [{"key": k, "count": len(v), "sample": (v[0]["merchant"] or v[0]["name"] or "")}
+               for k, v in keys.items() if k != key and k.split(" ")[0] == first]
+        return sorted(out, key=lambda x: -x["count"])[:50]
+
+    def bill_choices(income: bool) -> list[dict]:
+        with db.connect() as conn:
+            return [{"id": r["id"], "name": r["name"]} for r in conn.execute(
+                "SELECT id, name FROM bills WHERE kind=? ORDER BY name COLLATE NOCASE",
+                ("income" if income else "bill",))]
 
     @app.post("/api/transactions/{source}/{tid}")
     async def edit_transaction(source: str, tid: str, request: Request):
         t = find_txn(source, tid)
         body = await request.json()
+        scope = "this" if body.get("scope") == "this" else "merchant"
+        # Similar merchant keys the user chose to include (checked against the real list).
+        also = []
+        if scope == "merchant" and body.get("similar"):
+            allowed = {s["key"] for s in similar_merchants(t["merchant_key"], merchant_keys())}
+            also = [k for k in body["similar"] if k in allowed]
         if "display_name" in body:
             name = str(body["display_name"] or "").strip()[:80]
             bank = (t["merchant"] or t["name"] or "").strip()
-            if t["name_override"]:  # a one-off name (from YNAB) stays one-off
-                with db.connect() as conn:
-                    conn.execute("UPDATE transactions SET name_override=? WHERE source=? AND id=?",
-                                 (None if name in ("", bank) else name, source, tid))
-            else:
-                set_merchant_rule(db, t["merchant_key"], display_name=None if name in ("", bank) else name)
+            new = None if name in ("", bank) else name
+            with db.connect() as conn:
+                if scope == "this":
+                    conn.execute("UPDATE transactions SET name_override=? WHERE source=? AND id=?", (new, source, tid))
+            if scope == "merchant":
+                for key in [t["merchant_key"], *also]:
+                    set_merchant_rule(db, key, display_name=new)
+                    clear_name_overrides(key)
         if "category_id" in body:
             cid = body["category_id"]
             with db.connect() as conn:
                 if cid is not None and not conn.execute("SELECT 1 FROM categories WHERE id=?", (int(cid),)).fetchone():
                     raise HTTPException(400, "Unknown category")
-            if body.get("scope") == "this":
+            if scope == "this":
                 with db.connect() as conn:
                     conn.execute("UPDATE transactions SET category_id=? WHERE source=? AND id=?",
                                  (int(cid) if cid is not None else None, source, tid))
             else:
-                set_merchant_rule(db, t["merchant_key"], category_id=int(cid) if cid is not None else None)
+                for key in [t["merchant_key"], *also]:
+                    set_merchant_rule(db, key, category_id=int(cid) if cid is not None else None)
+        if "bill_id" in body:  # "" or None: automatic; 0: not a bill; a bill id: that bill
+            raw = body["bill_id"]
+            bid = None if raw in (None, "", "auto") else int(raw)
+            with db.connect() as conn:
+                if bid and not conn.execute("SELECT 1 FROM bills WHERE id=?", (bid,)).fetchone():
+                    raise HTTPException(400, "Unknown bill")
+                conn.execute("UPDATE transactions SET bill_id=? WHERE source=? AND id=?", (bid, source, tid))
         if "note" in body:
             note = str(body["note"] or "").strip()[:500] or None
             with db.connect() as conn:
                 conn.execute("UPDATE transactions SET note=? WHERE source=? AND id=?", (note, source, tid))
         return {"ok": True}
+
+    def clear_name_overrides(key: str) -> None:
+        """A merchant-wide name replaces one-off names on that merchant's transactions."""
+        with db.connect() as conn:
+            rows = conn.execute("SELECT rowid, merchant, name FROM transactions "
+                                "WHERE source='plaid' AND name_override IS NOT NULL").fetchall()
+            ids = [(r["rowid"],) for r in rows if merchant_key(dict(r)) == key]
+            conn.executemany("UPDATE transactions SET name_override=NULL WHERE rowid=?", ids)
+
+    @app.post("/api/rows")
+    async def render_rows(request: Request):
+        """Fresh HTML for transaction rows already on the page, so a save does not reload the page."""
+        body = await request.json()
+        wanted = {str(r["id"]): bool(r.get("review")) for r in body.get("rows", [])[:900]}
+        if not wanted:
+            return {"rows": {}}
+        marks = ",".join("?" * len(wanted))
+        rows = resolve(db, list_transactions(db, where=f"t.id IN ({marks})", params=tuple(wanted), limit=len(wanted)))
+        macro = templates.env.get_template("_txn.html").make_module({}).txn_row
+        return {"rows": {t["id"]: str(macro(t, review=wanted[t["id"]])) for t in rows}}
+
+    @app.get("/api/merchant-names")
+    async def merchant_names():
+        """Names in use, most common first, for suggestions while typing a name."""
+        rows = resolve(db, list_transactions(db, limit=100000))
+        counts: dict[str, int] = {}
+        for t in rows:
+            counts[t["display_name"]] = counts.get(t["display_name"], 0) + 1
+        return {"names": [n for n, _ in sorted(counts.items(), key=lambda x: (-x[1], x[0].lower()))][:2000]}
 
     @app.get("/accounts", response_class=HTMLResponse)
     async def accounts_page(request: Request):
@@ -477,11 +581,27 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     @app.get("/bills", response_class=HTMLResponse)
     async def bills_page(request: Request):
         today = datetime.now(PACIFIC).date()
-        bills = bill_status(db, today)
+        everything = bill_status(db, today)
+        bills = [b for b in everything if b["kind"] != "income"]
+        income = [b for b in everything if b["kind"] == "income"]
         return templates.TemplateResponse(request, "bills.html", {
-            "bills": bills, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(), "cov": coverage(db, schedule(), today),
+            "bills": bills, "income": income, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
+            "cov": coverage(db, schedule(), today),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
+            "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })
+
+    @app.get("/api/bills/form", response_class=HTMLResponse)
+    async def bill_form_from_transaction(request: Request, source: str, id: str):
+        """A new bill (or income) form filled in from a transaction."""
+        t = find_txn(source, id)
+        d = date.fromisoformat(t["date"])
+        prefill = {"name": t["display_name"], "match": t["merchant_key"], "amount": abs(t["amount"]),
+                   "kind": "income" if t["amount"] < 0 else "bill", "cadence": "monthly", "due_day": d.day,
+                   "account_choice": t["account_id"], "from_txn": t["id"]}
+        macro = templates.env.get_template("_bill_form.html").make_module(
+            {"accounts": plaid_accounts(), "colors": COLORS}).bill_form
+        return HTMLResponse(str(macro(None, prefill)))
 
     def bill_fields(body: dict) -> dict:
         try:
@@ -489,13 +609,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "name": str(body["name"]).strip()[:80],
                 "match": normalize(str(body.get("match") or body["name"])),
                 "amount": round(abs(float(body.get("amount") or 0)), 2),
-                "cadence": body.get("cadence") if body.get("cadence") in CADENCE_MONTHS else "monthly",
+                "cadence": body.get("cadence") if body.get("cadence") in CADENCES else "monthly",
                 "due_day": int(body["due_day"]) if body.get("due_day") else None,
                 "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
                 "active": 1 if body.get("active", True) else 0,
                 "color": valid_color(body.get("color"), "purple"),
                 "varies": 1 if body.get("varies") else 0,
                 "account_id": str(body["account_id"]) if body.get("account_id") else None,
+                "kind": "income" if body.get("kind") == "income" else "bill",
+                "is_payday": 1 if body.get("is_payday") and body.get("kind") == "income" else 0,
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
@@ -504,7 +626,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if out["account_id"] and out["account_id"] not in {a["account_id"] for a in plaid_accounts()}:
             raise HTTPException(400, "Unknown account")
         if not out["varies"] and out["amount"] <= 0:
-            raise HTTPException(400, "Enter the amount, or mark the bill as varying")
+            raise HTTPException(400, "Enter the amount, or mark it as varying")
+        if out["kind"] == "income" and body.get("color") in (None, ""):
+            out["color"] = "green"
         return out
 
     @app.post("/api/bills")
@@ -513,12 +637,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         f = bill_fields(body)
         with db.connect() as conn:
             if body.get("id"):
+                bill_id = int(body["id"])
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=?, color=?, varies=?, account_id=? WHERE id=?", (*f.values(), int(body["id"])))
+                             "active=?, color=?, varies=?, account_id=?, kind=?, is_payday=? WHERE id=?",
+                             (*f.values(), bill_id))
             else:
-                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
-                             "varies, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
-        return {"ok": True}
+                bill_id = conn.execute(
+                    "INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
+                    "varies, account_id, kind, is_payday) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    tuple(f.values())).lastrowid
+            if f["is_payday"]:  # only one paycheck sets paydays
+                conn.execute("UPDATE bills SET is_payday=0 WHERE id != ?", (bill_id,))
+            if body.get("from_txn"):  # made from a transaction: that transaction belongs to it
+                conn.execute("UPDATE transactions SET bill_id=? WHERE source='plaid' AND id=?",
+                             (bill_id, str(body["from_txn"])))
+        return {"ok": True, "id": bill_id}
 
     @app.post("/api/bills/{bill_id}/delete")
     async def delete_bill(bill_id: int):
@@ -527,6 +660,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             if row and row["source"] == "detected":
                 conn.execute("INSERT OR IGNORE INTO bills_dismissed VALUES (?)", (row["match"],))
             conn.execute("DELETE FROM bills WHERE id=?", (bill_id,))
+            conn.execute("UPDATE transactions SET bill_id=NULL WHERE bill_id=?", (bill_id,))
         return {"ok": True}
 
     @app.post("/api/bills/detect")
