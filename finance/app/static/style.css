@@ -105,7 +105,7 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 .narrow { max-width: 420px; margin: 14vh auto 0; }
 .center { text-align: center; }
 
-.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; min-height: 44px; }
 .top h1 { margin: 0; }
 .actions { display: flex; gap: 8px; }
 
@@ -403,6 +403,8 @@ form .row-actions button { margin: 0; }
 .muted { color: var(--text-2); }
 .small { font-size: 0.85rem; }
 .msg { min-height: 1.3em; margin: 6px 4px; color: var(--text-2); font-size: 0.92rem; }
+/* An empty status line takes no room, so every page's first card starts at the same height. */
+.top ~ .msg:empty { min-height: 0; margin: 0; }
 .msg.error { color: var(--red); }
 code { font-size: 0.88em; }
 a { color: var(--blue); }
