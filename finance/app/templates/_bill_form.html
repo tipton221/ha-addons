@@ -37,7 +37,17 @@
   <label class="inline"><input name="varies" type="checkbox" {% if v and v.varies %}checked{% endif %}> Amount varies (use the average of recent ones)</label>
   <label class="inline kind-income" {% if not income %}hidden{% endif %}><input name="is_payday" type="checkbox" {% if v and v.is_payday %}checked{% endif %}> This is my paycheck (its dates are my paydays)</label>
   <label class="inline kind-bill" {% if income %}hidden{% endif %}><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
-  {% if b %}<button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Remove</button>{% endif %}
+  {% if b %}
+  <div class="bill-manage">
+    {% if b.archived_on %}
+    <button type="button" class="archive-bill wide-btn" data-id="{{ b.id }}" data-restore="1">Restore</button>
+    {% else %}
+    <button type="button" class="archive-bill wide-btn" data-id="{{ b.id }}">Archive</button>
+    {% endif %}
+    <button type="button" class="danger delete-bill wide-btn" data-id="{{ b.id }}">Delete</button>
+  </div>
+  <p class="hint">{% if b.archived_on %}Archived {{ b.archived_on | shortdate }}. It still tags charges up to then. Restore makes it active again.{% else %}Archive when it ends: it leaves coverage and Scheduled but keeps its tag on past charges. Delete removes it and its tags.{% endif %}</p>
+  {% endif %}
   <div class="sheet-actions">
     <button type="button" class="sheet-close">Cancel</button>
     <button type="submit" class="primary">Save</button>

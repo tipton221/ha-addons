@@ -146,6 +146,8 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
             amount, income = abs(t["amount"]), t["amount"] < 0
             d = date.fromisoformat(t["date"])
             for b in bills:
+                if b.get("archived_on") and t["date"] > b["archived_on"]:
+                    continue  # archived: keeps tagging old charges, not new ones
                 if (b["kind"] == "income") == income and bill_matches(b, key, amount, d, series.get(b["id"])):
                     t["bill"] = b
                     break

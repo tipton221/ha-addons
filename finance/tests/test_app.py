@@ -974,3 +974,30 @@ def test_bill_tags_need_amount_and_date(tmp_path, monkeypatch):
     # Right amount and date: tagged. Similar amount on the wrong day, wrong amount on the right day,
     # or an order near the annual fee months off schedule: not tagged.
     assert bill == {"v1": "Prime Video", "v2": "Prime Video", "y1": "Prime", "o1": None, "o2": None, "o3": None}
+
+
+def test_archived_bill_keeps_old_tags_and_leaves_coverage(tmp_path, monkeypatch):
+    from datetime import timedelta
+    t = D.today()
+    months = [t - timedelta(days=30 * n) for n in (3, 2, 1)]
+    rows = [(f"r{i}", "chk", d.isoformat(), "AVENUE APTS RENT", None, 1900.0, 0, "RENT_AND_UTILITIES", "X", 1)
+            for i, d in enumerate(months)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 5000, 5000)])
+    with db.connect() as conn:
+        bid = conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES "
+                           "('Old Rent', 'avenue apts rent', 1900, 'monthly', ?)", (months[-1].day,)).lastrowid
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post(f"/api/bills/{bid}/archive", json={}, headers=H).status_code == 200
+        # Old charges keep the tag; the bill is listed under Archived and not in Scheduled.
+        assert all(c.get(f"/api/transactions/plaid/r{i}").json()["bill"] == "Old Rent" for i in range(3))
+        assert "Archived" in c.get("/bills").text
+        assert "Old Rent" not in c.get("/").text.split('id="scheduled-wrap"')[1].split('id="all"')[0]
+        # A charge after the archive date is not tagged.
+        with db.connect() as conn:
+            conn.execute("UPDATE bills SET archived_on=? WHERE id=?", ((months[1] + timedelta(days=1)).isoformat(), bid))
+        assert c.get("/api/transactions/plaid/r2").json()["bill"] is None
+        assert c.get("/api/transactions/plaid/r1").json()["bill"] == "Old Rent"
+        # Restore brings it back.
+        c.post(f"/api/bills/{bid}/archive", json={"restore": True}, headers=H)
+        assert c.get("/api/transactions/plaid/r2").json()["bill"] == "Old Rent"

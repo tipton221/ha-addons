@@ -144,7 +144,8 @@ class Database:
             "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
                   ("account_id", "TEXT"),
                   ("kind", "TEXT NOT NULL DEFAULT 'bill'"),
-                  ("is_payday", "INTEGER NOT NULL DEFAULT 0")],  # the paycheck that sets paydays  # 'bill' (money out) or 'income' (money in)  # chosen card; NULL means the card of the last charge,
+                  ("is_payday", "INTEGER NOT NULL DEFAULT 0"),
+                  ("archived_on", "TEXT")],  # set when archived: tags charges up to this date only  # the paycheck that sets paydays  # 'bill' (money out) or 'income' (money in)  # chosen card; NULL means the card of the last charge,
         }
         for table, cols in wanted.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

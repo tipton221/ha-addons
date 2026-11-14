@@ -325,6 +325,7 @@ def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
     today = today or date.today()
     all_bills = bill_status(db, today)
     # Paydays come from the recurring income marked as the paycheck, if there is one.
+    all_bills = [b for b in all_bills if not b.get("archived_on")]  # archived bills are history only
     paycheck = next((b for b in all_bills if b.get("kind") == "income" and b.get("is_payday")), None)
     if paycheck:
         payday = paycheck["next_due"]

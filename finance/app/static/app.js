@@ -649,6 +649,18 @@ document.addEventListener("submit", async (ev) => {
 });
 
 document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".archive-bill");
+  if (!btn) return;
+  const restore = !!btn.dataset.restore;
+  try {
+    await api(`/api/bills/${btn.dataset.id}/archive`, { restore });
+    closeAllSheets();
+    toast(restore ? "Restored" : "Archived");
+    await refreshInPlace();
+  } catch (e) { toast(e.message, true); }
+});
+
+document.addEventListener("click", async (ev) => {
   const undo = ev.target.closest(".undo-rule");
   if (!undo) return;
   if (!confirm("Undo this rename? Its transactions go back to the bank's name and default category.")) return;
@@ -663,7 +675,7 @@ document.addEventListener("click", async (ev) => {
   const del = ev.target.closest(".delete-bill, .delete-cat");
   if (!del) return;
   const isBill = del.classList.contains("delete-bill");
-  if (!confirm(isBill ? "Remove this bill?" : "Remove this category? Its transactions go back to their default category.")) return;
+  if (!confirm(isBill ? "Delete this permanently? Its tag comes off every past transaction. (Archive keeps the tags.)" : "Remove this category? Its transactions go back to their default category.")) return;
   try {
     await api(isBill ? `/api/bills/${del.dataset.id}/delete` : `/api/categories/${del.dataset.id}/delete`);
     closeAllSheets();

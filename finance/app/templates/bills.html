@@ -65,13 +65,13 @@
 
 {% macro bill_rows(items, income=False) %}
   <ul class="list bills">
-    {% for b in items %}
-    <li class="edit-row {{ '' if (b.active or income) and not b.stale else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
+    {% for b in items %}{% set income = b.kind == "income" %}
+    <li class="edit-row {{ '' if (b.active or income) and not b.stale and not b.archived_on else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
       <div class="grow">
         <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-        <span class="muted small">{{ cadence_label[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · {{ "none found yet" if income else "no charge found" }}{% endif %}{% if not b.active and not income %} · not counted{% endif %}</span>
+        <span class="muted small">{{ cadence_label[b.cadence] }}{% if not b.archived_on %} · next {{ b.next_due.isoformat() | shortdate }}{% endif %}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · {{ "none found yet" if income else "no charge found" }}{% endif %}{% if not b.active and not income and not b.archived_on %} · not counted{% endif %}</span>
         {% for a in accounts if a.account_id == b.account_id %}<span class="muted small">{{ a.label }}</span>{% endfor %}
-        {% if b.stale %}<span class="small warn-text">None since {{ b.last_date | shortdate }}. {{ "Remove it if it ended." if income else "Not counted; remove it if it ended." }}</span>{% endif %}
+        {% if b.archived_on %}<span class="muted small">Archived {{ b.archived_on | shortdate }}</span>{% elif b.stale %}<span class="small warn-text">None since {{ b.last_date | shortdate }}. {{ "Archive it if it ended." if income else "Not counted; archive it if it ended." }}</span>{% endif %}
       </div>
       <span class="amount {% if income %}inflow{% endif %}">{% if b.varies %}≈ {% endif %}{% if income %}+{% endif %}{{ b.amount | money }}</span>
       <span class="chev" aria-hidden="true">›</span>
@@ -99,4 +99,14 @@
   <p class="muted small">Paychecks, interest, and other regular deposits. Add one with "Add a bill or income" and choose Income, or open a deposit and pick "Make it recurring income" under Bill or income. Income shows in Scheduled but never changes coverage.</p>
   {% endif %}
 </section>
+
+{% if archived %}
+<section class="card">
+  <details class="scheduled">
+    <summary><span class="chev-down" aria-hidden="true">›</span> Archived <span class="count zero">{{ archived | length }}</span></summary>
+    <p class="muted small">Ended bills and income. They keep their tags on charges up to the day they were archived, and are left out of coverage and Scheduled.</p>
+    {{ bill_rows(archived) }}
+  </details>
+</section>
+{% endif %}
 {% endblock %}
