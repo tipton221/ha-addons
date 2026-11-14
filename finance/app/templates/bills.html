@@ -18,6 +18,10 @@
     <label>Matches charges containing<input name="match" type="text" value="{{ b.match if b else '' }}" placeholder="same as name"></label>
     <label>Next due (optional)<input name="next_due" type="date" value="{{ b.next_due_override if b and b.next_due_override else '' }}"></label>
   </div>
+  <label>Tag color</label>
+  <div class="swatches">
+    {% for c in ["purple", "blue", "teal", "green", "yellow", "orange", "red", "pink", "indigo", "gray"] %}<label><input type="radio" name="color" value="{{ c }}" {% if (b.color if b else "purple") == c %}checked{% endif %}><span class="c-{{ c }}"></span></label>{% endfor %}
+  </div>
   <label class="inline"><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
   <div class="row-actions">
     <button type="submit" class="primary">Save</button>
@@ -27,6 +31,7 @@
 {% endmacro %}
 {% block content %}
 <header class="top"><h1>Bills</h1></header>
+<p class="muted small">Transactions that match a bill get its colored ↻ tag in the transaction lists.</p>
 <p id="msg" class="msg" role="status"></p>
 
 <section class="card">
@@ -41,7 +46,7 @@
   {% if cov.due %}
   <ul class="list">
     {% for b in cov.due %}
-    <li><div><strong>{{ b.name }}</strong><span class="muted small">{{ b.next_due.isoformat() | shortdate }}</span></div><span class="amount">{{ b.amount | money }}</span></li>
+    <li class="plain-row"><div class="grow"><span class="pill tag c-{{ b.color or 'purple' }}">↻ {{ b.name }}</span><span class="muted small">{{ b.next_due.isoformat() | shortdate }}</span></div><span class="amount">{{ b.amount | money }}</span></li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -70,7 +75,7 @@
     <li class="{{ '' if b.active and not b.stale else 'inactive' }}">
       <details>
         <summary>
-          <span class="grow"><strong>{{ b.name }}</strong>
+          <span class="grow"><span><span class="pill tag c-{{ b.color or 'purple' }}">↻ {{ b.name }}</span></span>
             <span class="muted small">{{ {"monthly": "Monthly", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[b.cadence] }} · next {{ b.next_due.isoformat() | shortdate }}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · no charge found{% endif %}{% if not b.active %} · not counted{% endif %}</span>
             {% if b.stale %}<span class="small warn-text">No charge since {{ b.last_date | shortdate }}. Not counted; remove it if it ended.</span>{% endif %}</span>
           <span class="amount">{{ b.amount | money }}</span>

@@ -97,6 +97,22 @@ CREATE TABLE IF NOT EXISTS bills_dismissed (
     match           TEXT PRIMARY KEY
 );
 
+-- The user's own categories (seeded with a starter list, then fully editable).
+CREATE TABLE IF NOT EXISTS categories (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    color           TEXT NOT NULL DEFAULT 'gray',
+    sort            INTEGER NOT NULL DEFAULT 0
+);
+
+-- Per-merchant choices that apply to past and future transactions.
+-- merchant_key is the normalized raw merchant (or description) from the bank.
+CREATE TABLE IF NOT EXISTS merchant_rules (
+    merchant_key    TEXT PRIMARY KEY,
+    display_name    TEXT,
+    category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL
+);
+
 -- Which YNAB accounts track the same card or bank account as a Plaid account.
 -- More than one is allowed, e.g. when a card was converted and YNAB kept the old account.
 CREATE TABLE IF NOT EXISTS account_links (
@@ -114,6 +130,21 @@ class Database:
         with self.connect() as conn:
             self._migrate(conn)
             conn.executescript(SCHEMA)
+            self._add_columns(conn)
+
+    @staticmethod
+    def _add_columns(conn: sqlite3.Connection) -> None:
+        """Columns added after the first release (0.4.0)."""
+        wanted = {
+            "transactions": [("note", "TEXT"), ("category_id", "INTEGER")],
+            "accounts": [("display_name", "TEXT")],
+            "bills": [("color", "TEXT NOT NULL DEFAULT 'purple'")],
+        }
+        for table, cols in wanted.items():
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import csv
 import io
 import json
+import sqlite3
 from datetime import date, datetime
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -25,6 +26,8 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCE_MONTHS, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
+from .ledger import (COLORS, categories, group_by_date, list_transactions, resolve, seed_categories,
+                     set_merchant_rule)
 from .sync import sync_all, sync_ynab
 from .ynab import YNAB
 
@@ -66,6 +69,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     plaid = plaid or (Plaid(settings) if settings.plaid_configured else None)
     ynab = ynab or YNAB(settings)
     sync_lock = asyncio.Lock()
+
+    seed_categories(db)
 
     if db.get_kv("inbox_initialized") != "1":
         # Before 0.3.0 every transaction started unreviewed; start the inbox with the last week only.
@@ -253,26 +258,104 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         raw = db.get_kv("payday_schedule")
         return json.loads(raw) if raw else {"kind": "semimonthly", "days": [10, 25]}
 
-    def txn_query(where: str = "", params: tuple = (), limit: int | None = None, order: str = "t.date DESC, t.first_seen_at DESC"):
-        sql = ("SELECT t.*, a.name AS account_name, a.mask, a.type AS account_type, p.institution "
-               "FROM transactions t LEFT JOIN accounts a ON a.account_id = t.account_id "
-               "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE t.source='plaid' "
-               + (f"AND {where} " if where else "") + f"ORDER BY {order}")
-        if limit:
-            sql += f" LIMIT {int(limit)}"
+    def hidden_accounts() -> list[str]:
+        raw = db.get_kv("hidden_accounts")
+        return json.loads(raw) if raw else []
+
+    def today() -> date:
+        return datetime.now(PACIFIC).date()
+
+    def plaid_accounts() -> list[dict]:
         with db.connect() as conn:
-            return [dict(r) for r in conn.execute(sql, params)]
+            return [dict(r) for r in conn.execute(
+                "SELECT a.*, COALESCE(a.display_name, a.name) AS label, p.institution FROM accounts a "
+                "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE a.source='plaid' "
+                "ORDER BY p.institution, a.type, label")]
+
+    PAGE = 60
+
+    def page_after(rows: list[dict]) -> str | None:
+        return f"{rows[-1]['date']}:{rows[-1]['rid']}" if len(rows) == PAGE else None
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        inbox = txn_query("t.reviewed = 0", limit=300)
-        cov = coverage(db, schedule(), datetime.now(PACIFIC).date())
+        inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
+        hidden = hidden_accounts()
+        rest = resolve(db, list_transactions(db, reviewed=True, hidden_accounts=hidden, limit=PAGE))
+        cov = coverage(db, schedule(), today())
         with db.connect() as conn:
             attention = conn.execute("SELECT COUNT(*) AS n FROM plaid_items WHERE status != 'ok'").fetchone()["n"]
         return templates.TemplateResponse(request, "home.html", {
             "settings": settings, "plaid_ready": plaid is not None, "inbox": inbox, "cov": cov,
             "attention": attention, "last_sync": db.get_kv("last_sync_at"),
+            "groups": group_by_date(rest, today()), "more": page_after(rest),
+            "accounts": plaid_accounts(), "hidden": hidden,
         })
+
+    @app.get("/api/transactions/page", response_class=HTMLResponse)
+    async def more_transactions(request: Request, before: str):
+        try:
+            d, rid = before.split(":")
+            date.fromisoformat(d)
+            int(rid)
+        except ValueError:
+            raise HTTPException(400, "Bad cursor")
+        rows = resolve(db, list_transactions(db, reviewed=True, hidden_accounts=hidden_accounts(),
+                                             before=(d, rid), limit=PAGE))
+        return templates.TemplateResponse(request, "_rows.html", {
+            "groups": group_by_date(rows, today()), "more": page_after(rows)})
+
+    @app.post("/api/view/hidden-accounts")
+    async def set_hidden(request: Request):
+        body = await request.json()
+        valid = {a["account_id"] for a in plaid_accounts()}
+        db.set_kv("hidden_accounts", json.dumps([a for a in body.get("hidden", []) if a in valid]))
+        return {"ok": True}
+
+    def find_txn(source: str, tid: str) -> dict:
+        rows = list_transactions(db, where="t.source = ? AND t.id = ?", params=(source, tid), limit=1) \
+            if source == "plaid" else []
+        if not rows:
+            raise HTTPException(404, "Transaction not found")
+        return resolve(db, rows)[0]
+
+    @app.get("/api/transactions/{source}/{tid}")
+    async def transaction_detail(source: str, tid: str):
+        t = find_txn(source, tid)
+        return {
+            "id": t["id"], "source": t["source"], "display_name": t["display_name"],
+            "bank_name": t["name"], "merchant": t["merchant"], "merchant_key": t["merchant_key"],
+            "date": t["date"], "amount": t["amount"], "pending": bool(t["pending"]),
+            "account": t["account_label"], "note": t["note"] or "",
+            "category_id": (t["category_info"] or {}).get("id"),
+            "category_is_override": bool(t["category_id"]),
+            "bill": t["bill"]["name"] if t["bill"] else None, "reviewed": bool(t["reviewed"]),
+        }
+
+    @app.post("/api/transactions/{source}/{tid}")
+    async def edit_transaction(source: str, tid: str, request: Request):
+        t = find_txn(source, tid)
+        body = await request.json()
+        if "display_name" in body:
+            name = str(body["display_name"] or "").strip()[:80]
+            bank = (t["merchant"] or t["name"] or "").strip()
+            set_merchant_rule(db, t["merchant_key"], display_name=None if name in ("", bank) else name)
+        if "category_id" in body:
+            cid = body["category_id"]
+            with db.connect() as conn:
+                if cid is not None and not conn.execute("SELECT 1 FROM categories WHERE id=?", (int(cid),)).fetchone():
+                    raise HTTPException(400, "Unknown category")
+            if body.get("scope") == "this":
+                with db.connect() as conn:
+                    conn.execute("UPDATE transactions SET category_id=? WHERE source=? AND id=?",
+                                 (int(cid) if cid is not None else None, source, tid))
+            else:
+                set_merchant_rule(db, t["merchant_key"], category_id=int(cid) if cid is not None else None)
+        if "note" in body:
+            note = str(body["note"] or "").strip()[:500] or None
+            with db.connect() as conn:
+                conn.execute("UPDATE transactions SET note=? WHERE source=? AND id=?", (note, source, tid))
+        return {"ok": True}
 
     @app.get("/accounts", response_class=HTMLResponse)
     async def accounts_page(request: Request):
@@ -280,9 +363,6 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             items = [dict(r) for r in conn.execute(
                 "SELECT item_id, institution, status, error_code, update_status, last_sync_at "
                 "FROM plaid_items ORDER BY institution")]
-            accounts = [dict(r) for r in conn.execute(
-                "SELECT a.*, p.institution FROM accounts a LEFT JOIN plaid_items p "
-                "ON a.item_id = p.item_id WHERE a.source='plaid' ORDER BY p.institution, a.type, a.name")]
             total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid'").fetchone()["n"]
             ynab_total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='ynab'").fetchone()["n"]
         ynab_status = None
@@ -291,8 +371,52 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                            "count": ynab_total}
         return templates.TemplateResponse(request, "accounts.html", {
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
-            "accounts": accounts, "total": total, "ynab": ynab_status,
+            "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
+            "categories": categories(db), "colors": COLORS,
         })
+
+    @app.post("/api/accounts/{account_id}/rename")
+    async def rename_account(account_id: str, request: Request):
+        body = await request.json()
+        name = str(body.get("name") or "").strip()[:60] or None
+        with db.connect() as conn:
+            cur = conn.execute("UPDATE accounts SET display_name=? WHERE account_id=? AND source='plaid'",
+                               (name, account_id))
+            if not cur.rowcount:
+                raise HTTPException(404, "Unknown account")
+        return {"ok": True}
+
+    @app.post("/api/categories")
+    async def save_category(request: Request):
+        body = await request.json()
+        name = str(body.get("name") or "").strip()[:40]
+        color = body.get("color") if body.get("color") in COLORS else "gray"
+        if not name:
+            raise HTTPException(400, "Name the category")
+        try:
+            with db.connect() as conn:
+                if body.get("id"):
+                    conn.execute("UPDATE categories SET name=?, color=? WHERE id=?", (name, color, int(body["id"])))
+                    new_id = int(body["id"])
+                else:
+                    sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM categories").fetchone()[0]
+                    new_id = conn.execute("INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)",
+                                          (name, color, sort)).lastrowid
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "A category with that name already exists")
+        return {"ok": True, "id": new_id}
+
+    @app.post("/api/categories/{cat_id}/delete")
+    async def delete_category(cat_id: int):
+        with db.connect() as conn:
+            conn.execute("UPDATE merchant_rules SET category_id=NULL WHERE category_id=?", (cat_id,))
+            conn.execute("UPDATE transactions SET category_id=NULL WHERE category_id=?", (cat_id,))
+            conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+        return {"ok": True}
+
+    @app.get("/api/categories")
+    async def list_categories():
+        return {"categories": categories(db)}
 
     @app.post("/api/inbox/review-all")
     async def review_all(request: Request):
@@ -309,7 +433,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         today = datetime.now(PACIFIC).date()
         bills = bill_status(db, today)
         return templates.TemplateResponse(request, "bills.html", {
-            "bills": bills, "schedule": schedule(), "cov": coverage(db, schedule(), today),
+            "bills": bills, "colors": COLORS, "schedule": schedule(), "cov": coverage(db, schedule(), today),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
         })
 
@@ -323,6 +447,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "due_day": int(body["due_day"]) if body.get("due_day") else None,
                 "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
                 "active": 1 if body.get("active", True) else 0,
+                "color": body.get("color") if body.get("color") in COLORS else "purple",
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
@@ -337,10 +462,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if body.get("id"):
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=? WHERE id=?", (*f.values(), int(body["id"])))
+                             "active=?, color=? WHERE id=?", (*f.values(), int(body["id"])))
             else:
-                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
+                conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(f.values()))
         return {"ok": True}
 
     @app.post("/api/bills/{bill_id}/delete")
@@ -378,17 +503,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     # ---------- search and export ----------
 
-    def search_filter(q: dict) -> tuple[str, tuple]:
+    def search(q: dict) -> list[dict]:
         where, params = [], []
-        if q.get("q"):
-            where.append("(lower(coalesce(t.merchant,'')) LIKE ? OR lower(t.name) LIKE ?)")
-            params += [f"%{q['q'].lower()}%"] * 2
         if q.get("account"):
             where.append("t.account_id = ?")
             params.append(q["account"])
-        if q.get("category"):
-            where.append("t.category = ?")
-            params.append(q["category"])
         if q.get("start"):
             where.append("t.date >= ?")
             params.append(q["start"])
@@ -402,41 +521,41 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                     where.append(f"ABS(t.amount) {op} ?")
                 except ValueError:
                     pass
-        return " AND ".join(where), tuple(params)
+        rows = resolve(db, list_transactions(db, where=" AND ".join(where), params=tuple(params), limit=0))
+        if q.get("q"):
+            needle = q["q"].lower()
+            rows = [t for t in rows if needle in " ".join(
+                [t["display_name"], t["name"] or "", t["merchant"] or "", t["note"] or ""]).lower()]
+        if q.get("category"):
+            rows = [t for t in rows if str((t["category_info"] or {}).get("id")) == q["category"]]
+        return rows
 
     @app.get("/search", response_class=HTMLResponse)
     async def search_page(request: Request):
-        q = dict(request.query_params)
-        where, params = search_filter(q)
-        rows = txn_query(where, params, limit=1001) if any(q.values()) else txn_query(limit=100)
+        q = {k: v for k, v in request.query_params.items() if v}
+        rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
         more = len(rows) > 1000
-        rows = rows[:1000]
-        with db.connect() as conn:
-            accts = [dict(r) for r in conn.execute(
-                "SELECT a.account_id, a.name, a.mask, p.institution FROM accounts a "
-                "LEFT JOIN plaid_items p ON a.item_id = p.item_id WHERE a.source='plaid' ORDER BY p.institution, a.name")]
-            cats = [r["category"] for r in conn.execute(
-                "SELECT DISTINCT category FROM transactions WHERE source='plaid' AND category IS NOT NULL ORDER BY 1")]
         out = sum(t["amount"] for t in rows if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in rows if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
-            "q": q, "rows": rows, "more": more, "accounts": accts, "categories": cats,
-            "searched": any(q.values()), "total_out": out, "total_in": inflow,
-            "export_query": urlencode({k: v for k, v in q.items() if v}),
+            "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
+            "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
+            "total_out": out, "total_in": inflow, "export_query": urlencode(q),
         })
 
     @app.get("/export.csv")
     async def export_csv(request: Request):
-        where, params = search_filter(dict(request.query_params))
-        rows = txn_query(where, params, order="t.date, t.first_seen_at")
+        rows = search({k: v for k, v in request.query_params.items() if v})
+        rows.sort(key=lambda t: (t["date"], t["rid"]))
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["date", "authorized_date", "institution", "account", "mask", "merchant", "description",
-                    "amount", "category", "category_detail", "pending", "reviewed"])
+        w.writerow(["date", "authorized_date", "institution", "account", "name", "bank_description",
+                    "amount", "category", "note", "bill", "pending", "reviewed"])
         for t in rows:
-            w.writerow([t["date"], t["authorized_date"] or "", t["institution"] or "", t["account_name"] or "",
-                        t["mask"] or "", t["merchant"] or "", t["name"], f"{-t['amount']:.2f}",
-                        t["category"] or "", t["category_detail"] or "", "yes" if t["pending"] else "no",
+            w.writerow([t["date"], t["authorized_date"] or "", t["institution"] or "", t["account_label"],
+                        t["display_name"], t["name"], f"{-t['amount']:.2f}",
+                        (t["category_info"] or {}).get("name", ""), t["note"] or "",
+                        t["bill"]["name"] if t["bill"] else "", "yes" if t["pending"] else "no",
                         "yes" if t["reviewed"] else "no"])
         stamp = datetime.now(PACIFIC).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="text/csv",

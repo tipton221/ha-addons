@@ -1,47 +1,57 @@
 {% extends "base.html" %}
+{% from "_txn.html" import txn_row %}
 {% set nav = "inbox" %}
 {% block page %}home{% endblock %}
 {% block content %}
 <header class="top">
   <h1>Inbox</h1>
   <div class="actions">
-    {% if plaid_ready %}<button id="sync" class="ghost">Sync now</button>{% endif %}
+    {% if plaid_ready %}
+    <button id="sync" class="icon-btn" aria-label="Sync now" title="Sync now">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></svg>
+    </button>
+    {% endif %}
   </div>
 </header>
-<p id="msg" class="msg" role="status"></p>
 
 {% if attention %}
 <div class="banner warn">{{ attention }} bank connection{{ "s need" if attention > 1 else " needs" }} attention. <a href="/accounts">Open Accounts</a></div>
 {% endif %}
 
-<a class="card coverage {{ 'ok' if cov.ok else 'short' }}" href="/bills">
-  <span class="muted small">Through next payday, {{ cov.payday.isoformat() | shortdate }}</span>
+<a class="card hero {{ 'ok' if cov.ok else 'short' }}" href="/bills">
+  <span class="eyebrow">Left through {{ cov.payday.isoformat() | shortdate }}</span>
   <span class="big-number">{{ cov.left | money }}</span>
-  <span class="small">{% if cov.ok %}left after card balances and bills due{% else %}short: card balances and bills due exceed cash{% endif %}</span>
-  <span class="muted small">Cash {{ cov.cash | money }} · cards {{ (cov.cards + cov.pending) | money }} · bills due {{ cov.due_total | money }}</span>
+  <span class="parts">
+    <span>Cash <b>{{ cov.cash | money }}</b></span>
+    <span>Cards <b>{{ (cov.cards + cov.pending) | money }}</b></span>
+    <span>Bills due <b>{{ cov.due_total | money }}</b></span>
+  </span>
 </a>
 
-<section class="card">
+<section class="card" id="review-card">
   <div class="card-head">
-    <h2>To review <span class="count" id="inbox-count">{{ inbox | length }}</span></h2>
-    {% if inbox %}<button id="review-all" class="ghost">Mark all reviewed</button>{% endif %}
+    <h2>To review<span class="count {% if not inbox %}zero{% endif %}" id="inbox-count">{{ inbox | length }}</span></h2>
+    {% if inbox %}<button id="review-all">Mark all reviewed</button>{% endif %}
   </div>
-  {% if inbox %}
-  <ul class="list txns" id="inbox">
-    {% for t in inbox %}
-    <li data-id="{{ t.id }}">
-      <div class="grow">
-        <strong>{{ t.merchant or t.name }}</strong>
-        {% if t.pending %}<span class="pill">Pending</span>{% endif %}
-        <span class="muted small">{{ t.date | shortdate }} · {{ t.account_name or "" }}{% if t.mask %} ••{{ t.mask }}{% endif %}{% if t.category %} · {{ category(t) }}{% endif %}</span>
-      </div>
-      <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span>
-      <button class="tick" data-source="{{ t.source }}" data-id="{{ t.id }}" aria-label="Mark {{ t.merchant or t.name }} reviewed">✓</button>
-    </li>
-    {% endfor %}
+  <ul class="list" id="inbox">
+    {% for t in inbox %}{{ txn_row(t, review=True) }}{% endfor %}
   </ul>
+  <p class="empty" id="inbox-empty" {% if inbox %}hidden{% endif %}><span class="done-mark">✓</span>All caught up</p>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>All transactions</h2></div>
+  {% if accounts | length > 1 %}
+  <div class="filters" id="filters" aria-label="Show accounts">
+    {% for a in accounts %}
+    <button class="filter {% if a.account_id in hidden %}off{% endif %}" data-account="{{ a.account_id }}" aria-pressed="{{ 'false' if a.account_id in hidden else 'true' }}">{{ a.label }}</button>
+    {% endfor %}
+  </div>
   {% endif %}
-  <p class="muted empty" id="inbox-empty" {% if inbox %}hidden{% endif %}>All caught up.</p>
+  <div id="all">
+    {% include "_rows.html" %}
+    {% if not groups %}<p class="empty">No reviewed transactions{% if hidden %} in the selected accounts{% endif %}.</p>{% endif %}
+  </div>
 </section>
 {% if last_sync %}<p class="muted small center">Last synced {{ last_sync | local }}</p>{% endif %}
 {% endblock %}

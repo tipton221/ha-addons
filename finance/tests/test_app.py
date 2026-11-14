@@ -466,7 +466,9 @@ def test_inbox_pages_and_review_all(tmp_path, monkeypatch):
     with TestClient(create_app(settings, background_sync=False)) as c:
         c.cookies.set("finance_session", "tok")
         page = c.get("/").text
-        assert "New Shop" in page and "Pending" in page and "Old Shop" not in page
+        inbox_html = page.split('id="inbox"')[1].split("</ul>")[0]
+        assert "New Shop" in inbox_html and "Pending" in inbox_html and "Old Shop" not in inbox_html
+        assert "Old Shop" in page.split('id="all"')[1]  # reviewed ones list below
         assert c.post("/api/inbox/review-all", json={"ids": ["n1", "n2"]}, headers=H).json()["count"] == 2
         assert "All caught up" in c.get("/").text
         for path in ("/bills", "/search", "/accounts", "/search?q=old&min=1"):
@@ -506,7 +508,7 @@ def test_bills_api_and_export(tmp_path, monkeypatch):
         r = c.get("/export.csv?q=amazon")
         assert r.headers["content-type"].startswith("text/csv")
         rows = list(_csv.reader(_io.StringIO(r.text)))
-        assert rows[0][0] == "date" and len(rows) == 2 and rows[1][7] == "-25.50"
+        assert rows[0][0] == "date" and len(rows) == 2 and rows[1][6] == "-25.50" and rows[1][7] == "Shopping"
 
 
 def test_stale_bill_is_flagged_and_not_counted(tmp_path):
@@ -529,3 +531,122 @@ def test_bill_matches_similar_amount_only(tmp_path):
         conn.execute("INSERT INTO bills (name, match, amount, cadence) VALUES ('Amazon Prime', 'amazon', 147.34, 'yearly')")
     b = bill_status(db, D(2026, 11, 13))[0]
     assert b["last_date"] == "2026-03-18" and b["next_due"] == D(2027, 3, 18) and not b["stale"]
+
+
+# ---------------------------------------------------------------- 0.4.0: merchants, categories, notes
+
+def client_with(tmp_path, monkeypatch, rows, accounts):
+    settings = make_settings(tmp_path, monkeypatch)
+    db = Database(tmp_path / "finance.db")
+    db.set_kv("inbox_initialized", "1")
+    seed(db, rows, accounts=accounts)
+    return db, create_app(settings, background_sync=False)
+
+
+def test_default_categories_from_plaid(tmp_path, monkeypatch):
+    from app.ledger import resolve
+    db, app = client_with(tmp_path, monkeypatch, [
+        ("g", "card", "2026-11-01", "CORNER GROCER", "Corner Grocer", 20.0, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_GROCERIES", 1),
+        ("r", "card", "2026-11-01", "TACO PLACE", "Taco Place", 12.0, 0, "FOOD_AND_DRINK", "FOOD_AND_DRINK_FAST_FOOD", 1),
+        ("u", "card", "2026-11-01", "MYSTERY", None, 5.0, 0, None, None, 1)], [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        raw = [dict(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")]
+    rows = resolve(db, raw)
+    assert [r["category_info"]["name"] for r in rows] == ["Groceries", "Restaurants", "Other"]
+
+
+def test_rename_merchant_and_category_scopes(tmp_path, monkeypatch):
+    rows = [("a1", "card", "2026-11-01", "SQ *BEAN CAFE 123", "Bean Cafe", 5.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("a2", "card", "2026-11-05", "SQ *BEAN CAFE 456", "Bean Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("b1", "card", "2026-11-03", "OTHER STORE", "Other Store", 9.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        cats = {x["name"]: x["id"] for x in c.get("/api/categories").json()["categories"]}
+        # Rename and recategorize the merchant: applies to both past transactions.
+        assert c.post("/api/transactions/plaid/a1", json={"display_name": "Morning Coffee",
+                      "category_id": cats["Groceries"], "scope": "merchant"}, headers=H).status_code == 200
+        for tid in ("a1", "a2"):
+            d = c.get(f"/api/transactions/plaid/{tid}").json()
+            assert d["display_name"] == "Morning Coffee" and d["category_id"] == cats["Groceries"]
+        # A future transaction from the same merchant follows the rule.
+        seed(db, [("a3", "card", "2026-11-09", "SQ *BEAN CAFE 789", "Bean Cafe", 7.0, 0, "FOOD_AND_DRINK", "X", 0)])
+        d = c.get("/api/transactions/plaid/a3").json()
+        assert d["display_name"] == "Morning Coffee" and d["category_id"] == cats["Groceries"]
+        # A one-off override changes only that transaction.
+        c.post("/api/transactions/plaid/a2", json={"category_id": cats["Gifts"], "scope": "this"}, headers=H)
+        assert c.get("/api/transactions/plaid/a2").json()["category_id"] == cats["Gifts"]
+        assert c.get("/api/transactions/plaid/a1").json()["category_id"] == cats["Groceries"]
+        # Other merchants are untouched.
+        assert c.get("/api/transactions/plaid/b1").json()["display_name"] == "Other Store"
+        # Renaming back to the bank's name clears the custom name.
+        c.post("/api/transactions/plaid/a1", json={"display_name": "Bean Cafe"}, headers=H)
+        assert c.get("/api/transactions/plaid/a1").json()["display_name"] == "Bean Cafe"
+        assert c.post("/api/transactions/plaid/a1", json={"category_id": 99999}, headers=H).status_code == 400
+
+
+def test_notes_account_names_and_filters(tmp_path, monkeypatch):
+    rows = [("a1", "card", "2026-11-01", "SHOP ONE", "Shop One", 5.0, 0, None, None, 1),
+            ("b1", "bank", "2026-11-02", "SHOP TWO", "Shop Two", 6.0, 0, None, None, 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None),
+                                                         ("bank", "Bank B", "depository", 100, 100)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        c.post("/api/transactions/plaid/a1", json={"note": "Birthday gift for a friend"}, headers=H)
+        assert c.post("/api/accounts/card/rename", json={"name": "Everyday Card"}, headers=H).status_code == 200
+        assert c.post("/api/accounts/nope/rename", json={"name": "X"}, headers=H).status_code == 404
+        page = c.get("/").text
+        assert "Birthday gift for a friend" in page and "Everyday Card" in page
+        c.post("/api/view/hidden-accounts", json={"hidden": ["bank", "bogus"]}, headers=H)
+        all_html = c.get("/").text.split('id="all"')[1]
+        assert "Shop One" in all_html and "Shop Two" not in all_html
+        assert db.get_kv("hidden_accounts") == '["bank"]'
+        assert "Shop One" in c.get("/search?q=birthday").text
+
+
+def test_categories_crud(tmp_path, monkeypatch):
+    rows = [("a1", "card", "2026-11-01", "SHOP ONE", "Shop One", 5.0, 0, None, None, 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        new = c.post("/api/categories", json={"name": "Hobbies", "color": "teal"}, headers=H).json()["id"]
+        assert c.post("/api/categories", json={"name": "Hobbies"}, headers=H).status_code == 400
+        c.post("/api/transactions/plaid/a1", json={"category_id": new, "scope": "merchant"}, headers=H)
+        c.post("/api/categories", json={"id": new, "name": "Hobby gear", "color": "pink"}, headers=H)
+        assert "Hobby gear" in c.get("/").text
+        c.post(f"/api/categories/{new}/delete", headers=H)
+        assert c.get("/api/transactions/plaid/a1").json()["category_id"] is not None  # back to the default
+
+
+def test_paging_and_bill_tag(tmp_path, monkeypatch):
+    rows = [(f"t{i:03d}", "card", f"2026-{(i % 9) + 1:02d}-{(i % 27) + 1:02d}", "SHOP", f"Shop {i}", 1.0 + i, 0, None, None, 1)
+            for i in range(130)]
+    rows.append(("bill1", "card", "2026-11-11", "PHONE CO", "Phone Co", 99.0, 0, "RENT_AND_UTILITIES", "X", 1))
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, color) VALUES ('Phone', 'phone co', 99, 'monthly', 'teal')")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/").text
+        assert page.count('class="txn-item"') == 60 and 'class="pill tag c-teal">↻ Phone' in page
+        cursor = page.split('data-before="')[1].split('"')[0]
+        more = c.get(f"/api/transactions/page?before={cursor}").text
+        assert more.count('class="txn-item"') == 60 and 'data-before="' in more
+        cursor2 = more.split('data-before="')[1].split('"')[0]
+        last = c.get(f"/api/transactions/page?before={cursor2}").text
+        assert last.count('class="txn-item"') == 11 and "data-before" not in last
+        assert c.get("/api/transactions/page?before=garbage").status_code == 400
+
+
+def test_new_columns_added_to_old_database(tmp_path):
+    import sqlite3
+    path = tmp_path / "f.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE transactions (source TEXT, id TEXT, account_id TEXT, date TEXT, name TEXT, amount REAL, "
+                 "PRIMARY KEY (source, id))")
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    with db.connect() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(transactions)")}
+    assert {"note", "category_id"} <= cols

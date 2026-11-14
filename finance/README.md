@@ -43,10 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 0.3.0:
+Version 0.4.0:
 
-- Inbox home page: unreviewed transactions (pending included), one-tap review, mark all reviewed. History older than a week arrives already reviewed.
-- Bills: recurring charges detected from Plaid history and editable (amount, cadence, day, match text, next due date). Bills that stop charging are flagged and left out.
-- Coverage: cash minus card balances, pending card charges, and bills due before the next payday (twice-monthly days or every two weeks).
-- Search by merchant, dates, amounts, account, and category, with CSV export of the results.
-- Accounts page with Plaid connections, YNAB import status, and the Plaid versus YNAB comparison.
+- Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
+- Inbox: unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and per-account show/hide filters.
+- Tap a transaction to rename the merchant, change its category (for every transaction from that merchant, or just this one), and add a note. Merchant renames and categories apply to past and future transactions.
+- Your own categories (a starter list mapped from Plaid's categories, then fully editable), renamable accounts, and colored recurring tags for transactions that match a bill.
+- Bills with detection, editing, tag colors, and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.
