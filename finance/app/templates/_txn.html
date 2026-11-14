@@ -1,0 +1,21 @@
+{% macro txn_row(t, review=False) %}
+<li class="txn-item" data-source="{{ t.source }}" data-id="{{ t.id }}">
+  <div class="txn" role="button" tabindex="0" aria-label="Edit {{ t.display_name }}">
+    <div class="main">
+      <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}</div>
+      <div class="meta">
+        {% if t.category_info %}<span class="chip c-{{ t.category_info.color }}">{{ t.category_info.name }}</span>{% endif %}
+        {% if t.bill %}<span class="pill tag c-{{ t.bill.color }}">↻ {{ t.bill.name }}</span>{% endif %}
+        <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
+      </div>
+      {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+    </div>
+    <span class="amount {% if t.amount < 0 %}inflow{% elif t.pending %}pending{% endif %}">{{ (0 - t.amount) | money }}</span>
+    {% if review %}
+    <button class="tick" aria-label="Mark {{ t.display_name }} reviewed">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    </button>
+    {% endif %}
+  </div>
+</li>
+{% endmacro %}

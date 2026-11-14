@@ -7,8 +7,11 @@
 <header class="top">
   <h1>Accounts</h1>
   <div class="actions">
-    {% if plaid_ready %}<button id="sync" class="ghost">Sync now</button>{% endif %}
-    <button id="logout" class="ghost">Sign out</button>
+    {% if plaid_ready %}
+    <button id="sync" class="icon-btn" aria-label="Sync now" title="Sync now">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></svg>
+    </button>
+    {% endif %}
   </div>
 </header>
 <p id="msg" class="msg" role="status"></p>
@@ -21,29 +24,49 @@
 {% endif %}
 
 <section class="card">
+  <div class="card-head"><h2>Accounts</h2></div>
+  <p class="muted small">Tap a name to rename it. The new name is used everywhere in the app.</p>
+  {% if accounts %}
+  <ul class="list">
+    {% for a in accounts %}
+    <li class="plain-row">
+      <div class="grow">
+        <form class="rename" data-account="{{ a.account_id }}">
+          <input type="text" name="name" value="{{ a.label }}" maxlength="60" aria-label="Name for {{ a.name }}" data-original="{{ a.label }}">
+        </form>
+        <span class="muted small">{{ a.institution }} · {{ (a.subtype or a.type or "") | capitalize }}{% if a.display_name %} · bank name: {{ a.name }}{% endif %}</span>
+      </div>
+      <span class="amount">{{ a.current_balance | money }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No accounts yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <div class="card-head">
     <h2>Connections</h2>
     {% if plaid_ready %}<button id="connect" class="primary">Connect a bank</button>{% endif %}
   </div>
-  {% if items %}
   <ul class="list">
     {% for i in items %}
-    <li>
-      <div>
+    <li class="plain-row">
+      <div class="grow">
         <strong>{{ i.institution or "Unnamed connection" }}</strong>
         <span class="muted small">
           {% if i.last_sync_at %}Synced {{ i.last_sync_at | local }}{% else %}Not synced yet{% endif %}
           {% if i.update_status and i.update_status != "HISTORICAL_UPDATE_COMPLETE" %} · history loading{% endif %}
         </span>
       </div>
-      {% if i.status == "ok" %}<span class="pill ok">Connected</span>
-      {% else %}<button class="ghost reconnect" data-item="{{ i.item_id }}">Reconnect</button>{% endif %}
+      {% if i.status == "ok" %}<span class="pill c-green">Connected</span>
+      {% else %}<button class="reconnect" data-item="{{ i.item_id }}">Reconnect</button>{% endif %}
     </li>
+    {% else %}
+    <li class="muted">No banks connected yet.</li>
     {% endfor %}
   </ul>
-  {% else %}
-  <p class="muted">No banks connected yet.</p>
-  {% endif %}
   <p class="muted small">YNAB:
     {% if ynab is none %}not set up
     {% elif ynab.error %}last sync failed ({{ ynab.error }})
@@ -52,22 +75,39 @@
   </p>
 </section>
 
-{% if accounts %}
 <section class="card">
-  <h2>Accounts</h2>
-  <ul class="list">
-    {% for a in accounts %}
+  <div class="card-head"><h2>Categories</h2></div>
+  <p class="muted small">Rename, recolor, add, or remove. Removing a category sends its transactions back to their default.</p>
+  <ul class="list" id="categories">
+    {% for c in categories %}
     <li>
-      <div>
-        <strong>{{ a.name }}</strong>{% if a.mask %} <span class="muted">••{{ a.mask }}</span>{% endif %}
-        <span class="muted small">{{ a.institution }} · {{ a.subtype or a.type }}</span>
-      </div>
-      <span class="amount">{{ a.current_balance | money }}</span>
+      <details>
+        <summary class="plain-row"><span class="chip c-{{ c.color }}">{{ c.name }}</span></summary>
+        <form class="cat-form" data-id="{{ c.id }}">
+          <input type="text" name="name" value="{{ c.name }}" maxlength="40" required aria-label="Category name">
+          <div class="swatches">
+            {% for color in colors %}<label><input type="radio" name="color" value="{{ color }}" {% if color == c.color %}checked{% endif %}><span class="c-{{ color }}"></span></label>{% endfor %}
+          </div>
+          <div class="row-actions">
+            <button type="submit" class="primary">Save</button>
+            <button type="button" class="danger delete-cat" data-id="{{ c.id }}">Remove</button>
+          </div>
+        </form>
+      </details>
     </li>
     {% endfor %}
   </ul>
+  <details class="add">
+    <summary>Add a category</summary>
+    <form class="cat-form" data-id="">
+      <input type="text" name="name" maxlength="40" required placeholder="Name" aria-label="Category name">
+      <div class="swatches">
+        {% for color in colors %}<label><input type="radio" name="color" value="{{ color }}" {% if loop.first %}checked{% endif %}><span class="c-{{ color }}"></span></label>{% endfor %}
+      </div>
+      <div class="row-actions"><button type="submit" class="primary">Add</button></div>
+    </form>
+  </details>
 </section>
-{% endif %}
 
-<p class="muted small">{{ total }} transactions stored from Plaid.</p>
+<p class="muted small center">{{ total }} transactions stored · <a href="#" id="logout">Sign out</a></p>
 {% endblock %}

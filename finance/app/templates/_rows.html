@@ -1,0 +1,8 @@
+{% from "_txn.html" import txn_row %}
+{% for label, txns in groups %}
+<h3 class="day">{{ label }}</h3>
+<ul class="list">
+  {% for t in txns %}{{ txn_row(t) }}{% endfor %}
+</ul>
+{% endfor %}
+{% if more %}<button class="load-more" data-before="{{ more }}">Show more</button>{% endif %}
