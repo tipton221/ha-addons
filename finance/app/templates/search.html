@@ -6,7 +6,7 @@
 <header class="top"><h1>Search</h1></header>
 
 <form class="card search" method="get" action="/search">
-  <label class="wide">Name, description, or note<input name="q" type="search" value="{{ q.q or '' }}" placeholder="Amazon"></label>
+  <label class="wide">Merchant, description, or note<input name="q" type="search" value="{{ q.q or '' }}" placeholder="Amazon"></label>
   <div class="grid2">
     <label>From<input name="start" type="date" value="{{ q.start or '' }}"></label>
     <label>To<input name="end" type="date" value="{{ q.end or '' }}"></label>
