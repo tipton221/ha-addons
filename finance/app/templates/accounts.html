@@ -80,7 +80,7 @@
           {% if i.update_status and i.update_status != "HISTORICAL_UPDATE_COMPLETE" %} · history loading{% endif %}
         </span>
       </div>
-      {% if i.status == "ok" %}<span class="pill c-green">Connected</span>
+      {% if i.status == "ok" %}<button class="ghost choose-accounts" data-item="{{ i.item_id }}" title="Share another account from this bank, or stop sharing one">Accounts</button>
       {% else %}<button class="reconnect" data-item="{{ i.item_id }}">Reconnect</button>{% endif %}
     </li>
     {% else %}

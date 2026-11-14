@@ -72,7 +72,8 @@ body::before {
 .wrap {
   max-width: 820px;
   margin: 0 auto;
-  padding: max(16px, env(safe-area-inset-top)) 16px calc(var(--tabbar-h) + 40px + env(safe-area-inset-bottom));
+  /* Below the status bar plus the blurred band iOS draws under it in a home screen app. */
+  padding: calc(env(safe-area-inset-top) + 18px) 16px calc(var(--tabbar-h) + 40px + env(safe-area-inset-bottom));
 }
 
 /* Headings: SF Pro narrowed with its width axis on Apple devices; plain bold elsewhere. */
@@ -123,7 +124,12 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
   transition: background .25s var(--ease), color .25s var(--ease), transform .15s var(--ease);
 }
 .tabbar a svg { width: 20px; height: 20px; }
-.tabbar a[aria-current="page"] { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.tabbar a { position: relative; isolation: isolate; }
+.tabbar a[aria-current="page"] { color: var(--text); }
+/* The highlight behind the current tab is its own element, so moving between pages can slide it
+   from the old tab to the new one (a cross-document view transition), like an iOS tab bar. */
+.tab-pill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: rgba(255, 255, 255, 0.12);
+  view-transition-name: tab-pill; }
 .tabbar a:active { transform: scale(0.94); }
 
 @media (max-width: 640px) {
@@ -133,7 +139,8 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
   }
   .tabbar a { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 0.68rem; flex: 1; justify-content: center; }
   .tabbar a svg { width: 24px; height: 24px; }
-  .tabbar a[aria-current="page"] { color: var(--blue); background: rgba(255, 255, 255, 0.08); }
+  .tabbar a[aria-current="page"] { color: var(--blue); }
+  .tab-pill { background: rgba(255, 255, 255, 0.08); }
   h1 { font-size: 2.3rem; }
 }
 
@@ -562,3 +569,41 @@ a.detail-value { color: var(--blue); text-decoration: none; }
 .tip-inputs { align-items: baseline; }
 .group .row .tip-inputs input#sheet-tip { flex: 0 1 64px; width: 64px; text-align: left; }
 .group .row .tip-inputs input#sheet-tip-pct { flex: 0 0 40px; width: 40px; text-align: right; }
+
+/* Search filters */
+.filter-label { color: var(--text-2); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 16px 2px 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+label.filter.toggle-chip { display: inline-flex; align-items: center; margin: 0; border: 1px solid var(--glass-border); cursor: pointer; user-select: none; }
+label.toggle-chip input { display: none; }
+label.toggle-chip:has(input:checked) { color: #fff; background: var(--blue); border-color: transparent; box-shadow: 0 6px 14px -4px rgba(10, 132, 255, 0.5); }
+label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff); background: color-mix(in srgb, var(--c) 24%, transparent);
+  border-color: color-mix(in srgb, var(--c) 55%, transparent); box-shadow: none; }
+.search .scope { margin-bottom: 10px; }
+
+/* Bills due before payday, on the Bills coverage card */
+.due-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 18px 0 2px;
+  padding-top: 14px; border-top: 1px solid var(--hairline); }
+.due-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.due-list .edit-row { gap: 14px; }
+.due-date { flex: none; width: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 5px 0; border-radius: 12px; background: rgba(255,255,255,0.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); line-height: 1.1; }
+.due-date span { color: var(--red); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.due-date strong { font-size: 1.15rem; font-weight: 700; }
+
+/* ---------- page transitions (Safari 18.2+, Chrome 126+; others just load the page) ---------- */
+@view-transition { navigation: auto; }
+.tabbar { view-transition-name: tabbar; }
+::view-transition-group(tab-pill) { animation-duration: .45s; animation-timing-function: cubic-bezier(.32, .72, 0, 1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .2s; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+.filter-group { border-top: 1px solid var(--hairline); margin-top: 8px; }
+.filter-group > summary { display: flex; align-items: center; gap: 10px; padding: 12px 2px; cursor: pointer; list-style: none; }
+.filter-group > summary::-webkit-details-marker { display: none; }
+.filter-group > summary .filter-label { margin: 0; flex: 1; }
+.filter-group .chev-down { color: var(--text-2); font-size: 1.3rem; line-height: 1; transition: transform .25s var(--ease); }
+.filter-group[open] .chev-down { transform: rotate(90deg); }
+.filter-group[open] .chips { animation: drop .3s var(--ease); }
+
+.search .grid2 { grid-template-columns: 1fr 1fr; }  /* dates and amounts pair up even on phones */

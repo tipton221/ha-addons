@@ -37,7 +37,7 @@ class Plaid:
             raise PlaidError(r.status_code, data)
         return data
 
-    async def link_token(self, access_token: str | None = None) -> str:
+    async def link_token(self, access_token: str | None = None, choose_accounts: bool = False) -> str:
         body: dict = {
             "client_name": "Finance",
             "language": "en",
@@ -45,8 +45,11 @@ class Plaid:
             "user": {"client_user_id": "owner"},
         }
         if access_token:
-            # Update mode: re-authenticate an existing connection.
+            # Update mode: re-authenticate an existing connection, or (choose_accounts) pick which of
+            # its accounts are shared, to add one that was left out the first time.
             body["access_token"] = access_token
+            if choose_accounts:
+                body["update"] = {"account_selection_enabled": True}
         else:
             body["products"] = ["transactions"]
             body["transactions"] = {"days_requested": 730}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import logging
 from contextlib import asynccontextmanager
 import csv
@@ -29,7 +30,7 @@ from .bills import CADENCES, bill_status, coverage, detect, normalize, save_dete
 from .compare import compare_all
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
-from .sync import sync_all, sync_ynab
+from .sync import refresh_accounts, sync_all, sync_ynab
 from .ynab_names import apply_ynab_names
 from .ynab import YNAB
 
@@ -808,11 +809,26 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     # ---------- search and export ----------
 
+    def search_query(request: Request) -> dict:
+        """Search filters from the query string. Accounts and categories can be chosen several at a time."""
+        qp = request.query_params
+        q = {k: v.strip() for k, v in qp.items() if k not in ("account", "category") and v and v.strip()}
+        accounts = [a for a in qp.getlist("account") if a]
+        cats = [c for c in qp.getlist("category") if c]
+        if accounts:
+            q["account"] = accounts
+        if cats:
+            q["category"] = cats
+        return q
+
     def search(q: dict) -> list[dict]:
         where, params = [], []
-        if q.get("account"):
-            where.append("t.account_id = ?")
-            params.append(q["account"])
+        accounts = q.get("account") or []
+        if isinstance(accounts, str):
+            accounts = [accounts]
+        if accounts:
+            where.append(f"t.account_id IN ({','.join('?' * len(accounts))})")
+            params += accounts
         if q.get("start"):
             where.append("t.date >= ?")
             params.append(q["start"])
@@ -831,32 +847,59 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             needle = q["q"].lower()
             rows = [t for t in rows if needle in " ".join(
                 [t["display_name"], t["name"] or "", t["merchant"] or "", t["note"] or ""]).lower()]
-        if q.get("category"):
-            rows = [t for t in rows if str((t["category_info"] or {}).get("id")) == q["category"]]
+        cats = q.get("category") or []
+        if isinstance(cats, str):
+            cats = [cats]
+        if cats:
+            rows = [t for t in rows if str((t["category_info"] or {}).get("id")) in cats]
+        if q.get("flow") == "out":
+            rows = [t for t in rows if t["amount"] > 0]
+        elif q.get("flow") == "in":
+            rows = [t for t in rows if t["amount"] < 0]
+        if q.get("noted"):
+            rows = [t for t in rows if (t["note"] or "").strip()]
+        if q.get("billed"):
+            rows = [t for t in rows if t["bill"]]
         return rows
+
+    def quick_ranges(today_: date) -> dict:
+        """Quick date picks: the last 12 months and each year that has transactions."""
+        months = []
+        d = date(today_.year, today_.month, 1)
+        for _ in range(12):
+            end = date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
+            label = d.strftime("%b") + ("" if d.year == today_.year else d.strftime(" ’%y"))
+            months.append({"label": label, "start": d.isoformat(), "end": end.isoformat()})
+            d = date(d.year - 1, 12, 1) if d.month == 1 else date(d.year, d.month - 1, 1)
+        with db.connect() as conn:
+            first = conn.execute("SELECT MIN(date) FROM transactions WHERE source='plaid'").fetchone()[0]
+        first_year = int(first[:4]) if first else today_.year
+        years = [{"label": str(y), "start": f"{y}-01-01", "end": f"{y}-12-31"}
+                 for y in range(today_.year, first_year - 1, -1)]
+        return {"months": months, "years": years}
 
     def is_transfer(t: dict) -> bool:
         return bool(t.get("transfer")) or (t["category_info"] or {}).get("name") == TRANSFER_CATEGORY
 
     @app.get("/search", response_class=HTMLResponse)
     async def search_page(request: Request):
-        q = {k: v for k, v in request.query_params.items() if v}
+        q = search_query(request)
         rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
         more = len(rows) > 1000
-        # Totals leave out money moving between your own accounts, unless you searched that category.
+        # Totals leave out money moving between your own accounts, unless you searched by category.
         counted = rows if q.get("category") else [t for t in rows if not is_transfer(t)]
         out = sum(t["amount"] for t in counted if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
             "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
-            "total_out": out, "total_in": inflow, "export_query": urlencode(q),
-            "excluded": len(rows) - len(counted),
+            "total_out": out, "total_in": inflow, "export_query": urlencode(q, doseq=True),
+            "excluded": len(rows) - len(counted), "quick": quick_ranges(today()),
         })
 
     @app.get("/export.csv")
     async def export_csv(request: Request):
-        rows = search({k: v for k, v in request.query_params.items() if v})
+        rows = search(search_query(request))
         rows.sort(key=lambda t: (t["date"], t["rid"]))
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -927,7 +970,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 raise HTTPException(404, "Unknown connection")
             access_token = row["access_token"]
         try:
-            return {"link_token": await p.link_token(access_token)}
+            return {"link_token": await p.link_token(access_token, choose_accounts=bool(body.get("accounts")))}
         except PlaidError as e:
             raise HTTPException(502, f"Plaid: {e}")
 
@@ -946,8 +989,19 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "VALUES (?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token",
                 (item_id, access_token, inst.get("institution_id"), inst.get("name") or ""),
             )
+        await load_accounts(item_id)  # accounts show up right away; transactions follow in the background
         asyncio.create_task(run_sync())
         return {"ok": True}
+
+    async def load_accounts(item_id: str) -> None:
+        with db.connect() as conn:
+            row = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        if not row:
+            return
+        try:
+            await refresh_accounts(db, require_plaid(), dict(row))
+        except PlaidError as e:
+            log.warning("Could not load accounts for a new connection: %s", e)
 
     @app.post("/api/plaid/updated")
     async def updated(request: Request):
@@ -955,6 +1009,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             conn.execute("UPDATE plaid_items SET status='ok', error_code=NULL WHERE item_id=?",
                          (body.get("item_id"),))
+        await load_accounts(str(body.get("item_id") or ""))  # picks up accounts added in Plaid
         asyncio.create_task(run_sync())
         return {"ok": True}
 
