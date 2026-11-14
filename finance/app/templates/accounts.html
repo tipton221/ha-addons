@@ -2,7 +2,7 @@
 {% set nav = "accounts" %}
 {% block title %}Accounts{% endblock %}
 {% block page %}accounts{% endblock %}
-{% block head %}{% if plaid_ready %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>{% endif %}{% endblock %}
+{% block head %}{% if plaid_ready %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" nonce="{{ request.state.nonce }}" defer></script>{% endif %}{% endblock %}
 {% from "_color.html" import color_picker %}
 {% block content %}
 <header class="top">

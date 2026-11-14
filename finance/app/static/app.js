@@ -159,6 +159,7 @@ function fold(li, delay = 0) {
 
 function openSheet(el) {
   el.hidden = false;
+  el.scrollTop = 0;  // every pop-up opens at its top, not where it was last left
   document.documentElement.classList.add("sheet-open");
   requestAnimationFrame(() => {
     el.classList.add("open");
@@ -278,11 +279,18 @@ async function refreshRows() {
   }
 }
 
+// Bill and category tag colors come from /colors.css; fetch it again so a new bill's color shows.
+function refreshColors() {
+  const link = document.querySelector('link[href^="/colors.css"]');
+  if (link) link.href = `/colors.css?v=${Date.now()}`;
+}
+
 // After an edit: pages with transaction lists update in place; other pages reload.
 async function refreshInPlace() {
   const page = document.body.dataset.page;
   if (page !== "home" && page !== "search") { setTimeout(() => location.reload(), 600); return; }
   try {
+    refreshColors();
     await refreshRows();
     if (page === "home") await swapSections(["coverage", "scheduled-wrap"]);
   } catch (e) { location.reload(); }
@@ -514,7 +522,6 @@ const sheet = {
     if (d.time) rows.push(["Time", d.time]);
     if (d.authorized_date) rows.push(["Purchased", fmt(d.authorized_date)]);
     if (d.authorized_date) rows.push(["Posted", fmt(d.posted_date)]);
-    if (d.channel) rows.push(["Paid", d.channel]);
     if (d.street || d.place) {
       rows.push(["Where", [d.street, d.place, d.country].filter(Boolean).join("\n") + (d.store ? `\nStore ${d.store}` : "")]);
     }
@@ -525,8 +532,6 @@ const sheet = {
     if (d.processor) rows.push(["Processor", d.processor]);
     if (d.reference) rows.push(["Reference", d.reference]);
     if (d.check) rows.push(["Check", `#${d.check}`]);
-    if (d.mcc) rows.push(["Merchant code", d.mcc]);
-    if (d.confidence) rows.push(["Category confidence", d.confidence]);
     if (d.original && d.original !== t.bank_name) rows.push(["Original description", d.original]);
     const list = document.getElementById("sheet-details-list");
     list.innerHTML = "";
@@ -540,6 +545,12 @@ const sheet = {
       if (href) { v.href = href; v.target = "_blank"; v.rel = "noopener noreferrer"; }
       row.append(l, v);
       list.appendChild(row);
+    }
+    if (d.amazon) {
+      const a = document.createElement("a");
+      a.className = "maps-btn"; a.href = d.amazon; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Open Amazon transactions</span>';
+      list.appendChild(a);
     }
     if (d.maps) {
       const a = document.createElement("a");

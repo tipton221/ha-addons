@@ -1052,9 +1052,40 @@ def test_filters_reset_accounts_short_names_visibility_and_details(tmp_path, mon
         assert "still counts in coverage" in c.get("/accounts").text
         # Details from Plaid's record.
         d = c.get("/api/transactions/plaid/a1").json()["details"]
-        assert d["time"] == "10:42\u202fam" and d["channel"] == "In store" and d["store"] == "42"
+        assert d["time"] == "10:42\u202fam" and "channel" not in d and d["store"] == "42"
         assert d["street"] == "100 Main St" and d["place"] == "Springfield, WA 98000"
         assert d["maps"].startswith("https://maps.apple.com/?ll=47.1,-122.2")
         assert d["logo"].endswith("cafe.png") and d["counterparties"] == [{"name": "Square", "type": "payment terminal"}]
         assert d["original"].startswith("SQ *CORNER CAFE 0042")
         assert "https://*.plaid.com" in c.get("/").headers["content-security-policy"]
+        assert d["amazon"] is None and "mcc" not in d and "confidence" not in d
+
+
+
+def test_amazon_link_only_for_amazon(tmp_path, monkeypatch):
+    rows = [("z1", "card", "2026-11-01", "AMZN Mktp US*AB12", "AMZN Mktp US", 15.06, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("z2", "card", "2026-11-01", "Amazon.com*CD34", "Amazon.com", 2.97, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("n1", "card", "2026-11-01", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        links = {i: c.get(f"/api/transactions/plaid/{i}").json()["details"]["amazon"] for i in ("z1", "z2", "n1")}
+    assert links["z1"] == links["z2"] == "https://www.amazon.com/cpe/yourpayments/transactions" and links["n1"] is None
+
+
+def test_plaid_link_gets_a_per_page_style_nonce(tmp_path, monkeypatch):
+    import re
+    settings = make_settings(tmp_path, monkeypatch, plaid_client_id="cid", plaid_secret="sec")
+    db = Database(tmp_path / "finance.db")
+    seed(db, [], accounts=[])
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        pages = [c.get("/accounts"), c.get("/accounts")]
+    nonces = []
+    for r in pages:
+        tag = re.search(r'link-initialize\.js" nonce="([^"]+)"', r.text)
+        assert tag, "Plaid script tag has a nonce"
+        policy = r.headers["content-security-policy"]
+        assert f"style-src 'self' 'nonce-{tag.group(1)}'" in policy and "unsafe-inline" not in policy
+        nonces.append(tag.group(1))
+    assert nonces[0] != nonces[1]  # a new nonce for every page
