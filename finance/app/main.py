@@ -399,6 +399,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                            "venmo", "zelle", "atm", "fee", "interest", "mobile", "point", "sale", "pp"}
 
     PAYMENT_CHANNELS = {"in store": "In store", "online": "Online"}
+    AMAZON_TRANSACTIONS = "https://www.amazon.com/cpe/yourpayments/transactions"
 
     def local_time(value: str | None) -> str | None:
         """A Plaid timestamp as Pacific time, or None when missing or a placeholder midnight."""
@@ -428,7 +429,6 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         elif street or place:
             maps = f"https://maps.apple.com/?q={quote(', '.join(x for x in [name, street, place] if x))}"
         meta = raw.get("payment_meta") or {}
-        pfc = raw.get("personal_finance_category") or {}
         counterparties = [{"name": c.get("name"), "type": (c.get("type") or "").replace("_", " ")}
                           for c in raw.get("counterparties") or []
                           if c.get("name") and c.get("name") != name]
@@ -445,8 +445,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "website": raw.get("website"),
             "logo": logo_ok(raw.get("logo_url")),
             "counterparties": counterparties,
-            "mcc": raw.get("merchant_category_code"),
-            "confidence": (pfc.get("confidence_level") or "").replace("_", " ").lower() or None,
+            # Amazon purchases: a link to Amazon's payment history, which lists each charge with its order.
+            "amazon": AMAZON_TRANSACTIONS if t["merchant_key"].split(" ")[0] in ("amazon", "amzn") else None,
             "payee": meta.get("payee"), "payer": meta.get("payer"),
             "reference": meta.get("reference_number"), "processor": meta.get("payment_processor"),
             "check": raw.get("check_number"),
