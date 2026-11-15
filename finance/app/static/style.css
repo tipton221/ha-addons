@@ -916,3 +916,8 @@ a.tile:active { transform: scale(0.98); }
 .pslf-block .pslf-top b { font-size: 1.05rem; }
 .pslf-top { gap: 10px; }
 .pslf-top > span { white-space: nowrap; }
+
+/* Loan stats span the bar: first flush left, middle centered, last flush right */
+.pslf-block .loan-stats { display: flex; justify-content: space-between; gap: 12px; }
+.pslf-block .loan-stats > div:nth-child(2):not(:last-child) { align-items: center; text-align: center; }
+.pslf-block .loan-stats > div:last-child:not(:first-child) { align-items: flex-end; text-align: right; }
