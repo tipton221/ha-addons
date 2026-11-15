@@ -89,8 +89,9 @@ def seed_categories(db: Database) -> None:
     with db.connect() as conn:
         if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]:
             return
-        conn.executemany("INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)",
-                         [(n, c, i) for i, (n, c) in enumerate(STARTER_CATEGORIES)])
+        kinds = {"Income": "income", "Transfers and payments": "transfer", "Loans": "debt"}
+        conn.executemany("INSERT INTO categories (name, color, sort, kind) VALUES (?, ?, ?, ?)",
+                         [(n, c, i, kinds.get(n, "spending")) for i, (n, c) in enumerate(STARTER_CATEGORIES)])
 
 
 def categories(db: Database) -> list[dict]:
