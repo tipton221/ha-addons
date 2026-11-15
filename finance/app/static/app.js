@@ -1188,7 +1188,7 @@ document.addEventListener("change", async (ev) => {
   try {
     await api("/api/investments/tax-year", { id: sel.dataset.id, year: Number(sel.value) });
     closeAllSheets();
-    toast(`Counts for ${sel.value}`);
+    toast(sel.value === "0" ? "Left out" : `Counts for ${sel.value}`);
     setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });

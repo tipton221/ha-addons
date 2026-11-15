@@ -164,6 +164,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         label = detail[len(primary) + 1:] if primary and detail.startswith(primary + "_") else (detail or primary)
         return label.replace("_", " ").capitalize()
 
+    # Static files carry a version in their URL, so an update never runs with an old cached script.
+    templates.env.globals["asset_v"] = str(int(max(f.stat().st_mtime for f in (HERE / "static").rglob("*") if f.is_file())))
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = {
@@ -1141,10 +1143,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (str(body.get("id") or ""),)).fetchone()
             if not row:
                 raise HTTPException(404, "Contribution not found")
-            y = date.fromisoformat(row["date"]).year
-            year = int(body.get("year") or y)
-            if year not in (y, y - 1):
-                raise HTTPException(400, "It can count for its own year or the year before")
+            d = date.fromisoformat(row["date"])
+            y = d.year
+            year = int(body.get("year") if body.get("year") is not None else y)
+            early = (d.month, d.day) <= (4, 15)
+            if year not in ((y, y - 1, 0) if early else (y, 0)):
+                raise HTTPException(400, "It can count for its own year, the year before (through April 15), or not at all")
             conn.execute("UPDATE investment_txns SET tax_year=? WHERE id=?",
                          (None if year == y else year, str(body["id"])))
         return {"ok": True}

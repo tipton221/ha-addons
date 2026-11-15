@@ -43,6 +43,13 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.13.1:
+
+- Investments: an account with balances entered by hand uses only those entries (and their money put in) for gains, not YNAB history where contributions can't be told from growth. A period whose start has no entered balance within about a month shows "Needs a balance near" that date instead of a made-up gain. History that starts inside a period is measured from its first balance.
+- Contribution limits: transfers into an IRA count as contributions (some providers report contributions that way). Each one shows its description and can be set to count for its year, the year before (January 1 to April 15), or not at all.
+- Holdings show cash as Cash. Sheet buttons no longer touch the one above.
+- Scripts and styles load with a version in their URL, so an update never runs with a cached old copy.
+
 Version 1.13.0:
 
 - Plaid Investments: "Add investments" on a connection with investment accounts asks Plaid for consent and then syncs holdings and up to 24 months of investment activity. "Connect it for investments only" links a retirement plan site that has no bank transactions (Investments product only).

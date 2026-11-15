@@ -1550,3 +1550,37 @@ def test_manual_flow_spread_matches_record_keeper(tmp_path, monkeypatch):
         conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES ('manual:p', '2026-11-14', 67000, 12500)")
     ytd = returns(db, D(2026, 11, 15))["accounts"][0]["periods"]["ytd"]
     assert ytd["gain"] == 4500.0 and 7.5 < ytd["pct"] < 8.5  # lumped on Nov 14 it would be about 9%
+
+
+def test_entered_balances_anchor_gains_and_ira_transfers_count(tmp_path, monkeypatch):
+    from app.investments import limits, returns
+    rows = [("y0", "ynab:plan", "2025-06-01", "Starting balance", None, -30000.0, 0, None, None, 1),
+            ("y1", "ynab:plan", "2025-12-15", "Balance adjustment", None, -15000.0, 0, None, None, 1)]
+    db, app = client_with(tmp_path, monkeypatch, [], [("roth", "Test Roth IRA", "investment", 0.0, None)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO accounts (account_id, source, name, type) VALUES ('ynab:plan', 'ynab', 'Plan', 'otherAsset')")
+        for r in rows:
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, merchant, amount, pending, "
+                         "category, category_detail, reviewed) VALUES ('ynab', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", r)
+        conn.execute("UPDATE accounts SET track_returns=1 WHERE account_id='ynab:plan'")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('ynab:plan', '2025-12-31', 50000)")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES ('ynab:plan', '2026-11-14', 67000, 12500)")
+        conn.execute("UPDATE accounts SET subtype='roth' WHERE account_id='roth'")
+        conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) VALUES "
+                     "('t1', 'roth', '2026-10-15', 'Transfer in', -250, 'transfer', 'transfer')")
+        conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) VALUES "
+                     "('t2', 'roth', '2026-11-05', 'Promotion', -3.01, 'cash', 'deposit')")
+    plan = next(a for a in returns(db, D(2026, 11, 15))["accounts"] if a["id"] == "ynab:plan")
+    # YNAB's balances (contributions mixed with growth) are left out: history starts at the first entry.
+    assert plan["first"] == "2025-12-31" and plan["periods"]["all"]["since"] == "2025-12-31"
+    assert plan["periods"]["ytd"]["gain"] == 4500.0
+    assert plan["periods"]["3m"]["gain"] is None and plan["periods"]["3m"]["needs"] == "2026-08-15"
+    assert limits(db, D(2026, 11, 15))["years"][0]["ira"] == 253.01
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/investments/tax-year", json={"id": "t2", "year": 0}, headers=H).status_code == 200
+        assert c.post("/api/investments/tax-year", json={"id": "t1", "year": 2025}, headers=H).status_code == 400
+        assert "?v=" in c.get("/insights").text
+    y = limits(db, D(2026, 11, 15))["years"][0]
+    assert y["ira"] == 250.0 and [c["id"] for c in y["ira_ignored"]] == ["t2"]

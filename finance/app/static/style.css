@@ -852,3 +852,8 @@ a.tile:active { transform: scale(0.98); }
 .limit-bar { display: block; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
 .limit-fill { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--teal, var(--green)); transition: width .4s var(--ease); }
 .tax-year { width: auto; height: 34px; padding: 0 30px 0 12px; border-radius: var(--r-pill); font-size: 0.82rem; }
+
+/* A sheet's buttons never touch the button above them */
+.wide-btn + .sheet-actions, .list + .sheet-actions, .hint + .sheet-actions { margin-top: 18px; }
+.period-table .needs { grid-column: 2 / -1; color: var(--text-2); font-size: 0.85rem; text-align: center; }
+.ira-items .tax-year { flex: none; max-width: 52%; }

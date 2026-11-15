@@ -2,7 +2,7 @@
 {% set nav = "insights" %}
 {% block title %}Insights{% endblock %}
 {% block page %}insights{% endblock %}
-{% block head %}<script src="/static/insights.js" defer></script>{% endblock %}
+{% block head %}<script src="/static/insights.js?v={{ asset_v }}" defer></script>{% endblock %}
 
 {% macro month_label(k) %}{{ ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][k[5:] | int] }} {{ k[:4] }}{% endmacro %}
 
@@ -68,7 +68,7 @@
   <div class="stat-row">
     <div class="stat main"><span class="big-number">{{ inv.value | money }}</span>
       {% for key, _ in inv.periods %}{% set t = inv.totals.get(key) %}{% if t %}
-      <span class="stat-change p p-{{ key }} {{ 'up' if t.gain >= 0 else 'down' }}">{{ signed(t.gain) }}{% if t.pct is not none %} · {{ "+" if t.pct >= 0 else "" }}{{ t.pct }}%{% endif %}</span>
+      <span class="stat-change p p-{{ key }} {{ 'up' if t.gain >= 0 else 'down' }}">{{ signed(t.gain) }}{% if t.pct is not none %} · {{ "+" if t.pct >= 0 else "" }}{{ t.pct }}%{% endif %}{% if t.partial %}<small class="muted"> · not every account</small>{% endif %}</span>
       {% endif %}{% endfor %}
     </div>
   </div>
@@ -79,13 +79,14 @@
         <strong>{{ a.name }}</strong>
         {% if a.first >= today %}<span class="muted small">History starts today; gains show from tomorrow</span>{% else %}
         {% for key, _ in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
-        <span class="muted small p p-{{ key }}">{% if p.put_in %}{{ p.put_in | money }} put in{% else %}Nothing put in{% endif %}{% if p.since %} · since {{ p.since | shortdate }}{% endif %}</span>
+        <span class="muted small p p-{{ key }}">{% if p.needs %}Needs a balance near {{ p.needs | shortdate }}{% elif p.put_in %}{{ p.put_in | money }} put in{% else %}Nothing put in{% endif %}{% if p.since %} · since {{ p.since | shortdate }}{% endif %}</span>
         {% endif %}{% endfor %}{% endif %}
       </div>
       <div class="inv-nums">
         <span class="amount">{{ a.value | money }}</span>
         {% for key, _ in inv.periods if a.first < today %}{% set p = a.periods.get(key) %}{% if p %}
-        <span class="small p p-{{ key }} {{ 'up' if p.gain >= 0 else 'down' }}">{{ signed(p.gain) }}{% if p.pct is not none %} · {{ "+" if p.pct >= 0 else "" }}{{ p.pct }}%{% endif %}</span>
+        {% if p.gain is none %}<span class="small muted p p-{{ key }}">—</span>{% else %}
+        <span class="small p p-{{ key }} {{ 'up' if p.gain >= 0 else 'down' }}">{{ signed(p.gain) }}{% if p.pct is not none %} · {{ "+" if p.pct >= 0 else "" }}{{ p.pct }}%{% endif %}</span>{% endif %}
         {% endif %}{% endfor %}
       </div>
       <span class="chev" aria-hidden="true">›</span>
@@ -94,16 +95,21 @@
         <ul class="list period-table">
           <li class="mt-head"><span>Period</span><span>Put in</span><span>Gain</span><span>Return</span></li>
           {% for key, label in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
+          {% if p.gain is none %}
+          <li><span>{{ label }}</span><span class="needs">Needs a balance near {{ p.needs | shortdate }}</span></li>
+          {% else %}
           <li><span>{{ label }}</span><span>{{ p.put_in | money }}</span><span class="{{ 'up' if p.gain >= 0 else 'down' }}">{{ signed(p.gain) }}</span>
             <span>{% if p.pct is not none %}{{ "+" if p.pct >= 0 else "" }}{{ p.pct }}%{% else %}—{% endif %}</span></li>
+          {% endif %}
           {% endif %}{% endfor %}
         </ul>
-        <p class="hint">Gain is the change in balance minus money put in or taken out. Return weights each deposit by how long it was invested. History starts {{ a.first | shortdate }}{% if a.source == "manual" %}; enter "money put in" with each balance so deposits aren't counted as gains{% endif %}.</p>
+        <p class="hint">Gain is the change in balance minus money put in or taken out. Return weights each deposit by how long it was invested. History starts {{ a.first | shortdate }}.{% if a.id in balances %} Gains use the balances you entered (with the money put in), not other history. A period needs a balance within about a month before it starts; your record keeper can show the balance on a past date.{% endif %}</p>
         {% if a.holdings %}
         <p class="section-label">Holdings</p>
         <ul class="list holdings">
           {% for h in a.holdings %}
-          <li class="plain-row"><span class="grow"><strong>{{ h.ticker or h.name or "Holding" }}</strong>{% if h.ticker and h.name %}<span class="muted small">{{ h.name }}</span>{% endif %}</span>
+          {% set cash = h.kind == "cash" or (h.ticker or "").startswith("CUR:") %}
+          <li class="plain-row"><span class="grow"><strong>{{ "Cash" if cash else (h.ticker or h.name or "Holding") }}</strong>{% if h.ticker and h.name and not cash %}<span class="muted small">{{ h.name }}</span>{% endif %}</span>
             <span class="inv-nums"><span class="amount">{{ (h.value or 0) | money }}</span>
               {% if h.cost_basis %}{% set g = (h.value or 0) - h.cost_basis %}<span class="small {{ 'up' if g >= 0 else 'down' }}">{{ signed(g) }} vs cost</span>{% endif %}</span></li>
           {% endfor %}
@@ -124,27 +130,32 @@
   {% for y in limits.years %}
   <p class="section-label">{{ y.year }}{% if not y.known %} (limits not yet published, using the latest){% endif %}</p>
   <ul class="list limit-list">
-    <li class="limit-row{% if y.ira_items %} edit-row{% endif %}"{% if y.ira_items %} role="button" tabindex="0" data-editor="ira-{{ y.year }}"{% endif %}>
+    {% set ira_any = y.ira_items or y.ira_ignored %}
+    <li class="limit-row{% if ira_any %} edit-row{% endif %}"{% if ira_any %} role="button" tabindex="0" data-editor="ira-{{ y.year }}"{% endif %}>
       <div class="grow">
         <strong>IRA</strong>
         <span class="limit-bar"><span class="limit-fill" data-pct="{{ [100, (100 * y.ira / y.ira_limit) | round(1)] | min }}"></span></span>
         <span class="muted small">{{ y.ira | money }} of {{ y.ira_limit | money }} · {{ (y.ira_limit - y.ira) | money if y.ira < y.ira_limit else "$0.00" }} left</span>
       </div>
-      {% if y.ira_items %}<span class="chev" aria-hidden="true">›</span>{% endif %}
-      {% if y.ira_items %}
+      {% if ira_any %}<span class="chev" aria-hidden="true">›</span>{% endif %}
+      {% if ira_any %}
       <template id="ira-{{ y.year }}">
         <h3 class="sheet-title">IRA contributions for {{ y.year }}</h3>
-        <p class="hint">A contribution made January 1 to April 15 can count for the year before. Change it here to match what you chose with your IRA provider.</p>
-        <ul class="list">
-          {% for c in y.ira_items %}
-          <li class="plain-row"><span class="grow"><strong>{{ c.amount | money }}</strong><span class="muted small">{{ c.date | shortdate }} · {{ c.account }}</span></span>
-            {% if c.can_switch %}{% set d = c.date[:4] | int %}
+        <p class="hint">Money that came into your IRAs, as the provider reports it. A contribution made January 1 to April 15 can count for the year before; anything that isn't a contribution (a rollover, a promotion) can be left out.</p>
+        {% macro ira_rows(items) %}
+        <ul class="list ira-items">
+          {% for c in items %}{% set d = c.own_year %}
+          <li class="plain-row"><span class="grow"><strong>{{ c.amount | money }}</strong><span class="muted small">{{ c.date | shortdate }} · {{ c.name or c.subtype | capitalize }} · {{ c.account }}</span></span>
             <select class="tax-year" data-id="{{ c.id }}" aria-label="Counts for">
               <option value="{{ d }}" {% if c.year == d %}selected{% endif %}>Counts for {{ d }}</option>
-              <option value="{{ d - 1 }}" {% if c.year == d - 1 %}selected{% endif %}>Counts for {{ d - 1 }}</option>
-            </select>{% endif %}</li>
+              {% if c.can_switch %}<option value="{{ d - 1 }}" {% if c.year == d - 1 %}selected{% endif %}>Counts for {{ d - 1 }}</option>{% endif %}
+              <option value="0" {% if c.year == 0 %}selected{% endif %}>Not a contribution</option>
+            </select></li>
           {% endfor %}
         </ul>
+        {% endmacro %}
+        {{ ira_rows(y.ira_items) }}
+        {% if y.ira_ignored %}<p class="section-label">Left out</p>{{ ira_rows(y.ira_ignored) }}{% endif %}
         <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
       </template>
       {% endif %}
