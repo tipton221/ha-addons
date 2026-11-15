@@ -516,7 +516,7 @@ details:not(.add) > summary { padding: 6px 0; font-weight: 600; }
 .editor-form { padding-bottom: 4px; }
 .editor-form .sheet-actions { margin-top: 22px; }
 .editor-form label.inline { margin: 16px 0 6px; }
-.wide-btn { width: 100%; margin-top: 18px; }
+.wide-btn { width: 100%; margin-top: 18px; min-height: 50px; }
 .bill-manage { display: flex; gap: 10px; }
 .bill-manage .wide-btn { flex: 1; }
 .bill-manage + .hint { margin-top: 10px; }
@@ -857,3 +857,4 @@ a.tile:active { transform: scale(0.98); }
 .wide-btn + .sheet-actions, .list + .sheet-actions, .hint + .sheet-actions { margin-top: 18px; }
 .period-table .needs { grid-column: 2 / -1; color: var(--text-2); font-size: 0.85rem; text-align: center; }
 .ira-items .tax-year { flex: none; max-width: 52%; }
+.activity .grow { display: flex; flex-direction: column; min-width: 0; }

@@ -43,6 +43,13 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.13.2:
+
+- Plaid Investments history is requested in full (24 months) on every sync. Right after Investments is added Plaid may still be loading it, and a shorter window never picked it up.
+- IRA contributions also come from YNAB transfers into the IRA's linked YNAB account, before Plaid's activity starts. Each shows where it came from.
+- Each investment account's sheet lists its latest activity from Plaid with type and subtype.
+- Sheet buttons are all the same height. Short endings of account names ("403 (b)") stay on the line with the word before them.
+
 Version 1.13.1:
 
 - Investments: an account with balances entered by hand uses only those entries (and their money put in) for gains, not YNAB history where contributions can't be told from growth. A period whose start has no entered balance within about a month shows "Needs a balance near" that date instead of a made-up gain. History that starts inside a period is measured from its first balance.

@@ -1533,6 +1533,9 @@ def test_sync_investments_and_consent(tmp_path):
         assert conn.execute("SELECT amount FROM investment_txns WHERE id='t1'").fetchone()[0] == -250.0
     first_start = D.fromisoformat(p.ranges[0][0])
     assert (D.fromisoformat(p.ranges[0][1]) - first_start).days == 730  # full history the first time
+    item["investments_synced"] = "2026-11-15"
+    asyncio.run(sync_investments(db, p, item))
+    assert (D.fromisoformat(p.ranges[1][1]) - D.fromisoformat(p.ranges[1][0])).days == 730  # every time
     assert asyncio.run(sync_investments(db, InvPlaid("ADDITIONAL_CONSENT_REQUIRED"), item)) == {"investments": "consent"}
     with db.connect() as conn:
         assert conn.execute("SELECT investments FROM plaid_items").fetchone()[0] == "consent"
@@ -1584,3 +1587,30 @@ def test_entered_balances_anchor_gains_and_ira_transfers_count(tmp_path, monkeyp
         assert "?v=" in c.get("/insights").text
     y = limits(db, D(2026, 11, 15))["years"][0]
     assert y["ira"] == 250.0 and [c["id"] for c in y["ira_ignored"]] == ["t2"]
+
+
+
+def test_ira_contributions_from_ynab_before_plaid_activity(tmp_path, monkeypatch):
+    import json as _json
+    from app.investments import limits
+    db, app = client_with(tmp_path, monkeypatch, [], [("roth", "Test Roth IRA", "investment", 0.0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE accounts SET subtype='roth' WHERE account_id='roth'")
+        conn.execute("INSERT INTO account_links VALUES ('roth', 'ynab:r')")
+        for i, m in enumerate(range(1, 11)):
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, raw, reviewed) "
+                         "VALUES ('ynab', ?, 'ynab:r', ?, 'Transfer : Savings', -250, ?, 1)",
+                         (f"y{i}", f"2026-{m:02d}-15", _json.dumps({"transfer_account_id": "x"})))
+        conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, raw, reviewed) "
+                     "VALUES ('ynab', 'adj', 'ynab:r', '2026-06-30', 'Market change', -400, '{}', 1)")  # not a transfer
+        conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) VALUES "
+                     "('p1', 'roth', '2026-10-01', 'Deposit', -250, 'cash', 'deposit')")  # Plaid from Oct 1 on
+    y = limits(db, D(2026, 11, 15))["years"][0]
+    # Jan to Sep from YNAB (Oct's YNAB transfer overlaps Plaid's activity), plus Plaid's Oct 1 deposit.
+    assert y["ira"] == 2500.0 and {c["source"] for c in y["ira_items"]} == {"YNAB", "Plaid"}
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/investments/tax-year", json={"id": "ynab:y5", "year": 2025}, headers=H).status_code == 400
+        assert c.post("/api/investments/tax-year", json={"id": "ynab:y0", "year": 0}, headers=H).status_code == 200
+    assert limits(db, D(2026, 11, 15))["years"][0]["ira"] == 2250.0
