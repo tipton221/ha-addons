@@ -1614,3 +1614,43 @@ def test_ira_contributions_from_ynab_before_plaid_activity(tmp_path, monkeypatch
         assert c.post("/api/investments/tax-year", json={"id": "ynab:y5", "year": 2025}, headers=H).status_code == 400
         assert c.post("/api/investments/tax-year", json={"id": "ynab:y0", "year": 0}, headers=H).status_code == 200
     assert limits(db, D(2026, 11, 15))["years"][0]["ira"] == 2250.0
+
+
+def test_loans_pslf_count_and_projection(tmp_path, monkeypatch):
+    from app.loans import loans, project
+    # Monthly payments to a loan servicer, tagged with a bill.
+    rows = [(f"m{m}", "chk", f"2026-{m:02d}-08", "LOAN SERVICER", "Loan Servicer", 250.0, 0, "LOAN_PAYMENTS",
+             "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT", 1) for m in range(6, 12)]
+    rows.append(("extra", "chk", "2026-09-20", "LOAN SERVICER", "Loan Servicer", 250.0, 0, "LOAN_PAYMENTS", "X", 1))
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 0, 0)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES ('Loan servicer', 'loan servicer', 250, 'monthly', 8)")
+        bill = conn.execute("SELECT id FROM bills").fetchone()[0]
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/loans", json={"name": "Student loans", "balance": "24,000.00", "day": "2026-11-15",
+                                       "rate": "3.4", "payment": "250.00", "bill_id": str(bill), "pslf": True,
+                                       "pslf_count": "94", "pslf_as_of": "2026-09-06", "recert": "2027-04-08"}, headers=H)
+        assert r.status_code == 200
+        aid = r.json()["id"]
+        today = D(2026, 11, 15)
+        (loan,) = loans(db, today)
+        p = loan["pslf_info"]
+        # Sep (two payments: one month), Oct, Nov after Sep 6: 94 + 3.
+        assert loan["balance"] == 24000.0 and p["count"] == 97 and [m["month"] for m in p["months"]] == ["2026-09", "2026-10", "2026-11"]
+        # October and November were between jobs.
+        for m in ("2026-10", "2026-11"):
+            assert c.post("/api/loans/month", json={"account_id": aid, "month": m, "counts": False}, headers=H).status_code == 200
+        p = loans(db, today)[0]["pslf_info"]
+        assert p["count"] == 95 and p["left"] == 25
+        # November already has a payment, so the next is December; 25 more ends in December 2028.
+        assert p["last_month"] == "2028-12" and p["to_pay"] == 6250.0
+        assert p["forgiven"] == project(24000, 3.4, 250, 25)["balance"] and 18000 < p["forgiven"] < 19500
+        assert loan["recert_days"] == (D(2027, 4, 8) - today).days
+        assert "Loans" in c.get("/insights").text
+        # It counts in net worth as a debt.
+        from app.insights import net_worth
+        assert any(a["id"] == aid and a["value"] == -24000.0 for a in net_worth(db, today)["accounts"])
+    assert project(10000, 6, 40)["months"] is None          # 40 a month never covers $50 of interest
+    assert project(1200, 0, 100)["months"] == 12
