@@ -1,4 +1,4 @@
-{% macro txn_row(t, review=False) %}
+{% macro txn_row(t, review=False, dated=False) %}
 <li class="txn-item" data-source="{{ t.source }}" data-id="{{ t.id }}"{% if t.transfer_peer %} data-peer="{{ t.transfer_peer }}"{% endif %}>
   <div class="txn" role="button" tabindex="0" aria-label="Edit {{ t.display_name }}">
     <div class="main">
@@ -12,7 +12,7 @@
         {% endif %}
         {% if t.transfer %}<span class="pill tag c-gray">⇄ {{ "To" if t.transfer.out else "From" }} {{ t.transfer.account }}</span>{% endif %}
         {% if t.bill %}<span class="pill tag bill-{{ t.bill.id }}">↻ {{ t.bill.name }}</span>{% endif %}
-        <span>{% if review %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
+        <span>{% if review or dated %}{{ t.date | shortdate }} · {% endif %}{{ t.account_label }}</span>
       </div>
       {% if t.note %}<div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg><span>{{ t.note }}</span></div>{% endif %}
     </div>

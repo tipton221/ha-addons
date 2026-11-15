@@ -11,7 +11,8 @@ Net worth for each account on a given day comes from the best source available t
 
 Spending and cash flow use Plaid transactions only. Each category counts as one kind:
 spending, income, saving, debt (loan payments), or transfer (money moving between your own
-accounts, left out). A transfer paired with an investment account counts as saving.
+accounts, left out). A transfer paired with an investment account counts as saving, and a
+deposit tagged as recurring income (a paycheck) counts as income whatever its category.
 """
 
 from __future__ import annotations
@@ -166,6 +167,7 @@ def account_series(db: Database, today: date) -> list[dict]:
             continue
         out.append({"id": aid, "name": label, "source": a["source"], "type": a.get("type"),
                     "subtype": a.get("subtype"), "debt": debt, "value": value,
+                    "included": a.get("in_net_worth") != 0,
                     "closed": a.get("subtype") == "closed" or a.get("visibility") == "archived"})
     return out
 
@@ -178,7 +180,7 @@ def net_worth(db: Database, today: date) -> dict:
         first_manual = conn.execute("SELECT MIN(day) FROM manual_balances").fetchone()[0]
     starts = [d for d in (first, first_manual) if d]
     if not starts or not series:
-        return {"points": [], "accounts": [], "now": None}
+        return {"points": [], "accounts": [], "excluded": [], "now": None}
     start = date.fromisoformat(min(starts))
     points = []
     for m in months_between(start, today):
@@ -186,6 +188,8 @@ def net_worth(db: Database, today: date) -> dict:
         day = min(month_end(y, mo), today).isoformat()
         assets = debts = 0.0
         for s in series:
+            if not s["included"]:
+                continue
             v, _ = s["value"](day)
             if v is None:
                 continue
@@ -196,9 +200,12 @@ def net_worth(db: Database, today: date) -> dict:
         points.append({"m": m, "day": day, "assets": round(assets, 2), "debts": round(debts, 2),
                        "net": round(assets + debts, 2)})
     today_s = today.isoformat()
-    accounts = []
+    accounts, excluded = [], []
     for s in series:
         v, src = s["value"](today_s)
+        if not s["included"]:
+            excluded.append({"id": s["id"], "name": s["name"], "value": v, "debt": s["debt"]})
+            continue
         if v is None or (s["closed"] and abs(v) < 0.005):
             continue
         accounts.append({"id": s["id"], "name": s["name"], "value": v, "source": src, "debt": s["debt"],
@@ -206,7 +213,8 @@ def net_worth(db: Database, today: date) -> dict:
                          "subtype": s["subtype"],
                          "kind": MANUAL_KINDS.get(s["subtype"] or "") if s["source"] == "manual" else None})
     accounts.sort(key=lambda x: (x["debt"], -abs(x["value"])))
-    return {"points": points, "accounts": accounts, "now": points[-1] if points else None}
+    excluded.sort(key=lambda x: x["name"].lower())
+    return {"points": points, "accounts": accounts, "excluded": excluded, "now": points[-1] if points else None}
 
 
 # ---------------------------------------------------------------- spending and cash flow
@@ -230,28 +238,37 @@ def classify(t: dict, kinds: dict[int, str], acct_types: dict[str, str]) -> tupl
         if t.get("transfer") and peer_type == "investment":
             return "saving", amount
         return None
-    if kind == "income":
-        return "income", -amount
+    if kind == "income" or ((t.get("bill") or {}).get("kind") == "income" and amount < 0):
+        return "income", -amount  # an Income category, or a deposit tagged as recurring income
     if kind in ("saving", "debt"):
         return kind, amount
     return "spending", amount
 
 
-def monthly(db: Database, rows: list[dict], today: date) -> dict:
-    """Per month: income, spending (with categories), saving, debt payments, and what was kept."""
+def classified(db: Database, rows: list[dict]):
+    """Each counted transaction with its (bucket, amount)."""
     kinds = category_kinds(db)
     with db.connect() as conn:
         acct_types = {r["account_id"]: r["type"] for r in conn.execute("SELECT account_id, type FROM accounts")}
         peers = {r["id"]: r["account_id"] for r in conn.execute(
             "SELECT id, account_id FROM transactions WHERE source='plaid' AND id IN "
             "(SELECT transfer_peer FROM transactions WHERE transfer_peer IS NOT NULL)")}
-    months: dict[str, dict] = {}
     for t in rows:
         t["transfer_peer_account"] = peers.get(t.get("transfer_peer") or "")
         c = classify(t, kinds, acct_types)
-        if not c:
-            continue
-        bucket, amount = c
+        if c:
+            yield t, c[0], c[1]
+
+
+def spending_rows(db: Database, rows: list[dict]) -> list[dict]:
+    """The transactions counted as spending, largest first (refunds last)."""
+    return sorted((t for t, bucket, _ in classified(db, rows) if bucket == "spending"), key=lambda t: -t["amount"])
+
+
+def monthly(db: Database, rows: list[dict], today: date) -> dict:
+    """Per month: income, spending (with categories), saving, debt payments, and what was kept."""
+    months: dict[str, dict] = {}
+    for t, bucket, amount in classified(db, rows):
         m = months.setdefault(t["date"][:7], {"income": 0.0, "spending": 0.0, "saving": 0.0, "debt": 0.0,
                                               "cats": defaultdict(float), "count": 0, "biggest": []})
         m[bucket] += amount
@@ -282,43 +299,57 @@ def monthly(db: Database, rows: list[dict], today: date) -> dict:
 
 
 def observations(flow: list[dict], cats: dict[int, dict], today: date) -> list[dict]:
-    """A few plain observations: this month's pace, and categories well above their usual."""
-    notes = []
+    """A few tiles at the top of Insights: this month's spending pace, categories well above their
+    usual last month, and how much of the last three months' income was kept.
+
+    Each tile: tone (good, bad, or neutral), label, value, detail, and optionally a category id
+    (for its color) and a Search link."""
+    tiles = []
     if len(flow) < 2:
-        return notes
+        return tiles
     current, done = flow[-1], flow[:-1]
-    recent = done[-6:]
-    full = [m for m in recent if m["spending"] > 0]
-    if full:
+    full = [m for m in done[-6:] if m["spending"] > 0]
+    if full and today.day >= 5:
         avg = sum(m["spending"] for m in full) / len(full)
         days = calendar.monthrange(today.year, today.month)[1]
-        pace = current["spending"] / max(today.day, 1) * days
-        if avg > 0 and today.day >= 5:
-            diff = pace - avg
-            tone = "up" if diff > 0.1 * avg else "down" if diff < -0.1 * avg else "even"
-            notes.append({"tone": tone, "text": (
-                f"On pace to spend about {fmt(pace)} this month, "
-                + (f"{fmt(abs(diff))} {'more' if diff > 0 else 'less'} than" if tone != "even" else "close to")
-                + f" your {len(full)}-month average of {fmt(avg)}.")})
-    last = done[-1]
-    before = done[-7:-1]
+        pace = current["spending"] / today.day * days
+        diff = pace - avg
+        tone = "bad" if diff > 0.1 * avg else "good" if diff < -0.1 * avg else "neutral"
+        tiles.append({"tone": tone, "label": "This month's pace", "value": fmt(pace),
+                      "detail": (f"{fmt(abs(diff))} {'above' if diff > 0 else 'below'} your {len(full)}-month "
+                                 f"average of {fmt(avg)}" if tone != "neutral"
+                                 else f"Close to your {len(full)}-month average of {fmt(avg)}")})
+    last, before = done[-1], done[-7:-1]
     if before:
-        for cid, spent in sorted(last["cats"].items(), key=lambda x: -x[1]):
+        y, mo = int(last["m"][:4]), int(last["m"][5:])
+        end = calendar.monthrange(y, mo)[1]
+        spikes = []
+        for cid, spent in last["cats"].items():
             usual = sum(m["cats"].get(cid, 0) for m in before) / len(before)
             if spent >= 50 and spent > 1.4 * usual + 25:
-                name = (cats.get(int(cid)) or {}).get("name", "Other") if cid != "None" else "Other"
-                notes.append({"tone": "up", "text": (
-                    f"{name} was {fmt(spent)} in {month_name(last['m'])}, "
-                    f"{fmt(spent - usual)} above its usual {fmt(usual)}.")})
-            if len(notes) >= 4:
-                break
-    kept = [m for m in done[-3:] if m["rate"] is not None]
-    if kept:
-        rate = round(sum(m["rate"] for m in kept) / len(kept))
-        notes.append({"tone": "up" if rate >= 20 else "even" if rate >= 0 else "down",
-                      "text": f"You kept {rate}% of your income over the last {len(kept)} full month"
-                              f"{'' if len(kept) == 1 else 's'} after spending and debt payments."})
-    return notes
+                spikes.append((spent - usual, cid, spent, usual))
+        for _, cid, spent, usual in sorted(spikes, reverse=True)[:3]:
+            cat = cats.get(int(cid)) if cid != "None" else None
+            href = f"/search?start={last['m']}-01&end={last['m']}-{end:02d}" + (f"&category={cid}" if cat else "")
+            tiles.append({"tone": "bad", "label": f"{(cat or {}).get('name', 'Other')} in {calendar.month_abbr[mo]}",
+                          "value": fmt(spent), "detail": f"{fmt(spent - usual)} above its usual {fmt(usual)}",
+                          "cat": int(cid) if cat else None, "href": href})
+    recent = done[-3:]
+    income = sum(m["income"] for m in recent)
+    out = sum(m["spending"] + m["debt"] for m in recent)
+    kept = income - out
+    n = len(recent)
+    label = f"Kept, last {n} month{'' if n == 1 else 's'}"
+    if income <= 0:
+        tiles.append({"tone": "neutral", "label": label, "value": "No income found", "text": True,
+                      "detail": "Set your paycheck's category to count as Income (Accounts › Categories)"})
+    else:
+        rate = round(100 * kept / income)
+        tiles.append({"tone": "good" if rate >= 20 else "neutral" if rate >= 0 else "bad", "label": label,
+                      "value": ("-" if kept < 0 else "") + fmt(kept),
+                      "detail": (f"{rate}% of {fmt(income)} income" if kept >= 0
+                                 else f"Spending and debt payments were {fmt(abs(kept))} more than the {fmt(income)} that came in")})
+    return tiles
 
 
 def fmt(v: float) -> str:

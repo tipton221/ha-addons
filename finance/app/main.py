@@ -28,7 +28,8 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCES, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
-from .insights import KIND_LABELS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations
+from .insights import (KIND_LABELS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
+                       spending_rows)
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import refresh_accounts, sync_all, sync_ynab
@@ -42,6 +43,12 @@ HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify"}
+
+def num(value) -> float:
+    """A number typed in a field, which may have a $ and thousands commas (1,234.50)."""
+    text = str(value if value is not None else "").replace(",", "").replace("$", "").strip()
+    return float(text) if text else 0.0
+
 
 def csp(nonce: str) -> str:
     """Content Security Policy. Plaid Link adds one <style> element when it opens and copies the
@@ -539,7 +546,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                     set_merchant_rule(db, key, category_id=int(cid) if cid is not None else None)
         if "tip" in body:  # a tip entered by hand; empty or 0 goes back to automatic
             try:
-                tip = round(abs(float(body["tip"] or 0)), 2) or None
+                tip = round(abs(num(body["tip"])), 2) or None
             except (TypeError, ValueError):
                 raise HTTPException(400, "Enter the tip as an amount")
             if tip is not None and tip >= abs(t["amount"]):
@@ -574,12 +581,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         """Fresh HTML for transaction rows already on the page, so a save does not reload the page."""
         body = await request.json()
         wanted = {str(r["id"]): bool(r.get("review")) for r in body.get("rows", [])[:900]}
+        dated = {str(r["id"]) for r in body.get("rows", [])[:900] if r.get("dated")}
         if not wanted:
             return {"rows": {}}
         marks = ",".join("?" * len(wanted))
         rows = resolve(db, list_transactions(db, where=f"t.id IN ({marks})", params=tuple(wanted), limit=len(wanted)))
         macro = templates.env.get_template("_txn.html").make_module({}).txn_row
-        return {"rows": {t["id"]: str(macro(t, review=wanted[t["id"]])) for t in rows}}
+        return {"rows": {t["id"]: str(macro(t, review=wanted[t["id"]], dated=t["id"] in dated)) for t in rows}}
 
     @app.get("/api/merchant-names")
     async def merchant_names():
@@ -721,7 +729,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             out = {
                 "name": str(body["name"]).strip()[:80],
                 "match": normalize(str(body.get("match") or body["name"])),
-                "amount": round(abs(float(body.get("amount") or 0)), 2),
+                "amount": round(abs(num(body.get("amount"))), 2),
                 "cadence": body.get("cadence") if body.get("cadence") in CADENCES else "monthly",
                 "due_day": int(body["due_day"]) if body.get("due_day") else None,
                 "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
@@ -842,7 +850,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         for key, op in (("min", ">="), ("max", "<=")):
             if q.get(key):
                 try:
-                    params.append(abs(float(q[key])))
+                    params.append(abs(num(q[key])))
                     where.append(f"ABS(t.amount) {op} ?")
                 except ValueError:
                     pass
@@ -896,10 +904,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     def is_transfer(t: dict) -> bool:
         return bool(t.get("transfer")) or (t["category_info"] or {}).get("name") == TRANSFER_CATEGORY
 
+    SORTS = {"date": "Newest first", "oldest": "Oldest first", "name": "Merchant, A to Z",
+             "largest": "Largest amount", "smallest": "Smallest amount"}
+
     @app.get("/search", response_class=HTMLResponse)
     async def search_page(request: Request):
         q = search_query(request)
+        sort = q.pop("sort", "date")
+        sort = sort if sort in SORTS else "date"
         rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
+        if sort == "oldest":
+            rows.reverse()
+        elif sort == "name":
+            rows.sort(key=lambda t: (t["display_name"].casefold(), t["date"]))
+        elif sort in ("largest", "smallest"):
+            rows.sort(key=lambda t: abs(t["amount"]), reverse=sort == "largest")
         more = len(rows) > 1000
         # Totals leave out money moving between your own accounts, unless you searched by category
         # or asked for transfers.
@@ -907,7 +926,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         out = sum(t["amount"] for t in counted if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
-            "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
+            "q": q, "count": len(rows), "truncated": more, "sort": sort, "sorts": SORTS,
+            # By date the list is grouped by day; any other order is one list with dates on the rows.
+            "groups": group_by_date(rows[:1000], today()) if sort in ("date", "oldest") else [("", rows[:1000])],
+            "dated": sort not in ("date", "oldest"),
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
             "total_out": out, "total_in": inflow, "export_query": urlencode(q, doseq=True),
             "excluded": len(rows) - len(counted), "quick": quick_ranges(today(), q),
@@ -957,6 +979,30 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "today": now.isoformat(), "kind_labels": KIND_LABELS,
         })
 
+    @app.get("/api/insights/spending", response_class=HTMLResponse)
+    async def month_spending(request: Request, m: str):
+        """Every transaction counted as spending in a month, largest first, as editable rows."""
+        try:
+            first = date.fromisoformat(m + "-01")
+        except ValueError:
+            raise HTTPException(400, "Month must look like 2026-11")
+        last = first.replace(day=calendar.monthrange(first.year, first.month)[1])
+        rows = resolve(db, list_transactions(db, where="t.date >= ? AND t.date <= ?",
+                                             params=(first.isoformat(), last.isoformat()), limit=0))
+        macro = templates.env.get_template("_txn.html").make_module({}).txn_row
+        items = spending_rows(db, rows)
+        return HTMLResponse("".join(str(macro(t, dated=True)) for t in items))
+
+    @app.post("/api/accounts/{account_id}/net-worth")
+    async def set_in_net_worth(account_id: str, request: Request):
+        include = bool((await request.json()).get("include"))
+        with db.connect() as conn:
+            n = conn.execute("UPDATE accounts SET in_net_worth=? WHERE account_id=?",
+                             (1 if include else 0, account_id)).rowcount
+        if not n:
+            raise HTTPException(404, "No such account")
+        return {"ok": True}
+
     @app.post("/api/manual-accounts")
     async def save_manual_account(request: Request):
         body = await request.json()
@@ -984,7 +1030,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     def save_balance(aid: str, value, day) -> None:
         try:
-            amount = round(float(str(value).replace(",", "").replace("$", "")), 2)
+            amount = round(num(value), 2)
         except ValueError:
             raise HTTPException(400, "Enter the balance as a number")
         day = str(day or "") or today().isoformat()

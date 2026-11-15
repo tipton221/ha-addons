@@ -181,6 +181,7 @@ class Database:
                 ("display_name", "TEXT"),
                 ("short_name", "TEXT"),      # shown on filter pills
                 ("visibility", "TEXT NOT NULL DEFAULT 'everyday'"),  # everyday, less (used), archived
+                ("in_net_worth", "INTEGER NOT NULL DEFAULT 1"),  # 0: left out of Insights net worth
             ],
             "categories": [
                 ("kind", "TEXT"),            # spending, income, saving, debt, or transfer (see insights.py)

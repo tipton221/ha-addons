@@ -1235,6 +1235,13 @@ def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
     flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
     oct_ = flow[-1]
     assert (oct_["income"], oct_["spending"], oct_["debt"], oct_["saving"]) == (3000.0, 30.0, 200.0, 500.0)
+    # A paycheck the bank calls "Other" still counts as income once it's tagged as recurring income.
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET category=NULL, category_detail=NULL WHERE id='pay'")
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, kind) VALUES ('Paycheck', 'acme', 3000, 'biweekly', 'income')")
+        bill_id = conn.execute("SELECT id FROM bills").fetchone()[0]
+        conn.execute("UPDATE transactions SET bill_id=? WHERE id='pay'", (bill_id,))
+    assert monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"][-1]["income"] == 3000.0
     assert oct_["kept"] == 2770.0 and oct_["rate"] == 92
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
@@ -1266,3 +1273,54 @@ def test_manual_accounts_and_balances_api(tmp_path, monkeypatch):
         assert c.post("/api/manual-accounts/delete", json={"id": aid}, headers=H).status_code == 200
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM manual_balances").fetchone()[0] == 0
+
+
+def test_month_spending_list_and_net_worth_toggle(tmp_path, monkeypatch):
+    from datetime import date
+    from app.insights import net_worth
+    rows = [("a", "card", "2026-10-03", "BOOK BARN", "Book Barn", 40.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("b", "card", "2026-10-04", "TOY TOWN", "Toy Town", 90.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("c", "card", "2026-10-05", "CARD PAYMENT", None, -130.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 1),
+            ("d", "card", "2026-09-05", "TOY TOWN", "Toy Town", 15.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 100.0, None),
+                                                       ("chk", "Checking", "depository", 900.0, 900.0)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        html = c.get("/api/insights/spending?m=2026-10").text
+        assert html.index("Toy Town") < html.index("Book Barn") and "CARD PAYMENT" not in html
+        assert "Oct 4" in html  # rows show their date
+        assert c.get("/api/insights/spending?m=bad").status_code == 400
+        assert net_worth(db, date(2026, 11, 15))["now"]["net"] == 800.0
+        assert c.post("/api/accounts/card/net-worth", json={"include": False}, headers=H).status_code == 200
+        nw = net_worth(db, date(2026, 11, 15))
+        assert nw["now"]["net"] == 900.0 and [a["name"] for a in nw["excluded"]] == ["Card A"]
+        assert "Left out" in c.get("/insights").text
+        assert c.post("/api/accounts/nope/net-worth", json={"include": True}, headers=H).status_code == 404
+
+
+def test_amounts_accept_thousands_commas(tmp_path, monkeypatch):
+    db, app = client_with(tmp_path, monkeypatch, [], [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/bills", json={"name": "Big Insurance", "amount": "1,234.50", "cadence": "yearly"}, headers=H)
+        assert r.status_code == 200
+    with db.connect() as conn:
+        assert conn.execute("SELECT amount FROM bills").fetchone()[0] == 1234.5
+
+
+def test_search_sort_orders(tmp_path, monkeypatch):
+    rows = [("s1", "card", "2026-11-03", "BOOK BARN", "Book Barn", 12.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("s2", "card", "2026-11-04", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("s3", "card", "2026-11-05", "ACORN TOYS", "Acorn Toys", 30.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        def order(qs):
+            page = c.get("/search?" + qs).text.split("result")[1]
+            return sorted(("Book Barn", "Corner Cafe", "Acorn Toys"), key=page.index)
+        assert order("min=1") == ["Acorn Toys", "Corner Cafe", "Book Barn"]          # newest first
+        assert order("min=1&sort=oldest") == ["Book Barn", "Corner Cafe", "Acorn Toys"]
+        assert order("min=1&sort=name") == ["Acorn Toys", "Book Barn", "Corner Cafe"]
+        assert order("min=1&sort=largest") == ["Acorn Toys", "Book Barn", "Corner Cafe"]
+        assert order("min=1&sort=smallest") == ["Corner Cafe", "Book Barn", "Acorn Toys"]
+        assert "Nothing found" in c.get("/search?q=zzz&sort=name").text
