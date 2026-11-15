@@ -95,14 +95,14 @@
   </div>
   <div class="chart short" id="flow-chart" role="img" aria-label="Money in and out by month"></div>
   <ul class="list flow-table">
-    <li class="mt-head"><span>Month</span><span>In</span><span>Spent</span><span>Debt</span><span>Saved</span><span>Kept</span></li>
+    <li class="mt-head"><span>Month</span><span>In</span><span>Spent</span><span>Debt</span><span>Saved</span><span>Net</span></li>
     {% for m in (flow[-12:]) | reverse %}
     <li><span>{{ month_label(m.m) }}</span><span>{{ m.income | money }}</span><span>{{ m.spending | money }}</span>
       <span>{{ m.debt | money }}</span><span>{{ m.saving | money }}</span>
-      <span class="{{ 'up' if m.kept >= 0 else 'down' }}">{{ m.kept | money }}{% if m.rate is not none %} <small>{{ m.rate }}%</small>{% endif %}</span></li>
+      <span class="net-cell {{ 'up' if m.kept >= 0 else 'down' }}">{{ m.kept | money }}<small>{% if m.rate is not none %}{{ m.rate }}% of income{% else %}&nbsp;{% endif %}</small></span></li>
     {% endfor %}
   </ul>
-  <p class="muted small">Kept is income minus spending and debt payments. Saved is money moved into investments, or spent in a category set to count as saving.</p>
+  <p class="muted small">Net is income minus spending and debt payments. Saved is money moved into a retirement or investment account (a transfer Plaid marks that way, or one paired with a connected investment account), plus anything in a category set to count as saving. Saving isn't subtracted from Net: it's part of what you kept.</p>
 </section>
 {% endif %}
 

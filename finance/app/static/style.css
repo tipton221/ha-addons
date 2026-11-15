@@ -646,7 +646,7 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(240px 120px at 0% 0%, color-mix(in srgb, var(--tone) 18%, transparent), transparent 70%);
 }
-.tile.tone-bad { --tone: var(--orange); }
+.tile.tone-bad { --tone: var(--red); }
 .tile.tone-good { --tone: var(--green); }
 a.tile { transition: transform .15s var(--ease), border-color .2s; }
 a.tile:hover { border-color: color-mix(in srgb, var(--tone) 45%, transparent); }
@@ -668,8 +668,10 @@ a.tile:active { transform: scale(0.98); }
 .range-chips { display: flex; gap: 6px; }
 .range-chips .filter { min-height: 30px; padding: 4px 11px; font-size: 0.8rem; }
 
-.stat-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 22px; margin: 2px 0 12px; }
-.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 28px; margin: 10px 0 22px; }
+.stat { display: flex; flex-direction: column; gap: 6px; }
+#networth .card-head, #spending .card-head { margin-bottom: 4px; }
+#networth .chart, #spending .chart { margin-top: 8px; }
 .stat.main { flex-basis: 100%; }
 .stat .big-number { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1;
   font-variant-numeric: tabular-nums; font-stretch: 85%; font-variation-settings: "wdth" 85; }
@@ -789,3 +791,8 @@ a.tile:active { transform: scale(0.98); }
 }
 .search-sums { margin: -4px 0 8px; }
 .tile-value.as-text { font-size: 1.2rem; font-stretch: 100%; font-variation-settings: normal; letter-spacing: 0; }
+
+/* Cash flow Net column: the amount, then the share of income on its own line, on every row */
+.net-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+.net-cell small { color: var(--text-2); }
+.flow-table li > span { white-space: nowrap; }

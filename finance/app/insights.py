@@ -225,6 +225,9 @@ def category_kinds(db: Database) -> dict[int, str]:
                 for r in conn.execute("SELECT id, kind FROM categories")}
 
 
+INVESTMENT_TRANSFERS = {"TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS", "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS"}
+
+
 def classify(t: dict, kinds: dict[int, str], acct_types: dict[str, str]) -> tuple[str, float] | None:
     """(bucket, amount) for one Plaid transaction, with money out positive for every bucket but
     income, where money in is positive. None when it doesn't count (transfers, investment accounts)."""
@@ -236,6 +239,10 @@ def classify(t: dict, kinds: dict[int, str], acct_types: dict[str, str]) -> tupl
     if t.get("transfer") or kind == "transfer":
         peer_type = acct_types.get(t.get("transfer_peer_account") or "")
         if t.get("transfer") and peer_type == "investment":
+            return "saving", amount
+        # Plaid marks money sent to (or taken from) a retirement or investment account, even when that
+        # account isn't connected here: a Roth IRA contribution, for example.
+        if not t.get("transfer") and (t.get("category_detail") or "") in INVESTMENT_TRANSFERS:
             return "saving", amount
         return None
     if kind == "income" or ((t.get("bill") or {}).get("kind") == "income" and amount < 0):

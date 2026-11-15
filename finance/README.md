@@ -43,7 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.2:
+Version 1.11.3:
+
+- Insight tiles: red for worse than usual, green for better, gray for neutral. More room between the numbers at the top of Net worth and Spending.
+- Cash flow: Kept is now Net, with its share of income on a second line on every row so rows are the same height. Saved also counts transfers Plaid marks as going to (or coming from) a retirement or investment account, such as a Roth IRA contribution, even when that account isn't connected.
 
 - Insights tiles say what their color means in a badge (Above usual, Below usual, +$X vs usual, Kept N%), use plain labels ("November spending so far", with where the month is heading), and stack one per row on phones.
 - The spending donut is larger and interactive: hover or tap a slice, or hover a category in the list, to see its name, amount, and share in the middle; click (or tap again) to open those transactions in Search.
