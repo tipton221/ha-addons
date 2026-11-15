@@ -43,9 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 2.0.4:
+Version 2.0.5:
 
 - Loan stats line up with the progress bar: the first flush left, the middle centered, the last flush right.
+- A loan's rate, payment, and balance date are separated by dots.
 
 Version 2.0.3:
 
