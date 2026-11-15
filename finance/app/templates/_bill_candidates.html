@@ -1,0 +1,20 @@
+<h3 class="sheet-title">Recurring charges found</h3>
+<form class="detect-form editor-form" autocomplete="off">
+  <p class="hint">These repeat on a schedule and aren't on your bill list. Tick the ones to add. Anything you leave unticked shows up again next time unless you mark it "Not a bill".</p>
+  <ul class="list candidate-list">
+    {% for c in found %}
+    <li class="candidate" data-match="{{ c.match }}">
+      <label class="inline"><input type="checkbox" name="add" value="{{ c.match }}" checked>
+        <span class="grow"><strong>{{ c.name }}</strong>
+          <span class="muted small">{{ cadence_label[c.cadence] }} · {{ c.count }} charges · last {{ c.last_seen.isoformat() | shortdate }}</span></span>
+        <span class="amount">{% if c.varies %}≈ {% endif %}{{ c.amount | money }}</span>
+      </label>
+      <button type="button" class="ghost small not-bill">Not a bill</button>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="sheet-actions">
+    <button type="button" class="sheet-close">Cancel</button>
+    <button type="submit" class="primary">Add selected</button>
+  </div>
+</form>

@@ -137,6 +137,14 @@ def detect(db: Database, today: date | None = None) -> list[Candidate]:
     return sorted(out, key=lambda c: (-c.amount))
 
 
+def new_candidates(db: Database, candidates: list[Candidate]) -> list[Candidate]:
+    """Candidates that are neither on the bill list nor dismissed before."""
+    with db.connect() as conn:
+        known = {r["match"] for r in conn.execute("SELECT match FROM bills")}
+        known |= {r["match"] for r in conn.execute("SELECT match FROM bills_dismissed")}
+    return [c for c in candidates if c.match not in known]
+
+
 def save_detected(db: Database, candidates: list[Candidate]) -> int:
     """Add detected bills that are not already on the list (by match key). Returns how many were added."""
     added = 0
@@ -420,6 +428,11 @@ def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
     cash = sum((a["available_balance"] if a["available_balance"] is not None else a["current_balance"] or 0)
                for a in cash_accts)
     cards = sum(a["current_balance"] or 0 for a in card_accts)
+    # A payment or transfer only one side shows yet counts as if both had posted.
+    from .transit import in_transit
+    transit = in_transit(db, today)
+    cash += transit["cash"]
+    cards += transit["cards"]
     bills = [b for b in all_bills if b.get("kind") != "income"]  # coverage counts money going out
     due = [b for b in bills if b["active"] and not b["stale"] and today <= b["next_due"] < payday]
     due_total = sum(b["amount"] for b in due)
@@ -430,5 +443,6 @@ def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
         "today": today, "payday": payday, "cash": cash, "cash_accounts": cash_accts,
         "cards": cards, "pending": pending, "due": sorted(due, key=lambda b: b["next_due"]),
         "due_total": due_total, "left": left, "ok": left >= 0, "annual_reserve": reserve,
-        "paycheck": paycheck,
+        "paycheck": paycheck, "transit": transit["items"],
+        "transit_cash": transit["cash"], "transit_cards": transit["cards"],
     }

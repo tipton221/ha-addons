@@ -27,6 +27,8 @@
     <span>Cards <b>{{ (cov.cards + cov.pending) | money }}</b></span>
     <span>Bills due <b>{{ cov.due_total | money }}</b></span>
   </span>
+  {% set waiting = cov.transit | rejectattr("late") | list %}
+  {% if waiting %}<span class="transit-note">Counts {{ waiting | length }} payment{{ "" if waiting | length == 1 else "s" }} in transit as posted</span>{% endif %}
 </a>
 
 <section class="card" id="review-card">

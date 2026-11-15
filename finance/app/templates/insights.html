@@ -114,7 +114,7 @@
       <div class="grow">
         <strong>{{ a.name }}</strong>
         {% set hist = balances.get(a.id) %}
-        <span class="muted small">{% if a.manual %}{{ a.kind }} · entered by hand{% if hist %} {{ hist[0].day | shortdate }}{% endif %}{% elif a.source == "manual" %}From YNAB · entered by hand {{ hist[0].day | shortdate }}{% elif a.source == "ynab" %}From YNAB{% elif a.source == "estimate" %}Worked out from transactions{% else %}Plaid{% endif %}</span>
+        <span class="muted small">{% if a.manual %}{{ a.kind }} · entered by hand{% if hist %} {{ hist[0].day | shortdate }}{% endif %}{% elif a.source == "manual" %}From YNAB · entered by hand {{ hist[0].day | shortdate }}{% elif a.source == "ynab" %}From YNAB{% elif a.source == "estimate" %}Worked out from transactions{% else %}Plaid{% endif %}{% if a.transit %} · incl. {{ "+" if a.transit > 0 else "" }}{{ a.transit | money }} in transit{% endif %}</span>
       </div>
       <span class="amount {{ 'inflow' if not a.debt else '' }}">{{ a.value | money }}</span>
       <span class="chev" aria-hidden="true">›</span>

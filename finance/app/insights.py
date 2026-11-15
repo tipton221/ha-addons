@@ -184,6 +184,9 @@ def net_worth(db: Database, today: date) -> dict:
     if not starts or not series:
         return {"points": [], "accounts": [], "excluded": [], "now": None}
     start = date.fromisoformat(min(starts))
+    from .transit import in_transit
+    transit = in_transit(db, today)["nw"]  # today's balances only: a payment one side shows yet
+    today_s = today.isoformat()
     points = []
     for m in months_between(start, today):
         y, mo = int(m[:4]), int(m[5:])
@@ -195,16 +198,20 @@ def net_worth(db: Database, today: date) -> dict:
             v, _ = s["value"](day)
             if v is None:
                 continue
+            if day == today_s:
+                v += transit.get(s["id"], 0.0)
             if s["debt"]:
                 debts += v
             else:
                 assets += v
         points.append({"m": m, "day": day, "assets": round(assets, 2), "debts": round(debts, 2),
                        "net": round(assets + debts, 2)})
-    today_s = today.isoformat()
     accounts, excluded = [], []
     for s in series:
         v, src = s["value"](today_s)
+        shift = transit.get(s["id"], 0.0) if s["included"] and v is not None else 0.0
+        if shift:
+            v = round(v + shift, 2)
         if not s["included"]:
             excluded.append({"id": s["id"], "name": s["name"], "value": v, "debt": s["debt"]})
             continue
@@ -212,7 +219,7 @@ def net_worth(db: Database, today: date) -> dict:
             continue
         accounts.append({"id": s["id"], "name": s["name"], "value": v, "source": src, "debt": s["debt"],
                          "editable": s["source"] in ("manual", "ynab"), "manual": s["source"] == "manual",
-                         "subtype": s["subtype"],
+                         "subtype": s["subtype"], "transit": shift,
                          "kind": MANUAL_KINDS.get(s["subtype"] or "") if s["source"] == "manual" else None})
     accounts.sort(key=lambda x: (x["debt"], -abs(x["value"])))
     excluded.sort(key=lambda x: x["name"].lower())
