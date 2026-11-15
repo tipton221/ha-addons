@@ -1123,13 +1123,57 @@ const pages = {
       detect.classList.add("spin");
       try {
         const r = await api("/api/bills/detect");
-        toast(r.added ? `Added ${r.added} bill${r.added > 1 ? "s" : ""}` : "No new recurring charges found");
-        if (r.added) setTimeout(() => reloadHere(), 900);
+        if (r.count) editor.openHTML(r.html);
+        else toast("No new recurring charges found");
       } catch (e) { toast(e.message, true); }
       detect.classList.remove("spin");
     });
   },
 };
+
+// "Find new bills" confirmation: add the ticked charges, or set one aside for good with "Not a bill".
+const ignoredBills = new Set();
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".not-bill");
+  if (!btn) return;
+  const row = btn.closest(".candidate");
+  ignoredBills.add(row.dataset.match);
+  row.remove();
+});
+document.addEventListener("submit", async (ev) => {
+  const form = ev.target.closest(".detect-form");
+  if (!form) return;
+  ev.preventDefault();
+  const add = [...form.querySelectorAll('input[name="add"]:checked')].map((i) => i.value);
+  if (!add.length && !ignoredBills.size) { closeSheet(form.closest(".sheet")); return; }
+  try {
+    const r = await api("/api/bills/add-detected", { add, ignore: [...ignoredBills] });
+    ignoredBills.clear();
+    closeSheet(form.closest(".sheet"));
+    toast(r.added ? `Added ${r.added} bill${r.added > 1 ? "s" : ""}` : "Saved");
+    setTimeout(() => reloadHere(), 700);
+  } catch (e) { toast(e.message, true); }
+});
+
+// Tab bar: the highlight slides to the tapped tab right away, while the next page loads,
+// instead of waiting for that page to arrive.
+document.addEventListener("pointerdown", (ev) => {
+  const link = ev.target.closest && ev.target.closest(".tabbar a");
+  if (!link || ev.button > 0 || link.getAttribute("aria-current") === "page") return;
+  const pill = document.querySelector(".tab-pill");
+  const current = document.querySelector('.tabbar a[aria-current="page"]');
+  if (current) current.removeAttribute("aria-current");
+  link.setAttribute("aria-current", "page");
+  if (!pill) return;
+  const from = pill.getBoundingClientRect();
+  link.prepend(pill);
+  const to = pill.getBoundingClientRect();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  pill.animate([
+    { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)`, width: `${from.width}px`, height: `${from.height}px` },
+    { transform: "none", width: `${to.width}px`, height: `${to.height}px` },
+  ], { duration: 220, easing: "cubic-bezier(.32, .72, 0, 1)" });
+});
 
 // Keep browsers (Safari's Contacts AutoFill in particular) from offering personal details in app fields.
 function noAutofill(root) {

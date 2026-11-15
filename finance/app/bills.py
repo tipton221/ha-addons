@@ -137,6 +137,14 @@ def detect(db: Database, today: date | None = None) -> list[Candidate]:
     return sorted(out, key=lambda c: (-c.amount))
 
 
+def new_candidates(db: Database, candidates: list[Candidate]) -> list[Candidate]:
+    """Candidates that are neither on the bill list nor dismissed before."""
+    with db.connect() as conn:
+        known = {r["match"] for r in conn.execute("SELECT match FROM bills")}
+        known |= {r["match"] for r in conn.execute("SELECT match FROM bills_dismissed")}
+    return [c for c in candidates if c.match not in known]
+
+
 def save_detected(db: Database, candidates: list[Candidate]) -> int:
     """Add detected bills that are not already on the list (by match key). Returns how many were added."""
     added = 0

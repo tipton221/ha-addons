@@ -26,7 +26,7 @@ from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
-from .bills import CADENCES, bill_status, coverage, detect, normalize, save_detected
+from .bills import CADENCES, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
                        spending_rows)
@@ -797,7 +797,24 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     @app.post("/api/bills/detect")
     async def detect_bills():
-        return {"added": save_detected(db, detect(db, datetime.now(PACIFIC).date()))}
+        """Recurring charges not on the list yet, shown for confirmation. Nothing is added here."""
+        found = new_candidates(db, detect(db, datetime.now(PACIFIC).date()))
+        html = templates.env.get_template("_bill_candidates.html").render(found=found)
+        return {"count": len(found), "html": html}
+
+    @app.post("/api/bills/add-detected")
+    async def add_detected(request: Request):
+        """Add the recurring charges ticked in the confirmation sheet; "Not a bill" ones are never suggested again."""
+        body = await request.json()
+        add = set(body.get("add") or [])
+        found = new_candidates(db, detect(db, datetime.now(PACIFIC).date()))
+        added = save_detected(db, [c for c in found if c.match in add])
+        ignore = set(body.get("ignore") or [])
+        with db.connect() as conn:
+            for c in found:
+                if c.match in ignore and c.match not in add:
+                    conn.execute("INSERT OR IGNORE INTO bills_dismissed VALUES (?)", (c.match,))
+        return {"added": added}
 
     @app.post("/api/paydays")
     async def save_paydays(request: Request):
@@ -858,7 +875,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if q.get("q"):
             needle = q["q"].lower()
             rows = [t for t in rows if needle in " ".join(
-                [t["display_name"], t["name"] or "", t["merchant"] or "", t["note"] or ""]).lower()]
+                [t["display_name"], t["name"] or "", t["merchant"] or "", t["note"] or "",
+                 t["bill"]["name"] if t["bill"] else ""]).lower()]
         cats = q.get("category") or []
         if isinstance(cats, str):
             cats = [cats]

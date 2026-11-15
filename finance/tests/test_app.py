@@ -1343,3 +1343,26 @@ def test_bill_learns_merchant_from_hand_tagged_charge(tmp_path, monkeypatch):
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET bill_id=? WHERE id='x10'", (bill_id,))
     assert tagged() == {f"x{m}" for m in range(5, 11)}  # every monthly $250, a day or two off the 15th too
+
+
+def test_find_bills_asks_before_adding_and_search_finds_bill_names(tmp_path, monkeypatch):
+    rows = (monthly("tm", "Phone Co", 99.10, 11, [7, 8, 9, 10, 11])
+            + monthly("st", "Photo App", 22.99, 4, [7, 8, 9, 10, 11])
+            + monthly("rent", "Rent Co", 2000.0, 1, [8, 9, 10, 11]))
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    H = {"X-Finance": "1"}
+    def count():
+        with db.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM bills").fetchone()[0]
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/bills/detect", json={}, headers=H).json()
+        assert r["count"] == 3 and "Phone Co" in r["html"] and count() == 0  # shown, not added
+        ok = c.post("/api/bills/add-detected", json={"add": ["phone co"], "ignore": ["rent co"]}, headers=H).json()
+        assert ok["added"] == 1 and count() == 1
+        r = c.post("/api/bills/detect", json={}, headers=H).json()
+        assert r["count"] == 1 and "Photo App" in r["html"]  # rent set aside for good, phone already added
+        with db.connect() as conn:
+            conn.execute("UPDATE bills SET name='Creative Suite Plan', match='photo app', amount=22.99, due_day=4 WHERE match='phone co'")
+        page = c.get("/search?q=suite").text
+        assert "Photo App" in page and "Phone Co" not in page

@@ -613,8 +613,8 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 /* ---------- page transitions (Safari 18.2+, Chrome 126+; others just load the page) ---------- */
 @view-transition { navigation: auto; }
 .tabbar { view-transition-name: tabbar; }
-::view-transition-group(tab-pill) { animation-duration: .45s; animation-timing-function: cubic-bezier(.32, .72, 0, 1); }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .2s; }
+::view-transition-group(tab-pill) { animation-duration: .2s; animation-timing-function: cubic-bezier(.32, .72, 0, 1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .12s; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
@@ -759,15 +759,18 @@ a.tile:active { transform: scale(0.98); }
   display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--hairline);
   font-variant-numeric: tabular-nums; font-size: 0.9rem; align-items: baseline;
 }
-.month-table li { grid-template-columns: 7.5em 1fr 1fr; }
-.flow-table li { grid-template-columns: 7.5em repeat(5, 1fr); }
+.month-table li { grid-template-columns: 6.8rem 1fr 1fr; }
+.flow-table li { grid-template-columns: 6.8rem repeat(5, 1fr); }
+/* Column widths are in rem, not em: the smaller heading text must not narrow its row's first column,
+   or every heading shifts left of the numbers under it. */
 /* Numbers and their headings are centered on each column; the month leads each row. */
 .month-table li > span:not(:first-child), .flow-table li > span:not(:first-child) { text-align: center; }
 .month-table li:not(.mt-head) > span:first-child, .flow-table li:not(.mt-head) > span:first-child { font-weight: 700; color: var(--text); }
 .mt-head { color: var(--text-2); font-size: 0.78rem !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.mt-head > span:not(:first-child) { margin-right: -0.03em; } /* letter-spacing trails the last letter */
 .flow-table small { color: var(--text-2); font-size: 0.75rem; }
 @media (max-width: 560px) {
-  .flow-table li { grid-template-columns: 5.6em 1fr 1fr 1fr; font-size: 0.82rem; gap: 4px; }
+  .flow-table li { grid-template-columns: 4.6rem 1fr 1fr 1fr; font-size: 0.82rem; gap: 4px; }
   .flow-table li > span:nth-child(4), .flow-table li > span:nth-child(5) { display: none; }
 }
 
@@ -806,3 +809,10 @@ a.tile:active { transform: scale(0.98); }
 .kind-saving { --c: var(--teal); }
 .kind-debt { --c: var(--orange); }
 .kind-transfer { --c: var(--gray); }
+
+/* Find new bills: confirmation list */
+.candidate { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.candidate label.inline { flex: 1; margin: 8px 0; min-width: 0; }
+.candidate .grow { display: flex; flex-direction: column; min-width: 0; }
+.candidate .grow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidate .not-bill { flex: none; }

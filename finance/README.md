@@ -43,7 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.4:
+Version 1.11.5:
+
+- Find new bills shows what it found and asks first: tick the ones to add, or mark one "Not a bill" so it isn't suggested again.
+- Search also matches a transaction's bill name.
+- Cash flow and net worth table headings sit exactly over their columns (the smaller heading text was narrowing the first column).
+- Tab bar: the highlight moves the moment a tab is pressed, and page transitions are shorter.
 
 - Bills learn from your choices: setting a transaction to a bill by hand adds that transaction's bank merchant to the bill, so its other charges (same amount, about a cycle apart, a few days either way) get the tag automatically even when the bank's name doesn't contain the bill's match text.
 - Cash flow and net worth tables: headings and numbers centered on each column, the month in bold, and a narrower month column so the number columns have more room.
