@@ -1464,6 +1464,7 @@ def test_investment_returns_leave_out_money_put_in(tmp_path, monkeypatch):
         conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) "
                      "VALUES ('buy', 'roth', '2026-10-02', 'Buy fund', 250, 'buy', 'buy')")  # not a flow
     r = returns(db, today)
+    assert r["chart"][0]["d"] == "2025-12-01" and r["chart"][-1] == {"d": "2026-11-15", "v": 18600.0}
     plan = next(a for a in r["accounts"] if a["id"] == "manual:plan")
     ytd = plan["periods"]["ytd"]
     # The $1,000 is spread over the 30 weeks from Dec 1 to Jul 1: 4 of them fall in December, before YTD.
@@ -1644,6 +1645,15 @@ def test_loans_pslf_count_and_projection(tmp_path, monkeypatch):
             assert c.post("/api/loans/month", json={"account_id": aid, "month": m, "counts": False}, headers=H).status_code == 200
         p = loans(db, today)[0]["pslf_info"]
         assert p["count"] == 95 and p["left"] == 25
+        # The form saves every month's choice at once.
+        assert c.post("/api/loans", json={"account_id": aid, "rate": "3.4", "payment": "250", "bill_id": str(bill),
+                                          "pslf": True, "pslf_count": "94", "pslf_as_of": "2026-09-06",
+                                          "recert": "2027-04-08", "months": {"2026-10": True, "2026-11": False}},
+                      headers=H).status_code == 200
+        assert loans(db, today)[0]["pslf_info"]["count"] == 96
+        c.post("/api/loans", json={"account_id": aid, "rate": "3.4", "payment": "250", "bill_id": str(bill),
+                                   "pslf": True, "pslf_count": "94", "pslf_as_of": "2026-09-06", "recert": "2027-04-08",
+                                   "months": {"2026-10": False}}, headers=H)
         # November already has a payment, so the next is December; 25 more ends in December 2028.
         assert p["last_month"] == "2028-12" and p["to_pay"] == 6250.0
         assert p["forgiven"] == project(24000, 3.4, 250, 25)["balance"] and 18000 < p["forgiven"] < 19500

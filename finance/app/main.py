@@ -1017,11 +1017,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "categories": {str(i): {"name": c["name"], "color": c["color"]} for i, c in cats.items()},
             "today": now.isoformat(),
         }
+        inv = await run_in_threadpool(returns, db, now)
+        data["investments"] = {"points": inv["chart"], "starts": inv["starts"]}
         with db.connect() as conn:
             balances = {}
             for r in conn.execute("SELECT account_id, day, balance, flow FROM manual_balances ORDER BY day DESC"):
                 balances.setdefault(r["account_id"], []).append(dict(r))
-        inv = await run_in_threadpool(returns, db, now)
         return templates.TemplateResponse(request, "insights.html", {
             "nw": nw, "flow": flow, "notes": observations(flow, cats, now), "data": data,
             "loans": loans(db, now), "loan_bills": [b for b in bill_status(db, now) if b.get("kind") != "income" and not b.get("archived_on")],
@@ -1166,6 +1167,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "pslf_as_of=excluded.pslf_as_of, recert=excluded.recert",
                 (aid, rate, payment, bill, pslf, int(count) if count is not None else None, opt_day("pslf_as_of"),
                  opt_day("recert")))
+        months = body.get("months") or {}
+        with db.connect() as conn:
+            for m, counts in months.items():
+                if len(str(m)) != 7:
+                    continue
+                if counts:
+                    conn.execute("DELETE FROM loan_months WHERE account_id=? AND month=?", (aid, m))
+                else:
+                    conn.execute("INSERT OR REPLACE INTO loan_months VALUES (?, ?, 0)", (aid, m))
         if str(body.get("balance") or "").strip():
             save_balance(aid, body.get("balance"), body.get("day"))
         return {"ok": True, "id": aid}

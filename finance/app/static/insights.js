@@ -394,9 +394,87 @@
   else init();
 })();
 
-// ---------- investments: period chips and contribution bars ----------
+// ---------- investments: period chips, balance chart, and contribution bars ----------
 (() => {
   const card = document.getElementById("investments");
+  const raw = document.getElementById("insights-data");
+  const inv = raw ? JSON.parse(raw.textContent).investments : null;
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    parent.appendChild(n);
+    return n;
+  };
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
+  const money = (v, cents = true) => `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("en-US",
+    { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })}`;
+  const compact = (v) => (Math.abs(v) >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const short = (d) => `${MON[+d.slice(5, 7) - 1]} '${d.slice(2, 4)}`;
+  const long = (d) => `${MON[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}, ${d.slice(0, 4)}`;
+
+  // Balance week by week for the chosen period, drawn like the net worth line.
+  function chart(key) {
+    const host = document.getElementById("inv-chart");
+    if (!host || !inv || !inv.points.length) return;
+    const start = inv.starts[key] || "";
+    const pts = inv.points.filter((p) => p.d >= start);
+    host.innerHTML = "";
+    if (pts.length < 2) return;
+    const width = Math.max(host.clientWidth, 260), height = 200, pad = { l: 46, r: 8, t: 10, b: 24 };
+    const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width, height, class: "chart-svg" }, host);
+    const vals = pts.map((p) => p.v);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    const span = hi - lo || hi || 1;
+    lo = Math.max(0, lo - span * 0.1); hi += span * 0.1;
+    const rawStep = (hi - lo) / 4, mag = 10 ** Math.floor(Math.log10(rawStep));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= rawStep);
+    const y0 = Math.floor(lo / step) * step, y1 = Math.ceil(hi / step) * step;
+    const y = (v) => pad.t + (height - pad.t - pad.b) * (1 - (v - y0) / (y1 - y0 || 1));
+    const x = (i) => pad.l + (width - pad.l - pad.r) * (i / (pts.length - 1));
+    for (let v = y0; v <= y1 + step / 2; v += step) {
+      el("line", { x1: pad.l, x2: width - pad.r, y1: y(v), y2: y(v), class: "grid" }, svg);
+      el("text", { x: pad.l - 8, y: y(v) + 4, class: "axis", "text-anchor": "end" }, svg).textContent = compact(v);
+    }
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    const defs = el("defs", {}, svg);
+    const g = el("linearGradient", { id: "inv-fill", x1: 0, x2: 0, y1: 0, y2: 1 }, defs);
+    el("stop", { offset: "0%", "stop-color": css("teal"), "stop-opacity": 0.35 }, g);
+    el("stop", { offset: "100%", "stop-color": css("teal"), "stop-opacity": 0 }, g);
+    el("path", { d: `${line}L${x(pts.length - 1)},${y(y0)}L${x(0)},${y(y0)}Z`, fill: "url(#inv-fill)" }, svg);
+    el("path", { d: line, class: "nw-line inv-line-path" }, svg);
+    const labels = Math.max(2, Math.min(5, Math.floor(width / 70)));
+    for (let k = 0; k < labels; k++) {
+      const i = Math.round(k * (pts.length - 1) / (labels - 1));
+      el("text", { x: x(i), y: height - 6, class: "axis", "text-anchor": k === 0 ? "start" : k === labels - 1 ? "end" : "middle" }, svg)
+        .textContent = short(pts[i].d);
+    }
+    const cross = el("line", { y1: pad.t, y2: height - pad.b, class: "cross", visibility: "hidden" }, svg);
+    const dot = el("circle", { r: 4.5, class: "nw-dot inv-dot", visibility: "hidden" }, svg);
+    const tip = document.createElement("div");
+    tip.className = "chart-tip";
+    tip.hidden = true;
+    host.appendChild(tip);
+    const hit = el("rect", { x: pad.l, y: 0, width: width - pad.l - pad.r, height, fill: "transparent" }, svg);
+    const move = (ev) => {
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) * (width / r.width);
+      const i = Math.min(pts.length - 1, Math.max(0, Math.round((px - pad.l) / (width - pad.l - pad.r) * (pts.length - 1))));
+      cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+      dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(pts[i].v)); dot.setAttribute("visibility", "visible");
+      const ch = pts[i].v - pts[0].v;
+      tip.innerHTML = `<b>${long(pts[i].d)}</b><span>${money(pts[i].v)}</span>` +
+        (i ? `<small class="${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "+" : ""}${money(ch, false)} since ${long(pts[0].d)}</small>` : "");
+      tip.hidden = false;
+      const w = tip.offsetWidth;
+      tip.style.left = `${Math.min(Math.max(x(i) - w / 2, 0), width - w)}px`;
+    };
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerdown", move);
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
+  }
+
   if (card) {
     let saved = null;
     try { saved = localStorage.getItem("insights-inv-period"); } catch { /* ignore */ }
@@ -404,8 +482,11 @@
       if (!card.querySelector(`.range-chips [data-period="${key}"]`)) return;
       card.dataset.period = key;
       card.querySelectorAll(".range-chips [data-period]").forEach((b) => b.classList.toggle("on", b.dataset.period === key));
+      chart(key);
     };
-    if (saved) pick(saved);
+    pick(saved || card.dataset.period);
+    let width = window.innerWidth;
+    window.addEventListener("resize", () => { if (window.innerWidth !== width) { width = window.innerWidth; chart(card.dataset.period); } });
     card.querySelector(".range-chips").addEventListener("click", (ev) => {
       const b = ev.target.closest("[data-period]");
       if (!b) return;

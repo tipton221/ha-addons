@@ -164,6 +164,7 @@ def returns(db: Database, today: date) -> dict:
     # Balances entered by hand are the record for gains: other history for that account (YNAB
     # balances, where contributions can't be told apart from growth) is left out here.
     for a in accts:
+        a["balance_at"] = a["value"]   # the balance history (as in net worth), for the chart
         if entered.get(a["id"]):
             ser = Series(entered[a["id"]])
             a["value"] = lambda day, ser=ser: (ser.at(day)[1], "manual") if ser.at(day) else (None, None)
@@ -228,7 +229,20 @@ def returns(db: Database, today: date) -> dict:
             t_cash += in_period
         gain, pct = dietz(t_v0, t_v1, t_cash, start, today)
         totals[key] = {"gain": gain, "pct": pct, "value": round(t_v1, 2), "partial": partial}
-    return {"accounts": [r for _, r in rows], "totals": totals, "periods": PERIODS,
+    # Total balance week by week (and today), for the chart.
+    chart = []
+    if first_any:
+        d = first_any
+        while True:
+            day = min(d, today)
+            vals = [a["balance_at"](day.isoformat())[0] for a, _ in rows]
+            if any(v is not None for v in vals):
+                chart.append({"d": day.isoformat(), "v": round(sum(v for v in vals if v is not None), 2)})
+            if day >= today:
+                break
+            d += timedelta(days=7)
+    starts = {key: (period_start(key, today).isoformat() if key != "all" else "") for key, _ in PERIODS}
+    return {"accounts": [r for _, r in rows], "totals": totals, "periods": PERIODS, "chart": chart, "starts": starts,
             "value": round(sum(r["value"] for _, r in rows), 2)}
 
 

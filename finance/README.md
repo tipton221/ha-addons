@@ -43,6 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.14.1:
+
+- Investments: a balance chart (week by week) for the chosen period, and each account's name on its own line across the full width.
+- Loans: a cleaner card: name and balance, then rate and payment, then PSLF progress in its own block with payments left, the last payment's month, and the amount forgiven.
+- A loan's month choices (counts or not) save together with the rest of its form instead of one at a time.
+
 Version 1.14.0:
 
 - Insights › Loans: each loan's balance, rate, and payment, with a payoff date projected month by month. A loan added here is a manual debt account, so it counts in net worth; a Plaid loan account can carry the same details.
