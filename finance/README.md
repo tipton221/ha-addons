@@ -43,7 +43,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.14.2:
+Version 2.0.0: the transaction logger becomes a full financial dashboard. Insights covers net worth back to the start of YNAB, spending and cash flow, investments (Plaid Investments, gains and Modified Dietz returns by period, a balance chart, contribution limits), and loans (payoff projections and PSLF tracking). Changes since 1.14.1:
 
 - A debt entered by hand counts in net worth before its first balance too, so adding an existing loan doesn't look like a drop in net worth that month. With a rate and payment the balance is worked backward month by month (each earlier month adds back a payment less its interest); without them the first balance carries back as is.
 
