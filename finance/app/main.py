@@ -1144,6 +1144,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 raise HTTPException(400, "Enter a valid date")
 
         rate, payment = opt_num("rate", "interest rate"), opt_num("payment", "monthly payment")
+        original = opt_num("original", "original amount")
         pslf = 1 if body.get("pslf") else 0
         count = opt_num("pslf_count", "qualifying payment count")
         if count is not None and not 0 <= count <= 120:
@@ -1161,12 +1162,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             elif not conn.execute("SELECT 1 FROM accounts WHERE account_id=?", (aid,)).fetchone():
                 raise HTTPException(404, "Account not found")
             conn.execute(
-                "INSERT INTO loans (account_id, rate, payment, bill_id, pslf, pslf_count, pslf_as_of, recert) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET rate=excluded.rate, "
+                "INSERT INTO loans (account_id, rate, payment, bill_id, pslf, pslf_count, pslf_as_of, recert, original) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET rate=excluded.rate, "
                 "payment=excluded.payment, bill_id=excluded.bill_id, pslf=excluded.pslf, pslf_count=excluded.pslf_count, "
-                "pslf_as_of=excluded.pslf_as_of, recert=excluded.recert",
-                (aid, rate, payment, bill, pslf, int(count) if count is not None else None, opt_day("pslf_as_of"),
-                 opt_day("recert")))
+                "pslf_as_of=excluded.pslf_as_of, recert=excluded.recert, original=excluded.original",
+                (aid, rate, payment, bill, pslf, int(count) if count is not None and pslf else None,
+                 opt_day("pslf_as_of") if pslf else None, opt_day("recert") if pslf else None, original))
         months = body.get("months") or {}
         with db.connect() as conn:
             for m, counts in months.items():

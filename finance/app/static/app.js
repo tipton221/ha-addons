@@ -786,6 +786,7 @@ const forms = {
       account_id: form.dataset.account || undefined, name: f.name ? f.name.value : undefined,
       balance: f.balance ? f.balance.value : undefined, day: f.day ? f.day.value : undefined,
       rate: f.rate.value, payment: f.payment.value, bill_id: f.bill_id.value, recert: f.recert.value,
+      original: f.original.value,
       pslf: f.pslf.checked, pslf_count: f.pslf_count.value, pslf_as_of: f.pslf_as_of.value,
       months: Object.fromEntries([...form.querySelectorAll(".pslf-month")].map((s) => [s.dataset.month, s.value === "1"])),
     });
@@ -1066,14 +1067,7 @@ const pages = {
     const form = document.getElementById("search-form");
     if (!form) return;
     // Date fields stay plain text ("Any") until tapped, then become date pickers.
-    form.querySelectorAll(".lazy-date").forEach((el) => {
-      el.addEventListener("focus", () => {
-        if (el.type === "date") return;
-        el.type = "date";
-        try { el.showPicker(); } catch (e) { /* not supported or not allowed */ }
-      });
-      el.addEventListener("blur", () => { if (!el.value) el.type = "text"; });
-    });
+    // Date fields stay plain text until tapped (handled for every page below).
     // Quick picks: a month, a year, or both (that month of that year). A month alone means its
     // most recent occurrence. Tapping a chosen chip again clears it. The dates fill in and it searches.
     form.addEventListener("click", (ev) => {
@@ -1201,6 +1195,27 @@ document.addEventListener("change", async (ev) => {
     toast(sel.value === "0" ? "Left out" : `Counts for ${sel.value}`);
     setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
+});
+
+// Optional dates show their placeholder ("Any", "None") until tapped, then become date pickers,
+// instead of a browser showing today's date in an empty field.
+document.addEventListener("focusin", (ev) => {
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains("lazy-date") || el.type === "date") return;
+  el.type = "date";
+  try { el.showPicker(); } catch (e) { /* not supported or not allowed */ }
+});
+document.addEventListener("focusout", (ev) => {
+  const el = ev.target;
+  if (el.classList && el.classList.contains("lazy-date") && !el.value) el.type = "text";
+});
+
+// Loans: the PSLF fields (count, date, recertification) only apply with PSLF checked.
+document.addEventListener("change", (ev) => {
+  const box = ev.target.closest && ev.target.closest(".pslf-toggle");
+  if (!box) return;
+  const fields = box.closest("form").querySelector(".pslf-fields");
+  if (fields) fields.disabled = !box.checked;
 });
 
 // Money in transit: choose the other account, or say it isn't a transfer between my accounts.

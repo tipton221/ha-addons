@@ -251,6 +251,9 @@ class Database:
                 ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
                 ("tip", "REAL"),             # tip entered by hand (part of the amount); NULL: automatic; 0: no tip
             ],
+            "loans": [
+                ("original", "REAL"),        # amount borrowed, for the paid-off progress bar
+            ],
             "plaid_items": [
                 ("products", "TEXT"),        # NULL: transactions; 'investments' for an investments-only connection
                 ("investments", "TEXT"),     # NULL: not added; 'on'; 'consent' (needs Plaid consent); 'unsupported'
