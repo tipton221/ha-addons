@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.12.2:
+
+- In transit items show their status as a pill: blue while waiting on (or pending in) the other account, orange when nothing matched after 7 days.
+
 Version 1.12.1:
 
 - An "In transit" pill on transactions counted as in transit, in the Inbox and Search lists.

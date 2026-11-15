@@ -825,3 +825,6 @@ a.tile:active { transform: scale(0.98); }
 .transit-txn { margin: 4px 0 14px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); }
 .transit-txn .tt-top { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
 .transit-txn .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; color: var(--text-2); font-size: 0.85rem; }
+.transit-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; }
+.transit-status { --c: var(--blue); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.transit-status.late { --c: var(--orange); }
