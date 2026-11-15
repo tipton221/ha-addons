@@ -127,7 +127,11 @@ def resolve(db: Database, txns: list[dict], today: date | None = None) -> list[d
             "JOIN accounts a ON a.account_id = t.account_id WHERE t.source='plaid' AND t.id IN "
             f"({','.join('?' * len(peer_ids))})", peer_ids)} if peer_ids else {}
     by_name = {c["name"]: cid for cid, c in cats.items()}
+    # Payments one account shows and the other doesn't yet (counted as posted for up to 7 days).
+    from .transit import in_transit, pacific_today
+    transit = {i["id"]: i for i in in_transit(db, today or pacific_today())["items"] if not i["late"]}
     for t in txns:
+        t["in_transit"] = transit.get(t["id"]) if t.get("source", "plaid") == "plaid" else None
         key = merchant_key(t)
         rule = rules.get(key) or {}
         t["merchant_key"] = key

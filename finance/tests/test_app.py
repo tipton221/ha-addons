@@ -1425,3 +1425,12 @@ def test_payment_in_transit_both_directions(tmp_path):
     with db.connect() as conn:
         conn.execute("INSERT INTO transit_choices VALUES ('p2', '')")
     assert in_transit(db, today)["items"][0]["id"] != "p2" and in_transit(db, today)["cards"] == 0
+    # A different transfer from the same account (a description its paired transfers never had) is left alone.
+    add("fee", "sav", "2026-11-14", "SWEEP TO BROKERAGE", None, 25.0, 0, "TRANSFER_OUT", "TRANSFER_OUT_X", 0)
+    assert "fee" not in {i["id"] for i in in_transit(db, today)["items"]}
+    # Rows carry the in-transit item, for the pill in transaction lists.
+    from app.ledger import list_transactions, resolve
+    with db.connect() as conn:
+        conn.execute("DELETE FROM transit_choices")
+    flagged = {t["id"] for t in resolve(db, list_transactions(db, limit=0), today) if t["in_transit"]}
+    assert flagged == {"p2"}  # p3 is past 7 days, so no pill

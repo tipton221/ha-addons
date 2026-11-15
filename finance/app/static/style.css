@@ -821,3 +821,7 @@ a.tile:active { transform: scale(0.98); }
 .transit-list .grow { display: flex; flex-direction: column; min-width: 0; }
 .due-head h3 { white-space: nowrap; }
 .hero .transit-note { display: block; margin-top: 8px; font-size: 0.8rem; color: var(--text-2); }
+.transit-pill { --c: var(--blue); flex: none; }
+.transit-txn { margin: 4px 0 14px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); }
+.transit-txn .tt-top { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+.transit-txn .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; color: var(--text-2); font-size: 0.85rem; }

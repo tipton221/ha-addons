@@ -12,7 +12,8 @@ which leave pending rows out, so there a pending side is still in transit.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from .bills import normalize
 from .db import Database
@@ -21,6 +22,10 @@ from .ledger import _transfer_like
 WAIT_DAYS = 7      # adjust balances this long while the other side hasn't posted
 REVIEW_DAYS = 30   # after that, list it as unmatched (no adjustment) this long, unless dismissed
 TRIGGER_TYPES = ("depository", "credit")
+
+
+def pacific_today() -> date:
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date()
 
 
 def _cents(v: float) -> int:
@@ -48,20 +53,15 @@ def in_transit(db: Database, today: date) -> dict:
             "WHERE t.source='plaid' AND p.account_id != t.account_id")]
         choices = {r["txn_id"]: r["account_id"] for r in conn.execute("SELECT txn_id, account_id FROM transit_choices")}
 
+    # Only transfers with the same bank description as past paired ones: an account's other
+    # transfers (fees, interest, contributions to accounts that never show them) are left alone.
     by_key: dict[tuple, Counter] = defaultdict(Counter)
-    by_dir: dict[tuple, Counter] = defaultdict(Counter)
     for h in history:
-        out = h["amount"] > 0
-        by_key[(h["account_id"], out, normalize(h["merchant"] or h["name"]))][h["peer"]] += 1
-        by_dir[(h["account_id"], out)][h["peer"]] += 1
+        by_key[(h["account_id"], h["amount"] > 0, normalize(h["merchant"] or h["name"]))][h["peer"]] += 1
 
     def guess(r: dict) -> str | None:
-        out = r["amount"] > 0
-        for counts in (by_key.get((r["account_id"], out, normalize(r["merchant"] or r["name"]))),
-                       by_dir.get((r["account_id"], out))):
-            if counts:
-                return counts.most_common(1)[0][0]
-        return None
+        counts = by_key.get((r["account_id"], r["amount"] > 0, normalize(r["merchant"] or r["name"])))
+        return counts.most_common(1)[0][0] if counts else None
 
     def name(aid: str) -> str:
         a = accts.get(aid) or {}

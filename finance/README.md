@@ -43,6 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.12.1:
+
+- An "In transit" pill on transactions counted as in transit, in the Inbox and Search lists.
+- Each in-transit item on the Bills page shows its transaction (name, category, date, account, bank description, note).
+- The other account is guessed only from past paired transfers with the same bank description, not from any transfer on the account, which flagged fees and unrelated transfers.
+
 Version 1.12.0:
 
 - Money in transit: when a card payment or transfer shows on one account but not yet the other (in either order), balances count it as if both sides had posted, for up to 7 days. The other account is worked out from where past transfers like it went, and can be changed or dismissed on the Bills page. Coverage, the Inbox summary, and today's net worth all use the adjusted balances. After 7 days with no match it is listed but no longer counted.
