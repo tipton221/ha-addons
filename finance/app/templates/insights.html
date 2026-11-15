@@ -230,19 +230,23 @@
     <label>Interest rate (%)<input name="rate" type="text" inputmode="decimal" placeholder="3.40" value="{{ l.rate if l and l.rate is not none else '' }}"></label>
     <label>Monthly payment<input name="payment" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '{:,.2f}'.format(l.payment) if l and l.payment else '' }}"></label>
   </div>
+  <label>Original amount (for the progress bar)<input name="original" type="text" inputmode="numeric" class="money" placeholder="Optional" value="{{ '{:,.2f}'.format(l.original) if l and l.original else '' }}"></label>
   <label>Payments are the recurring bill
     <select name="bill_id">
       <option value="">None</option>
       {% for b in loan_bills %}<option value="{{ b.id }}" {% if l and l.bill_id == b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}
     </select>
   </label>
-  <label>Next recertification (income-driven plans)<input name="recert" type="date" value="{{ l.recert if l and l.recert else '' }}"></label>
-  <label class="inline"><input name="pslf" type="checkbox" {% if l and l.pslf %}checked{% endif %}> Working toward Public Service Loan Forgiveness</label>
-  <div class="grid2 pslf-fields">
-    <label>Qualifying payments<input name="pslf_count" type="text" inputmode="numeric" placeholder="0" value="{{ l.pslf_info.base if l and l.pslf_info else '' }}"></label>
-    <label>As of<input name="pslf_as_of" type="date" max="{{ today }}" value="{{ l.pslf_info.as_of if l and l.pslf_info else '' }}"></label>
-  </div>
-  <p class="hint">Use the lowest count among your loans on studentaid.gov and its "last updated" date. Each later month with a payment adds one (pick the bill above so payments are found); mark a month that doesn't count in the payment list at the top.</p>
+  <label class="inline"><input name="pslf" type="checkbox" class="pslf-toggle" {% if l and l.pslf %}checked{% endif %}> Working toward Public Service Loan Forgiveness</label>
+  {% set on = l and l.pslf %}
+  <fieldset class="pslf-fields"{% if not on %} disabled{% endif %}>
+    <div class="grid2">
+      <label>Qualifying payments<input name="pslf_count" type="text" inputmode="numeric" placeholder="0" value="{{ l.pslf_info.base if l and l.pslf_info else '' }}"></label>
+      <label>As of<input name="pslf_as_of" type="{{ 'date' if l and l.pslf_info and l.pslf_info.as_of else 'text' }}" class="lazy-date" max="{{ today }}" placeholder="Date" value="{{ l.pslf_info.as_of if l and l.pslf_info else '' }}"></label>
+    </div>
+    <label>Next recertification<input name="recert" type="{{ 'date' if l and l.recert else 'text' }}" class="lazy-date" placeholder="None" value="{{ l.recert if l and l.recert else '' }}"></label>
+    <p class="hint">Use the lowest count among your loans on studentaid.gov and its "last updated" date. Each later month with a payment adds one (pick the bill above so payments are found); mark a month that doesn't count in the payment list at the top. Recertification is for income-driven plans.</p>
+  </fieldset>
   <div class="sheet-actions">
     <button type="button" class="sheet-close">Cancel</button>
     <button type="submit" class="primary">Save</button>
@@ -277,10 +281,23 @@
           </div>
           {% elif not p.left %}<span class="small up">All 120 done: apply for forgiveness</span>{% endif %}
         </div>
-        {% elif l.payoff %}
-        <div class="loan-stats">
-          <div><span class="muted small">Paid off</span><b>{% if l.payoff.months is not none %}{{ l.payoff.month | month_label }}{% else %}Never at this payment{% endif %}</b></div>
-          {% if l.payoff.months is not none %}<div><span class="muted small">Interest left</span><b>{{ l.payoff.interest | money }}</b></div>{% endif %}
+        {% elif l.payoff or l.paid_pct is defined %}
+        <div class="pslf-block">
+          {% if l.paid_pct is defined %}
+          <div class="pslf-top"><span class="pill tag payoff-pill">Paid</span><span><b>{{ l.paid_pct | round | int }}%</b><span class="muted"> of {{ l.original | money }}</span></span></div>
+          <span class="limit-bar"><span class="limit-fill payoff-fill" data-pct="{{ l.paid_pct }}"></span></span>
+          {% endif %}
+          {% if l.payoff %}
+          <div class="loan-stats">
+            {% if l.payoff.months is not none %}
+            <div><span class="muted small">Payments left</span><b>{{ l.payoff.months }}</b></div>
+            <div><span class="muted small">Paid off</span><b>{{ l.payoff.month | month_label }}</b></div>
+            <div><span class="muted small">Interest to go</span><b>${{ '{:,.0f}'.format(l.payoff.interest) }}</b></div>
+            {% else %}
+            <div><span class="muted small">Paid off</span><b>Never at this payment</b></div>
+            {% endif %}
+          </div>
+          {% elif not l.has_details %}<span class="muted small">Add the rate and payment for a payoff date</span>{% endif %}
         </div>
         {% endif %}
         {% if l.recert %}<span class="pill tag recert-pill{{ ' soon' if l.recert_days < 60 else '' }}">Recertify by {{ l.recert | shortdate }}{% if l.recert_days >= 0 %} · {{ l.recert_days }} days{% endif %}</span>{% endif %}

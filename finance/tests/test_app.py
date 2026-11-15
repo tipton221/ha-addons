@@ -1676,3 +1676,22 @@ def test_loans_pslf_count_and_projection(tmp_path, monkeypatch):
         assert jun_end == -round(expected, 2)
     assert project(10000, 6, 40)["months"] is None          # 40 a month never covers $50 of interest
     assert project(1200, 0, 100)["months"] == 12
+
+
+def test_any_loan_shows_progress_and_payoff(tmp_path, monkeypatch):
+    from app.loans import loans
+    db, app = client_with(tmp_path, monkeypatch, [], [])
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/loans", json={"name": "Car loan", "balance": "20,000.00", "day": "2026-11-15", "rate": "5",
+                                       "payment": "400", "original": "28,000", "pslf": False,
+                                       "pslf_count": "12", "pslf_as_of": "2026-01-01", "recert": "2027-01-01"}, headers=H)
+        assert r.status_code == 200
+    (car,) = loans(db, D(2026, 11, 15))
+    assert car["paid_pct"] == round(100 * 8000 / 28000, 1) and car["paid"] == 8000.0
+    assert 50 < car["payoff"]["months"] < 60 and car["payoff"]["month"] > "2031-01"
+    # Without PSLF the count, its date, and the recertification aren't kept.
+    assert car["pslf_info"] if car["pslf"] else car["recert"] is None
+    with db.connect() as conn:
+        assert conn.execute("SELECT pslf_count, pslf_as_of, recert FROM loans").fetchone()[:] == (None, None, None)

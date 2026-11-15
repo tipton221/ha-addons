@@ -52,7 +52,7 @@ def loan_accounts(db: Database) -> list[dict]:
     with db.connect() as conn:
         accts = [dict(r) for r in conn.execute(
             "SELECT a.account_id, COALESCE(a.display_name, a.name) AS name, a.source, a.type, a.subtype, "
-            "a.current_balance, l.rate, l.payment, l.pslf, l.pslf_count, l.pslf_as_of, l.bill_id, l.recert, "
+            "a.current_balance, l.rate, l.payment, l.pslf, l.pslf_count, l.pslf_as_of, l.bill_id, l.recert, l.original, "
             "l.account_id AS detailed FROM accounts a LEFT JOIN loans l ON l.account_id = a.account_id "
             f"WHERE (a.source='manual' AND a.subtype IN ({','.join('?' * len(MANUAL_DEBTS))})) "
             "OR (a.source='plaid' AND a.type='loan') OR l.account_id IS NOT NULL",
@@ -89,7 +89,12 @@ def loans(db: Database, today: date) -> list[dict]:
         rate, payment = a.get("rate") or 0.0, a.get("payment") or 0.0
         loan = {"id": a["account_id"], "name": a["name"], "source": a["source"], "balance": round(a["balance"], 2),
                 "as_of": a["as_of"], "rate": a.get("rate"), "payment": a.get("payment"), "bill_id": a.get("bill_id"),
-                "recert": a.get("recert"), "pslf": bool(a.get("pslf")), "has_details": a.get("rate") is not None}
+                "recert": a.get("recert"), "pslf": bool(a.get("pslf")), "has_details": a.get("rate") is not None,
+                "original": a.get("original")}
+        if a.get("original") and a["original"] > 0:
+            paid = max(0.0, min(1.0, (a["original"] - a["balance"]) / a["original"]))
+            loan["paid_pct"] = round(100 * paid, 1)
+            loan["paid"] = round(max(0.0, a["original"] - a["balance"]), 2)
         if a.get("recert"):
             loan["recert_days"] = (date.fromisoformat(a["recert"]) - today).days
         if payment > 0:

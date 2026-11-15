@@ -903,3 +903,9 @@ a.tile:active { transform: scale(0.98); }
 .loan-stats .up { color: var(--green); }
 .recert-pill { --c: var(--gray); align-self: flex-start; }
 .recert-pill.soon { --c: var(--orange); }
+
+/* Loans: paid-off progress for any loan; PSLF fields grouped and greyed out when off */
+.payoff-pill { --c: var(--blue); }
+.payoff-fill { background: var(--blue); }
+.pslf-fields { border: 0; margin: 0; padding: 0; min-width: 0; transition: opacity .2s; }
+.pslf-fields[disabled] { opacity: 0.4; }
