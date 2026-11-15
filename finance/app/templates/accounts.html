@@ -101,7 +101,8 @@
   <ul class="list" id="categories">
     {% for c in categories %}
     <li class="edit-row" role="button" tabindex="0" data-editor="cat-{{ c.id }}">
-      <div class="grow"><span><span class="chip cat-{{ c.id }}">{{ c.name }}</span>{% if c.kind and c.kind != "spending" %} <span class="muted small">{{ kind_labels[c.kind] }}</span>{% endif %}</span></div>
+      <div class="grow"><span><span class="chip cat-{{ c.id }}">{{ c.name }}</span></span></div>
+      {% set kind = c.kind if c.kind in kind_pills else "spending" %}<span class="pill mini kind-pill kind-{{ kind }}">{{ kind_pills[kind] }}</span>
       <span class="chev" aria-hidden="true">›</span>
       <template id="cat-{{ c.id }}">
         <h3 class="sheet-title">Edit category</h3>
@@ -112,7 +113,7 @@
           <label>Counts as
             <select name="kind">{% for k, label in kind_labels.items() %}<option value="{{ k }}" {% if (c.kind or "spending") == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
           </label>
-          <p class="hint">Used by Insights. Spending is the default. Transfers are left out of spending and cash flow.</p>
+          <p class="hint">How Insights counts this category. Transfer is money moving between your own accounts (card payments, moving cash to savings), so it isn't counted as spending or income.</p>
           <button type="button" class="danger delete-cat wide-btn" data-id="{{ c.id }}">Remove category</button>
           <div class="sheet-actions">
             <button type="button" class="sheet-close">Cancel</button>

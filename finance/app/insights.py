@@ -26,7 +26,9 @@ from .db import Database
 
 KINDS = ("spending", "income", "saving", "debt", "transfer")
 KIND_LABELS = {"spending": "Spending", "income": "Income", "saving": "Saving or investing",
-               "debt": "Debt payment", "transfer": "Transfer (left out)"}
+               "debt": "Debt payment", "transfer": "Transfer"}
+# Short names for the pill on each category in Accounts › Categories.
+KIND_PILLS = {"spending": "Spending", "income": "Income", "saving": "Saving", "debt": "Debt", "transfer": "Transfer"}
 DEFAULT_KINDS = {"Income": "income", "Transfers and payments": "transfer", "Loans": "debt"}
 
 # Account types that are owed money (shown as debts). Plaid, YNAB, and manual names.

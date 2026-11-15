@@ -796,3 +796,11 @@ a.tile:active { transform: scale(0.98); }
 .net-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
 .net-cell small { color: var(--text-2); }
 .flow-table li > span { white-space: nowrap; }
+
+/* What each category counts as, in Accounts › Categories: one color per kind */
+.kind-pill { flex: none; margin-left: auto; vertical-align: 0; }
+.kind-spending { --c: var(--blue); }
+.kind-income { --c: var(--green); }
+.kind-saving { --c: var(--teal); }
+.kind-debt { --c: var(--orange); }
+.kind-transfer { --c: var(--gray); }
