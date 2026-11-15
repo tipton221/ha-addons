@@ -828,3 +828,27 @@ a.tile:active { transform: scale(0.98); }
 .transit-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; }
 .transit-status { --c: var(--blue); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .transit-status.late { --c: var(--orange); }
+
+/* Investments: one period shown at a time */
+#investments .p { display: none; }
+#investments[data-period="3m"] .p-3m, #investments[data-period="6m"] .p-6m, #investments[data-period="ytd"] .p-ytd,
+#investments[data-period="1y"] .p-1y, #investments[data-period="all"] .p-all { display: revert; }
+#investments .stat-change.p { display: none; }
+#investments[data-period="3m"] .stat-change.p-3m, #investments[data-period="6m"] .stat-change.p-6m,
+#investments[data-period="ytd"] .stat-change.p-ytd, #investments[data-period="1y"] .stat-change.p-1y,
+#investments[data-period="all"] .stat-change.p-all { display: inline-flex; }
+.inv-list .grow { display: flex; flex-direction: column; min-width: 0; }
+.inv-nums { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inv-nums .up, .period-table .up { color: var(--green); }
+.inv-nums .down, .period-table .down { color: var(--red); }
+.holdings .grow { display: flex; flex-direction: column; min-width: 0; }
+.period-table li { display: grid; grid-template-columns: 4rem 1fr 1fr 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+.period-table li > span:not(:first-child) { text-align: center; }
+.period-table li:not(.mt-head) > span:first-child { font-weight: 700; }
+
+/* Contribution limits */
+.limit-row .grow { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.limit-bar { display: block; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.limit-fill { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--teal, var(--green)); transition: width .4s var(--ease); }
+.tax-year { width: auto; height: 34px; padding: 0 30px 0 12px; border-radius: var(--r-pill); font-size: 0.82rem; }

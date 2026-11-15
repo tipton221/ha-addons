@@ -1143,7 +1143,7 @@ def test_new_connection_lists_accounts_right_away_and_can_choose_accounts(tmp_pa
         async def exchange(self, public_token):
             return "access-1", "item-1"
 
-        async def link_token(self, access_token=None, choose_accounts=False):
+        async def link_token(self, access_token=None, choose_accounts=False, **kw):
             seen["args"] = (access_token, choose_accounts)
             return "link-token"
 
@@ -1200,10 +1200,10 @@ def test_net_worth_joins_ynab_history_plaid_and_manual(tmp_path, monkeypatch):
         # Plaid balances start on Nov 13; before that the checking account's history comes from YNAB.
         conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('chk', '2026-11-13', 1500)")
         conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('card', '2026-11-13', 200)")
-        conn.execute("INSERT INTO manual_balances VALUES ('ynab:ret', '2026-11-10', 6000)")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('ynab:ret', '2026-11-10', 6000)")
         conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES "
                      "('manual:car', 'manual', 'Car loan', 'liability', 'loan')")
-        conn.execute("INSERT INTO manual_balances VALUES ('manual:car', '2026-11-01', 4000)")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('manual:car', '2026-11-01', 4000)")
     nw = net_worth(db, date(2026, 11, 15))
     by_month = {p["m"]: p for p in nw["points"]}
     assert by_month["2026-09"]["net"] == 6000.0           # YNAB only: 1000 + 5000
@@ -1441,3 +1441,112 @@ def test_payment_in_transit_both_directions(tmp_path):
         food = conn.execute("SELECT id FROM categories WHERE kind='spending' LIMIT 1").fetchone()[0]
         conn.execute("UPDATE transactions SET category_id=? WHERE id='p2'", (food,))
     assert "p2" not in {i["id"] for i in in_transit(db, today)["items"]}
+
+
+def test_investment_returns_leave_out_money_put_in(tmp_path, monkeypatch):
+    from app.investments import returns
+    db, app = client_with(tmp_path, monkeypatch, [], [("roth", "Test Roth IRA", "investment", 5600.0, None)])
+    today = D(2026, 11, 15)
+    with db.connect() as conn:
+        conn.execute("UPDATE accounts SET subtype='roth' WHERE account_id='roth'")
+        # A plan entered by hand: $10,000 in December, $1,000 put in on July 1, $13,000 now.
+        conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES "
+                     "('manual:plan', 'manual', 'Old 403b', 'asset', 'retirement')")
+        for day, bal, flow in (("2025-12-01", 10000, None), ("2026-07-01", 12000, 1000), ("2026-11-15", 13000, None)):
+            conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES ('manual:plan', ?, ?, ?)",
+                         (day, bal, flow))
+        # The Roth: Plaid balance history since Sep 30, and $250 contributions from Plaid Investments.
+        conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('roth', '2026-09-30', 5000)")
+        conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('roth', '2026-11-15', 5600)")
+        for i, m in enumerate((10, 11)):
+            conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) "
+                         "VALUES (?, 'roth', ?, 'Contribution', -250, 'cash', 'contribution')", (f"c{i}", f"2026-{m:02d}-01"))
+        conn.execute("INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype) "
+                     "VALUES ('buy', 'roth', '2026-10-02', 'Buy fund', 250, 'buy', 'buy')")  # not a flow
+    r = returns(db, today)
+    plan = next(a for a in r["accounts"] if a["id"] == "manual:plan")
+    ytd = plan["periods"]["ytd"]
+    # The $1,000 is spread over the 30 weeks from Dec 1 to Jul 1: 4 of them fall in December, before YTD.
+    assert ytd["put_in"] == round(1000 * 26 / 30, 2) and ytd["gain"] == round(2000 + 1000 * 4 / 30, 2)
+    assert ytd["since"] is None and 19.5 < ytd["pct"] < 21.0
+    roth = next(a for a in r["accounts"] if a["id"] == "roth")
+    three = roth["periods"]["3m"]  # history starts inside the period: counts from its first balance
+    assert three["since"] == "2026-09-30" and three["put_in"] == 500.0 and three["gain"] == 100.0
+    assert r["value"] == 18600.0 and r["totals"]["ytd"]["value"] == 18600.0
+
+
+def test_contribution_limits_and_tax_year(tmp_path, monkeypatch):
+    from app.investments import limits
+    db, app = client_with(tmp_path, monkeypatch, [], [("roth", "Test Roth IRA", "investment", 0.0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE accounts SET subtype='roth' WHERE account_id='roth'")
+        for tid, day, amt in (("a", "2026-01-10", 500), ("b", "2026-03-01", 250), ("c", "2026-06-01", 250)):
+            conn.execute("INSERT INTO investment_txns (id, account_id, date, amount, type, subtype) "
+                         "VALUES (?, 'roth', ?, ?, 'cash', 'contribution')", (tid, day, -amt))
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        y = limits(db, D(2026, 11, 15))["years"]
+        assert [x["year"] for x in y] == [2026] and y[0]["ira"] == 1000.0 and y[0]["ira_limit"] == 7500
+        assert c.post("/api/investments/tax-year", json={"id": "a", "year": 2025}, headers=H).status_code == 200
+        assert c.post("/api/investments/tax-year", json={"id": "a", "year": 2024}, headers=H).status_code == 400
+        assert limits(db, D(2026, 11, 15))["years"][0]["ira"] == 500.0
+        early = limits(db, D(2026, 3, 2))["years"]  # before April 15 last year shows too
+        assert [(x["year"], x["ira"]) for x in early] == [(2026, 500.0), (2025, 500.0)]
+        assert c.post("/api/investments/plan", json={"year": 2026, "plan": "403b", "amount": "6,120.50"},
+                      headers=H).status_code == 200
+        plan = limits(db, D(2026, 11, 15))["years"][0]["plans"][0]
+        assert plan["amount"] == 6120.5 and plan["limit"] == 24500
+        page = c.get("/insights").text
+        assert "Contribution limits" in page and "Investments" in page
+
+
+def test_sync_investments_and_consent(tmp_path):
+    from app.sync import sync_investments
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+
+    class InvPlaid:
+        def __init__(self, fail=None):
+            self.fail, self.ranges = fail, []
+
+        async def investments_holdings(self, token):
+            if self.fail:
+                raise PlaidError(400, {"error_code": self.fail})
+            return {"accounts": [{"account_id": "roth"}],
+                    "holdings": [{"account_id": "roth", "security_id": "s1", "quantity": 10,
+                                  "institution_value": 1200.0, "cost_basis": 1000.0}],
+                    "securities": [{"security_id": "s1", "name": "Total Market Fund", "ticker_symbol": "TMF", "type": "etf"}]}
+
+        async def investments_transactions(self, token, start, end):
+            self.ranges.append((start, end))
+            return {"investment_transactions": [
+                {"investment_transaction_id": "t1", "account_id": "roth", "date": "2026-11-01", "name": "Deposit",
+                 "amount": -250.0, "type": "cash", "subtype": "contribution"}], "securities": []}
+
+    item = {"item_id": "i1", "access_token": "tok", "investments_synced": None}
+    p = InvPlaid()
+    assert asyncio.run(sync_investments(db, p, item)) == {"holdings": 1, "activity": 1}
+    with db.connect() as conn:
+        assert conn.execute("SELECT investments FROM plaid_items").fetchone()[0] == "on"
+        assert conn.execute("SELECT ticker, value FROM holdings").fetchone()[:] == ("TMF", 1200.0)
+        assert conn.execute("SELECT amount FROM investment_txns WHERE id='t1'").fetchone()[0] == -250.0
+    first_start = D.fromisoformat(p.ranges[0][0])
+    assert (D.fromisoformat(p.ranges[0][1]) - first_start).days == 730  # full history the first time
+    assert asyncio.run(sync_investments(db, InvPlaid("ADDITIONAL_CONSENT_REQUIRED"), item)) == {"investments": "consent"}
+    with db.connect() as conn:
+        assert conn.execute("SELECT investments FROM plaid_items").fetchone()[0] == "consent"
+
+
+
+def test_manual_flow_spread_matches_record_keeper(tmp_path, monkeypatch):
+    """A year of payroll contributions entered once lands near the record keeper's own rate of return."""
+    from app.investments import returns
+    db, app = client_with(tmp_path, monkeypatch, [], [])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES "
+                     "('manual:p', 'manual', 'Plan', 'asset', 'retirement')")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('manual:p', '2025-12-31', 50000)")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES ('manual:p', '2026-11-14', 67000, 12500)")
+    ytd = returns(db, D(2026, 11, 15))["accounts"][0]["periods"]["ytd"]
+    assert ytd["gain"] == 4500.0 and 7.5 < ytd["pct"] < 8.5  # lumped on Nov 14 it would be about 9%

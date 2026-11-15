@@ -393,3 +393,25 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();
+
+// ---------- investments: period chips and contribution bars ----------
+(() => {
+  const card = document.getElementById("investments");
+  if (card) {
+    let saved = null;
+    try { saved = localStorage.getItem("insights-inv-period"); } catch { /* ignore */ }
+    const pick = (key) => {
+      if (!card.querySelector(`.range-chips [data-period="${key}"]`)) return;
+      card.dataset.period = key;
+      card.querySelectorAll(".range-chips [data-period]").forEach((b) => b.classList.toggle("on", b.dataset.period === key));
+    };
+    if (saved) pick(saved);
+    card.querySelector(".range-chips").addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-period]");
+      if (!b) return;
+      pick(b.dataset.period);
+      try { localStorage.setItem("insights-inv-period", b.dataset.period); } catch { /* ignore */ }
+    });
+  }
+  document.querySelectorAll(".limit-fill[data-pct]").forEach((el) => { el.style.width = `${el.dataset.pct}%`; });
+})();

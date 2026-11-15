@@ -56,6 +56,130 @@
   {% endif %}
 </section>
 
+{% macro signed(v) %}{{ "+" if v >= 0 else "" }}{{ v | money }}{% endmacro %}
+{% if inv.accounts %}
+<section class="card" id="investments" data-period="ytd">
+  <div class="card-head">
+    <h2>Investments</h2>
+    <div class="range-chips" role="group" aria-label="Period">
+      {% for key, label in inv.periods %}<button type="button" class="filter{% if key == 'ytd' %} on{% endif %}" data-period="{{ key }}">{{ label }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="stat-row">
+    <div class="stat main"><span class="big-number">{{ inv.value | money }}</span>
+      {% for key, _ in inv.periods %}{% set t = inv.totals.get(key) %}{% if t %}
+      <span class="stat-change p p-{{ key }} {{ 'up' if t.gain >= 0 else 'down' }}">{{ signed(t.gain) }}{% if t.pct is not none %} · {{ "+" if t.pct >= 0 else "" }}{{ t.pct }}%{% endif %}</span>
+      {% endif %}{% endfor %}
+    </div>
+  </div>
+  <ul class="list inv-list">
+    {% for a in inv.accounts %}
+    <li class="edit-row" role="button" tabindex="0" data-editor="inv-{{ loop.index }}">
+      <div class="grow">
+        <strong>{{ a.name }}</strong>
+        {% if a.first >= today %}<span class="muted small">History starts today; gains show from tomorrow</span>{% else %}
+        {% for key, _ in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
+        <span class="muted small p p-{{ key }}">{% if p.put_in %}{{ p.put_in | money }} put in{% else %}Nothing put in{% endif %}{% if p.since %} · since {{ p.since | shortdate }}{% endif %}</span>
+        {% endif %}{% endfor %}{% endif %}
+      </div>
+      <div class="inv-nums">
+        <span class="amount">{{ a.value | money }}</span>
+        {% for key, _ in inv.periods if a.first < today %}{% set p = a.periods.get(key) %}{% if p %}
+        <span class="small p p-{{ key }} {{ 'up' if p.gain >= 0 else 'down' }}">{{ signed(p.gain) }}{% if p.pct is not none %} · {{ "+" if p.pct >= 0 else "" }}{{ p.pct }}%{% endif %}</span>
+        {% endif %}{% endfor %}
+      </div>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="inv-{{ loop.index }}">
+        <h3 class="sheet-title">{{ a.name }}</h3>
+        <ul class="list period-table">
+          <li class="mt-head"><span>Period</span><span>Put in</span><span>Gain</span><span>Return</span></li>
+          {% for key, label in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
+          <li><span>{{ label }}</span><span>{{ p.put_in | money }}</span><span class="{{ 'up' if p.gain >= 0 else 'down' }}">{{ signed(p.gain) }}</span>
+            <span>{% if p.pct is not none %}{{ "+" if p.pct >= 0 else "" }}{{ p.pct }}%{% else %}—{% endif %}</span></li>
+          {% endif %}{% endfor %}
+        </ul>
+        <p class="hint">Gain is the change in balance minus money put in or taken out. Return weights each deposit by how long it was invested. History starts {{ a.first | shortdate }}{% if a.source == "manual" %}; enter "money put in" with each balance so deposits aren't counted as gains{% endif %}.</p>
+        {% if a.holdings %}
+        <p class="section-label">Holdings</p>
+        <ul class="list holdings">
+          {% for h in a.holdings %}
+          <li class="plain-row"><span class="grow"><strong>{{ h.ticker or h.name or "Holding" }}</strong>{% if h.ticker and h.name %}<span class="muted small">{{ h.name }}</span>{% endif %}</span>
+            <span class="inv-nums"><span class="amount">{{ (h.value or 0) | money }}</span>
+              {% if h.cost_basis %}{% set g = (h.value or 0) - h.cost_basis %}<span class="small {{ 'up' if g >= 0 else 'down' }}">{{ signed(g) }} vs cost</span>{% endif %}</span></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <button type="button" class="wide-btn track-toggle" data-account="{{ a.id }}">Hide from Investments</button>
+        <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
+      </template>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="muted small">Gains leave out money you put in, so a deposit isn't counted as growth. Periods that start before an account's history begin at its first balance.</p>
+</section>
+{% endif %}
+
+<section class="card" id="limits">
+  <div class="card-head"><h2>Contribution limits</h2></div>
+  {% for y in limits.years %}
+  <p class="section-label">{{ y.year }}{% if not y.known %} (limits not yet published, using the latest){% endif %}</p>
+  <ul class="list limit-list">
+    <li class="limit-row{% if y.ira_items %} edit-row{% endif %}"{% if y.ira_items %} role="button" tabindex="0" data-editor="ira-{{ y.year }}"{% endif %}>
+      <div class="grow">
+        <strong>IRA</strong>
+        <span class="limit-bar"><span class="limit-fill" data-pct="{{ [100, (100 * y.ira / y.ira_limit) | round(1)] | min }}"></span></span>
+        <span class="muted small">{{ y.ira | money }} of {{ y.ira_limit | money }} · {{ (y.ira_limit - y.ira) | money if y.ira < y.ira_limit else "$0.00" }} left</span>
+      </div>
+      {% if y.ira_items %}<span class="chev" aria-hidden="true">›</span>{% endif %}
+      {% if y.ira_items %}
+      <template id="ira-{{ y.year }}">
+        <h3 class="sheet-title">IRA contributions for {{ y.year }}</h3>
+        <p class="hint">A contribution made January 1 to April 15 can count for the year before. Change it here to match what you chose with your IRA provider.</p>
+        <ul class="list">
+          {% for c in y.ira_items %}
+          <li class="plain-row"><span class="grow"><strong>{{ c.amount | money }}</strong><span class="muted small">{{ c.date | shortdate }} · {{ c.account }}</span></span>
+            {% if c.can_switch %}{% set d = c.date[:4] | int %}
+            <select class="tax-year" data-id="{{ c.id }}" aria-label="Counts for">
+              <option value="{{ d }}" {% if c.year == d %}selected{% endif %}>Counts for {{ d }}</option>
+              <option value="{{ d - 1 }}" {% if c.year == d - 1 %}selected{% endif %}>Counts for {{ d - 1 }}</option>
+            </select>{% endif %}</li>
+          {% endfor %}
+        </ul>
+        <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
+      </template>
+      {% endif %}
+    </li>
+    {% for p in y.plans %}
+    <li class="limit-row edit-row" role="button" tabindex="0" data-editor="plan-{{ y.year }}-{{ p.plan }}">
+      <div class="grow">
+        <strong>{{ p.label }}</strong>
+        {% if p.amount is not none %}
+        <span class="limit-bar"><span class="limit-fill" data-pct="{{ [100, (100 * p.amount / p.limit) | round(1)] | min }}"></span></span>
+        <span class="muted small">{{ p.amount | money }} of {{ p.limit | money }} · your own contributions, all employers</span>
+        {% else %}
+        <span class="muted small">Not entered · limit {{ p.limit | money }}</span>
+        {% endif %}
+      </div>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="plan-{{ y.year }}-{{ p.plan }}">
+        <h3 class="sheet-title">{{ p.label }} in {{ y.year }}</h3>
+        <form class="plan-form editor-form" data-year="{{ y.year }}" data-plan="{{ p.plan }}" autocomplete="off">
+          <label>Your contributions so far<input name="amount" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '{:,.2f}'.format(p.amount) if p.amount is not none else '' }}"></label>
+          <p class="hint">Pre-tax and Roth deferrals from every employer this year, not employer contributions. The year-to-date line on your last paystub has it; after the year ends, box 12 of each W-2 (codes E, AA, BB, or G). Leave empty to remove.</p>
+          <div class="sheet-actions">
+            <button type="button" class="sheet-close">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+      </template>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+  <p class="muted small">IRS limits for anyone under 50.
+    {% if limits.ira_needs_investments %}IRA contributions are counted from Plaid Investments activity: add investments to that connection in Accounts › Connections.{% elif not limits.has_ira %}No IRA is connected.{% endif %}</p>
+</section>
+
 <section class="card" id="spending">
   <div class="card-head">
     <h2>Spending</h2>
@@ -126,11 +250,12 @@
             <label>{{ "Amount owed" if a.debt else "Balance" }}<input name="balance" type="text" inputmode="numeric" class="money" required placeholder="0.00"></label>
             <label>As of<input name="day" type="date" value="{{ today }}" max="{{ today }}"></label>
           </div>
+          {% if a.id in tracked_ids %}<label>Money put in since the last entry<input name="flow" type="text" inputmode="numeric" class="money" placeholder="0.00"></label>{% endif %}
           <p class="hint">{% if a.manual %}Enter the balance whenever you check it. Net worth uses the latest one up to each month.{% else %}This account comes from YNAB with no Plaid connection. A balance entered here is used from its date on, in place of YNAB's.{% endif %}</p>
           {% if hist %}
           <p class="section-label">Entered</p>
           <ul class="list balance-list">
-            {% for h in hist[:24] %}<li class="plain-row"><span class="grow">{{ h.day | shortdate }}</span><span class="amount">{{ h.balance | money }}</span>
+            {% for h in hist[:24] %}<li class="plain-row"><span class="grow">{{ h.day | shortdate }}</span><span class="amount">{{ h.balance | money }}{% if h.flow %}<small class="muted"> · {{ h.flow | money }} in</small>{% endif %}</span>
               <button type="button" class="ghost small delete-balance" data-account="{{ a.id }}" data-day="{{ h.day }}" aria-label="Remove">✕</button></li>{% endfor %}
           </ul>
           {% endif %}
@@ -144,6 +269,7 @@
             </div>
           </details>
           {% endif %}
+          {% if not a.debt %}<button type="button" class="wide-btn track-toggle" data-account="{{ a.id }}"{% if a.id not in tracked_ids %} data-track="1"{% endif %}>{{ "Hide from Investments" if a.id in tracked_ids else "Track gains in Investments" }}</button>{% endif %}
           <button type="button" class="wide-btn net-worth-toggle" data-account="{{ a.id }}">Leave out of net worth</button>
           <div class="sheet-actions">
             <button type="button" class="sheet-close">Cancel</button>
@@ -152,6 +278,7 @@
         </form>
         {% else %}
         <p class="hint">{% if a.source == "estimate" %}Plaid hasn't saved a balance for this account yet, so today's value is worked out from its transactions.{% else %}Plaid updates this balance on every sync.{% endif %} Leave it out if it shouldn't count in net worth, for example an account you closed or don't own.</p>
+        {% if not a.debt %}<button type="button" class="wide-btn track-toggle" data-account="{{ a.id }}"{% if a.id not in tracked_ids %} data-track="1"{% endif %}>{{ "Hide from Investments" if a.id in tracked_ids else "Track gains in Investments" }}</button>{% endif %}
         <button type="button" class="wide-btn net-worth-toggle" data-account="{{ a.id }}">Leave out of net worth</button>
         <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
         {% endif %}

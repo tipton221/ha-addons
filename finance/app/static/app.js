@@ -97,7 +97,13 @@ function plaidHandler(token, extra) {
       try {
         if (state.itemId) {
           const r = await api("/api/plaid/updated",
-                              { item_id: state.itemId, selected: (metadata.accounts || []).length });
+                              { item_id: state.itemId, selected: (metadata.accounts || []).length,
+                                investments: !!state.investments });
+          if (state.investments) {
+            say("Investments added. Holdings and activity load with the next sync, in a minute or two.");
+            setTimeout(() => { location.href = "/accounts"; }, 2500);
+            return;
+          }
           if (state.chooseAccounts && !r.added) {
             say("Plaid did not share any new accounts. For banks that sign in on their own site, like Chase, " +
                 "the bank decides what is shared: allow the account in the bank's linked apps settings, then try again.", true);
@@ -109,7 +115,8 @@ function plaidHandler(token, extra) {
           setTimeout(() => { location.href = "/accounts"; }, 1800);
           return;
         } else {
-          await api("/api/plaid/exchange", { public_token: publicToken, institution: metadata.institution });
+          await api("/api/plaid/exchange", { public_token: publicToken, institution: metadata.institution,
+                                             investments: !!state.investments });
         }
         say(state.itemId ? "Updated. New accounts are listed now; their transactions follow in a few minutes."
                          : "Connected. Accounts are listed now; the first transactions can take a few minutes.");
@@ -123,14 +130,16 @@ function plaidHandler(token, extra) {
   });
 }
 
-async function openLink(itemId, chooseAccounts) {
+// investments: on an existing connection, ask for Investments consent; on a new one, connect a
+// retirement plan site for Investments only (no bank transactions).
+async function openLink(itemId, chooseAccounts, investments) {
   say("");
   try {
     const { link_token } = await api("/api/plaid/link-token",
-                                     itemId ? { item_id: itemId, accounts: !!chooseAccounts } : {});
+                                     { item_id: itemId || undefined, accounts: !!chooseAccounts, investments: !!investments });
     // Saved so the OAuth return page can resume the same Link session.
     localStorage.setItem(LINK_KEY, JSON.stringify({ token: link_token, itemId: itemId || null,
-                                                    chooseAccounts: !!chooseAccounts }));
+                                                    chooseAccounts: !!chooseAccounts, investments: !!investments }));
     plaidHandler(link_token).open();
   } catch (e) { say(e.message, true); }
 }
@@ -768,7 +777,11 @@ const forms = {
   },
   async "balance-form"(form) {
     const f = form.elements;
-    await api("/api/balances", { account_id: form.dataset.account, balance: f.balance.value, day: f.day.value });
+    await api("/api/balances", { account_id: form.dataset.account, balance: f.balance.value, day: f.day.value,
+                                 flow: f.flow ? f.flow.value : undefined });
+  },
+  async "plan-form"(form) {
+    await api("/api/investments/plan", { year: form.dataset.year, plan: form.dataset.plan, amount: form.elements.amount.value });
   },
   async "manual-form"(form) {
     const f = form.elements;
@@ -1027,6 +1040,9 @@ const pages = {
   accounts() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
+    on("connect-invest", (ev) => { ev.preventDefault(); openLink(null, false, true); });
+    document.querySelectorAll(".add-investments").forEach((b) =>
+      b.addEventListener("click", () => openLink(b.dataset.item, false, true)));
     on("logout", async (ev) => { ev.preventDefault(); await api("/api/logout"); location.href = "/login"; });
     on("sync", syncNow);
     document.querySelectorAll(".reconnect").forEach((b) =>
@@ -1152,6 +1168,28 @@ document.addEventListener("submit", async (ev) => {
     closeSheet(form.closest(".sheet"));
     toast(r.added ? `Added ${r.added} bill${r.added > 1 ? "s" : ""}` : "Saved");
     setTimeout(() => reloadHere(), 700);
+  } catch (e) { toast(e.message, true); }
+});
+
+// Investments: show or hide an account, and which year an early-year IRA contribution counts for.
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".track-toggle");
+  if (!btn) return;
+  try {
+    await api(`/api/accounts/${encodeURIComponent(btn.dataset.account)}/track`, { track: !!btn.dataset.track });
+    closeAllSheets();
+    toast(btn.dataset.track ? "Now in Investments" : "Hidden from Investments");
+    setTimeout(() => reloadHere(), 600);
+  } catch (e) { toast(e.message, true); }
+});
+document.addEventListener("change", async (ev) => {
+  const sel = ev.target.closest(".tax-year");
+  if (!sel) return;
+  try {
+    await api("/api/investments/tax-year", { id: sel.dataset.id, year: Number(sel.value) });
+    closeAllSheets();
+    toast(`Counts for ${sel.value}`);
+    setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });
 

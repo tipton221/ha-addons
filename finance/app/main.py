@@ -27,6 +27,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
 from .transit import transit_options
+from .investments import PLANS, limits, returns
 from .bills import CADENCES, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
@@ -603,7 +604,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def accounts_page(request: Request):
         with db.connect() as conn:
             items = [dict(r) for r in conn.execute(
-                "SELECT item_id, institution, status, error_code, update_status, last_sync_at "
+                "SELECT item_id, institution, status, error_code, update_status, last_sync_at, products, investments, "
+                "(SELECT COUNT(*) FROM accounts a WHERE a.item_id = plaid_items.item_id AND a.type='investment') AS invest_accounts "
                 "FROM plaid_items ORDER BY institution")]
             total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid'").fetchone()["n"]
             ynab_total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='ynab'").fetchone()["n"]
@@ -1010,10 +1012,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         }
         with db.connect() as conn:
             balances = {}
-            for r in conn.execute("SELECT account_id, day, balance FROM manual_balances ORDER BY day DESC"):
+            for r in conn.execute("SELECT account_id, day, balance, flow FROM manual_balances ORDER BY day DESC"):
                 balances.setdefault(r["account_id"], []).append(dict(r))
+        inv = await run_in_threadpool(returns, db, now)
         return templates.TemplateResponse(request, "insights.html", {
             "nw": nw, "flow": flow, "notes": observations(flow, cats, now), "data": data,
+            "inv": inv, "limits": limits(db, now), "plans": PLANS, "tracked_ids": {a["id"] for a in inv["accounts"]},
             "manual_kinds": MANUAL_KINDS, "manual_debts": MANUAL_DEBTS, "balances": balances,
             "today": now.isoformat(), "kind_labels": KIND_LABELS,
         })
@@ -1067,7 +1071,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             save_balance(aid, body.get("balance"), body.get("day"))
         return {"ok": True, "id": aid}
 
-    def save_balance(aid: str, value, day) -> None:
+    def save_balance(aid: str, value, day, flow=None) -> None:
         try:
             amount = round(num(value), 2)
         except ValueError:
@@ -1083,13 +1087,66 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             src = conn.execute("SELECT source FROM accounts WHERE account_id=?", (aid,)).fetchone()
             if not src or src["source"] not in ("manual", "ynab"):
                 raise HTTPException(400, "Balances can only be entered for manual or YNAB accounts")
-            conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES (?, ?, ?) "
-                         "ON CONFLICT(account_id, day) DO UPDATE SET balance=excluded.balance", (aid, day, amount))
+            try:
+                put_in = round(num(flow), 2) if str(flow or "").strip() else None
+            except ValueError:
+                raise HTTPException(400, "Enter the money put in as a number")
+            conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES (?, ?, ?, ?) "
+                         "ON CONFLICT(account_id, day) DO UPDATE SET balance=excluded.balance, flow=excluded.flow",
+                         (aid, day, amount, put_in))
 
     @app.post("/api/balances")
     async def add_balance(request: Request):
         body = await request.json()
-        save_balance(str(body.get("account_id") or ""), body.get("balance"), body.get("day"))
+        save_balance(str(body.get("account_id") or ""), body.get("balance"), body.get("day"), body.get("flow"))
+        return {"ok": True}
+
+    @app.post("/api/accounts/{account_id}/track")
+    async def set_track_returns(account_id: str, request: Request):
+        """Show (or hide) an account in Investments."""
+        track = 1 if (await request.json()).get("track") else 0
+        with db.connect() as conn:
+            if not conn.execute("UPDATE accounts SET track_returns=? WHERE account_id=?", (track, account_id)).rowcount:
+                raise HTTPException(404, "Account not found")
+        return {"ok": True}
+
+    @app.post("/api/investments/plan")
+    async def save_plan_contributions(request: Request):
+        """Workplace plan contributions so far in a year (empty removes the entry)."""
+        body = await request.json()
+        try:
+            year = int(body.get("year"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Pick a year")
+        plan = str(body.get("plan") or "")
+        if plan not in PLANS:
+            raise HTTPException(400, "Unknown plan")
+        with db.connect() as conn:
+            if not str(body.get("amount") or "").strip():
+                conn.execute("DELETE FROM plan_contributions WHERE year=? AND plan=?", (year, plan))
+            else:
+                try:
+                    amount = round(num(body["amount"]), 2)
+                except ValueError:
+                    raise HTTPException(400, "Enter the amount as a number")
+                conn.execute("INSERT INTO plan_contributions VALUES (?, ?, ?) ON CONFLICT(year, plan) "
+                             "DO UPDATE SET amount=excluded.amount", (year, plan, amount))
+        return {"ok": True}
+
+    @app.post("/api/investments/tax-year")
+    async def set_contribution_year(request: Request):
+        """Count an early-year IRA contribution for the year before (or back for its own year)."""
+        body = await request.json()
+        with db.connect() as conn:
+            row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (str(body.get("id") or ""),)).fetchone()
+            if not row:
+                raise HTTPException(404, "Contribution not found")
+            y = date.fromisoformat(row["date"]).year
+            year = int(body.get("year") or y)
+            if year not in (y, y - 1):
+                raise HTTPException(400, "It can count for its own year or the year before")
+            conn.execute("UPDATE investment_txns SET tax_year=? WHERE id=?",
+                         (None if year == y else year, str(body["id"])))
         return {"ok": True}
 
     @app.post("/api/balances/delete")
@@ -1164,7 +1221,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 raise HTTPException(404, "Unknown connection")
             access_token = row["access_token"]
         try:
-            return {"link_token": await p.link_token(access_token, choose_accounts=bool(body.get("accounts")))}
+            return {"link_token": await p.link_token(access_token, choose_accounts=bool(body.get("accounts")),
+                                                     add_investments=bool(access_token and body.get("investments")),
+                                                     investments_only=bool(not access_token and body.get("investments")))}
         except PlaidError as e:
             raise HTTPException(502, f"Plaid: {e}")
 
@@ -1178,10 +1237,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         except PlaidError as e:
             raise HTTPException(502, f"Plaid: {e}")
         with db.connect() as conn:
+            only = bool(body.get("investments"))
             conn.execute(
-                "INSERT INTO plaid_items (item_id, access_token, institution_id, institution) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token",
-                (item_id, access_token, inst.get("institution_id"), inst.get("name") or ""),
+                "INSERT INTO plaid_items (item_id, access_token, institution_id, institution, products, investments) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token",
+                (item_id, access_token, inst.get("institution_id"), inst.get("name") or "",
+                 "investments" if only else None, "on" if only else None),
             )
         await load_accounts(item_id)  # accounts show up right away; transactions follow in the background
         asyncio.create_task(run_sync())
@@ -1203,6 +1264,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             conn.execute("UPDATE plaid_items SET status='ok', error_code=NULL WHERE item_id=?",
                          (body.get("item_id"),))
+            if body.get("investments"):  # consent given in Link: start pulling holdings and activity
+                conn.execute("UPDATE plaid_items SET investments='on' WHERE item_id=?", (body.get("item_id"),))
         item_id = str(body.get("item_id") or "")
         def count() -> int:
             with db.connect() as conn:

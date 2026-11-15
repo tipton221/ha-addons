@@ -70,6 +70,7 @@
     <h2>Connections</h2>
     {% if plaid_ready %}<button id="connect" class="primary">Connect a bank</button>{% endif %}
   </div>
+  {% if plaid_ready %}<p class="muted small">A retirement plan site with no bank account, like a 403(b) record keeper? <a href="#" id="connect-invest">Connect it for investments only</a>.</p>{% endif %}
   <ul class="list">
     {% for i in items %}
     <li class="plain-row">
@@ -78,8 +79,12 @@
         <span class="muted small">
           {% if i.last_sync_at %}Synced {{ i.last_sync_at | local }}{% else %}Not synced yet{% endif %}
           {% if i.update_status and i.update_status != "HISTORICAL_UPDATE_COMPLETE" %} · history loading{% endif %}
+          {% if i.products == "investments" %} · investments only{% elif i.investments == "on" %} · with investments{% elif i.investments == "unsupported" %} · investments not available here{% endif %}
         </span>
       </div>
+      {% if i.status == "ok" and i.invest_accounts and i.investments not in ("on", "unsupported") and i.products != "investments" %}
+      <button class="ghost add-investments" data-item="{{ i.item_id }}" title="Holdings, gains, and contributions for its investment accounts">{{ "Allow investments" if i.investments == "consent" else "Add investments" }}</button>
+      {% endif %}
       {% if i.status == "ok" %}<button class="ghost choose-accounts" data-item="{{ i.item_id }}" title="Share another account from this bank, or stop sharing one">Accounts</button>
       {% else %}<button class="reconnect" data-item="{{ i.item_id }}">Reconnect</button>{% endif %}
     </li>

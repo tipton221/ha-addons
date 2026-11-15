@@ -124,6 +124,46 @@ CREATE TABLE IF NOT EXISTS merchant_rules (
 
 -- Balances entered by hand: for accounts added in the app (source 'manual') and for YNAB
 -- accounts with no Plaid connection. Debts are stored as the positive amount owed.
+-- Investment activity from Plaid Investments: buys, sells, dividends, and the cash moved in and
+-- out (contributions, withdrawals). amount follows Plaid: positive when cash leaves the account
+-- (a buy), negative when cash comes in (a contribution or a sale).
+CREATE TABLE IF NOT EXISTS investment_txns (
+    id              TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    name            TEXT NOT NULL DEFAULT '',
+    amount          REAL NOT NULL,
+    type            TEXT,
+    subtype         TEXT,
+    quantity        REAL,
+    price           REAL,
+    fees            REAL,
+    security_id     TEXT,
+    tax_year        INTEGER                 -- IRA contribution counted for this year instead of the date's
+);
+CREATE INDEX IF NOT EXISTS investment_txns_account ON investment_txns (account_id, date);
+
+-- Current holdings per investment account (replaced on every sync).
+CREATE TABLE IF NOT EXISTS holdings (
+    account_id      TEXT NOT NULL,
+    security_id     TEXT NOT NULL,
+    name            TEXT,
+    ticker          TEXT,
+    kind            TEXT,
+    quantity        REAL,
+    value           REAL,
+    cost_basis      REAL,
+    PRIMARY KEY (account_id, security_id)
+);
+
+-- Workplace plan (403(b), 401(k), 457(b)) contributions so far in a year, entered by hand.
+CREATE TABLE IF NOT EXISTS plan_contributions (
+    year            INTEGER NOT NULL,
+    plan            TEXT NOT NULL,          -- '403b' (also 401(k)) or '457b'
+    amount          REAL NOT NULL,
+    PRIMARY KEY (year, plan)
+);
+
 -- Money in transit: the account chosen for the other side of a transfer ('' = not a transfer
 -- between my accounts). Without a row, the account is worked out from past transfers.
 CREATE TABLE IF NOT EXISTS transit_choices (
@@ -184,11 +224,20 @@ class Database:
                 ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
                 ("tip", "REAL"),             # tip entered by hand (part of the amount); NULL: automatic; 0: no tip
             ],
+            "plaid_items": [
+                ("products", "TEXT"),        # NULL: transactions; 'investments' for an investments-only connection
+                ("investments", "TEXT"),     # NULL: not added; 'on'; 'consent' (needs Plaid consent); 'unsupported'
+                ("investments_synced", "TEXT"),  # first full investment history pulled
+            ],
+            "manual_balances": [
+                ("flow", "REAL"),            # money put in (+) or taken out (-) since the previous entry
+            ],
             "accounts": [
                 ("display_name", "TEXT"),
                 ("short_name", "TEXT"),      # shown on filter pills
                 ("visibility", "TEXT NOT NULL DEFAULT 'everyday'"),  # everyday, less (used), archived
                 ("in_net_worth", "INTEGER NOT NULL DEFAULT 1"),  # 0: left out of Insights net worth
+                ("track_returns", "INTEGER"),  # 1/0: show (or hide) in Investments; NULL: by account type
             ],
             "categories": [
                 ("kind", "TEXT"),            # spending, income, saving, debt, or transfer (see insights.py)
