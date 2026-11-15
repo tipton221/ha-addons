@@ -1466,9 +1466,9 @@ def test_investment_returns_leave_out_money_put_in(tmp_path, monkeypatch):
     r = returns(db, today)
     plan = next(a for a in r["accounts"] if a["id"] == "manual:plan")
     ytd = plan["periods"]["ytd"]
-    weight = (today - D(2026, 7, 1)).days / (today - D(2025, 12, 31)).days
-    assert ytd["gain"] == 2000.0 and ytd["put_in"] == 1000.0 and ytd["since"] is None
-    assert ytd["pct"] == round(100 * 2000 / (10000 + 1000 * weight), 2)
+    # The $1,000 is spread over the 30 weeks from Dec 1 to Jul 1: 4 of them fall in December, before YTD.
+    assert ytd["put_in"] == round(1000 * 26 / 30, 2) and ytd["gain"] == round(2000 + 1000 * 4 / 30, 2)
+    assert ytd["since"] is None and 19.5 < ytd["pct"] < 21.0
     roth = next(a for a in r["accounts"] if a["id"] == "roth")
     three = roth["periods"]["3m"]  # history starts inside the period: counts from its first balance
     assert three["since"] == "2026-09-30" and three["put_in"] == 500.0 and three["gain"] == 100.0
@@ -1536,3 +1536,17 @@ def test_sync_investments_and_consent(tmp_path):
     assert asyncio.run(sync_investments(db, InvPlaid("ADDITIONAL_CONSENT_REQUIRED"), item)) == {"investments": "consent"}
     with db.connect() as conn:
         assert conn.execute("SELECT investments FROM plaid_items").fetchone()[0] == "consent"
+
+
+
+def test_manual_flow_spread_matches_record_keeper(tmp_path, monkeypatch):
+    """A year of payroll contributions entered once lands near the record keeper's own rate of return."""
+    from app.investments import returns
+    db, app = client_with(tmp_path, monkeypatch, [], [])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES "
+                     "('manual:p', 'manual', 'Plan', 'asset', 'retirement')")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('manual:p', '2025-12-31', 50000)")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance, flow) VALUES ('manual:p', '2026-11-14', 67000, 12500)")
+    ytd = returns(db, D(2026, 11, 15))["accounts"][0]["periods"]["ytd"]
+    assert ytd["gain"] == 4500.0 and 7.5 < ytd["pct"] < 8.5  # lumped on Nov 14 it would be about 9%

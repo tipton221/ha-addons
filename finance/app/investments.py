@@ -4,7 +4,8 @@ Balances come from the same per-day values as net worth (insights.account_series
 or taken out ("flows") is not gain, so it is taken out of the change in balance:
 - Plaid Investments activity: contributions, deposits, withdrawals, distributions, transfers.
 - YNAB: transfers into or out of the account (YNAB's own transfer transactions).
-- Accounts entered by hand: the "money put in since the last entry" saved with a balance.
+- Accounts entered by hand: the "money put in since the last entry" saved with a balance, spread
+  evenly over the weeks since the previous entry (payroll contributions arrive all along).
 
 Return % is the Modified Dietz return: gain divided by the starting balance plus each flow
 weighted by the share of the period it was invested. A deposit late in the period barely counts,
@@ -85,9 +86,23 @@ def flows(db: Database, ids: list[str]) -> dict[str, list[tuple[str, float]]]:
             plaid_from.setdefault(r["account_id"], r["date"])
             if r["type"] in FLOW_TYPES and r["subtype"] in FLOW_SUBTYPES and r["amount"]:
                 out[r["account_id"]].append((r["date"], -r["amount"]))
+        # Money put in by hand is spread evenly, week by week, over the time since the previous
+        # entry: payroll contributions arrive all through it, not on the day the balance was checked.
+        prev: dict[str, str] = {}
         for r in conn.execute(f"SELECT account_id, day, flow FROM manual_balances "
-                              f"WHERE account_id IN ({marks}) AND flow IS NOT NULL AND flow != 0", tuple(ids)):
-            out[r["account_id"]].append((r["day"], r["flow"]))
+                              f"WHERE account_id IN ({marks}) ORDER BY account_id, day", tuple(ids)):
+            before = prev.get(r["account_id"])
+            prev[r["account_id"]] = r["day"]
+            if not r["flow"]:
+                continue
+            if not before:
+                out[r["account_id"]].append((r["day"], r["flow"]))
+                continue
+            d0, d1 = date.fromisoformat(before), date.fromisoformat(r["day"])
+            n = max(1, (d1 - d0).days // 7)
+            for k in range(1, n + 1):
+                out[r["account_id"]].append(((d0 + timedelta(days=round(k * (d1 - d0).days / n))).isoformat(),
+                                             r["flow"] / n))
         # YNAB transfers into the account (its own, or the YNAB accounts linked to a Plaid account),
         # before Plaid's investment activity starts.
         links = defaultdict(list)

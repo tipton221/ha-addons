@@ -46,7 +46,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 Version 1.13.0:
 
 - Plaid Investments: "Add investments" on a connection with investment accounts asks Plaid for consent and then syncs holdings and up to 24 months of investment activity. "Connect it for investments only" links a retirement plan site that has no bank transactions (Investments product only).
-- Insights › Investments: balance, gain, and return for 3M, 6M, YTD, 1Y, and All, per account and in total. Gain leaves out money put in or taken out (Plaid contributions and withdrawals, YNAB transfers, or the "money put in" entered with a manual balance). Return is the Modified Dietz return. Each account's sheet shows every period and its holdings with gain against cost basis. Any asset account can be added or hidden.
+- Insights › Investments: balance, gain, and return for 3M, 6M, YTD, 1Y, and All, per account and in total. Gain leaves out money put in or taken out (Plaid contributions and withdrawals, YNAB transfers, or the "money put in" entered with a manual balance, spread evenly over the weeks since the previous entry). Return is the Modified Dietz return. Each account's sheet shows every period and its holdings with gain against cost basis. Any asset account can be added or hidden.
 - Insights › Contribution limits: IRA contributions (from Plaid Investments activity) against the IRS limit, with contributions made January 1 to April 15 switchable to the year before. 403(b)/401(k) contributions entered by hand from a paystub. Limits for 2025 to 2027, under-50 amounts.
 
 Version 1.12.2:
