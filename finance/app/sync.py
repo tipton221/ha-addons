@@ -153,6 +153,56 @@ async def refresh_accounts(db: Database, plaid: Plaid, item: dict) -> None:
                 (a["account_id"], datetime.now(PACIFIC).date().isoformat(), b.get("current"), b.get("available")))
 
 
+INVESTMENT_HISTORY_DAYS = 730   # Plaid keeps up to 24 months of investment transactions
+INVESTMENT_RECENT_DAYS = 30     # later syncs refresh this much (late or corrected entries)
+INVESTMENT_UNAVAILABLE = {"PRODUCTS_NOT_SUPPORTED", "NO_INVESTMENT_ACCOUNTS", "PRODUCT_NOT_ENABLED",
+                          "INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED_FOR_INSTITUTION"}
+
+
+async def sync_investments(db: Database, plaid: Plaid, item: dict) -> dict:
+    """Holdings and investment transactions for a connection with Investments added."""
+    try:
+        holdings = await plaid.investments_holdings(item["access_token"])
+        today = datetime.now(PACIFIC).date()
+        days = INVESTMENT_RECENT_DAYS if item.get("investments_synced") else INVESTMENT_HISTORY_DAYS
+        activity = await plaid.investments_transactions(
+            item["access_token"], (today - timedelta(days=days)).isoformat(), today.isoformat())
+    except PlaidError as e:
+        state = ("consent" if e.error_code == "ADDITIONAL_CONSENT_REQUIRED"
+                 else "unsupported" if e.error_code in INVESTMENT_UNAVAILABLE else None)
+        if state:
+            with db.connect() as conn:
+                conn.execute("UPDATE plaid_items SET investments=? WHERE item_id=?", (state, item["item_id"]))
+            return {"investments": state}
+        raise
+    securities = {sec["security_id"]: sec for sec in holdings.get("securities") or []}
+    securities.update({sec["security_id"]: sec for sec in activity.get("securities") or []})
+    accounts = {a["account_id"] for a in holdings.get("accounts") or []}
+    with db.connect() as conn:
+        if accounts:
+            conn.execute(f"DELETE FROM holdings WHERE account_id IN ({','.join('?' * len(accounts))})", tuple(accounts))
+        for h in holdings.get("holdings") or []:
+            sec = securities.get(h["security_id"]) or {}
+            conn.execute(
+                "INSERT OR REPLACE INTO holdings (account_id, security_id, name, ticker, kind, quantity, value, cost_basis) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (h["account_id"], h["security_id"], _clean(sec.get("name")) or None, sec.get("ticker_symbol"),
+                 sec.get("type"), h.get("quantity"), h.get("institution_value"), h.get("cost_basis")))
+        for t in activity["investment_transactions"]:
+            conn.execute(
+                "INSERT INTO investment_txns (id, account_id, date, name, amount, type, subtype, quantity, price, fees, "
+                "security_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                "account_id=excluded.account_id, date=excluded.date, name=excluded.name, amount=excluded.amount, "
+                "type=excluded.type, subtype=excluded.subtype, quantity=excluded.quantity, price=excluded.price, "
+                "fees=excluded.fees, security_id=excluded.security_id",
+                (t["investment_transaction_id"], t["account_id"], t["date"], _clean(t.get("name")), t["amount"],
+                 t.get("type"), t.get("subtype"), t.get("quantity"), t.get("price"), t.get("fees"),
+                 t.get("security_id")))
+        conn.execute("UPDATE plaid_items SET investments='on', investments_synced=COALESCE(investments_synced, ?) "
+                     "WHERE item_id=?", (today.isoformat(), item["item_id"]))
+    return {"holdings": len(holdings.get("holdings") or []), "activity": len(activity["investment_transactions"])}
+
+
 async def sync_all(db: Database, plaid: Plaid) -> dict:
     with db.connect() as conn:
         items = [dict(r) for r in conn.execute("SELECT * FROM plaid_items")]
@@ -161,7 +211,22 @@ async def sync_all(db: Database, plaid: Plaid) -> dict:
         name = item["institution"] or item["item_id"]
         try:
             await refresh_accounts(db, plaid, item)  # first, so a new account appears even if transactions fail
-            results[name] = await sync_item(db, plaid, item)
+            if item.get("products") != "investments":
+                results[name] = await sync_item(db, plaid, item)
+            else:
+                with db.connect() as conn:
+                    conn.execute("UPDATE plaid_items SET status='ok', error_code=NULL, last_sync_at=? WHERE item_id=?",
+                                 (datetime.now(timezone.utc).isoformat(), item["item_id"]))
+                results[name] = {}
+            if item.get("investments") == "on" or item.get("products") == "investments":
+                try:
+                    results[name]["investments"] = await sync_investments(db, plaid, item)
+                except PlaidError as e:
+                    # A bank whose transactions synced stays connected; only its investments wait.
+                    if e.error_code in LOGIN_ERRORS or item.get("products") == "investments":
+                        raise
+                    log.warning("Plaid investments failed for %s: %s", name, e)
+                    results[name]["investments"] = {"error": e.error_code}
         except PlaidError as e:
             log.warning("Plaid sync failed for %s: %s", name, e)
             status = "login_required" if e.error_code in LOGIN_ERRORS else "error"

@@ -37,7 +37,8 @@ class Plaid:
             raise PlaidError(r.status_code, data)
         return data
 
-    async def link_token(self, access_token: str | None = None, choose_accounts: bool = False) -> str:
+    async def link_token(self, access_token: str | None = None, choose_accounts: bool = False,
+                         add_investments: bool = False, investments_only: bool = False) -> str:
         body: dict = {
             "client_name": "Finance",
             "language": "en",
@@ -50,6 +51,12 @@ class Plaid:
             body["access_token"] = access_token
             if choose_accounts:
                 body["update"] = {"account_selection_enabled": True}
+            if add_investments:
+                # Consent for Investments on an existing connection (Plaid: "products" must stay out).
+                body["additional_consented_products"] = ["investments"]
+        elif investments_only:
+            # Retirement plan sites that don't offer bank transactions (a 403(b) record keeper).
+            body["products"] = ["investments"]
         else:
             body["products"] = ["transactions"]
             body["transactions"] = {"days_requested": 730}
@@ -70,6 +77,24 @@ class Plaid:
         if cursor:
             body["cursor"] = cursor
         return await self._post("/transactions/sync", body)
+
+    async def investments_holdings(self, access_token: str) -> dict:
+        return await self._post("/investments/holdings/get", {"access_token": access_token})
+
+    async def investments_transactions(self, access_token: str, start: str, end: str) -> dict:
+        """Every investment transaction between two dates (Plaid pages them 500 at a time)."""
+        txns, securities, offset = [], {}, 0
+        while True:
+            page = await self._post("/investments/transactions/get", {
+                "access_token": access_token, "start_date": start, "end_date": end,
+                "options": {"count": 500, "offset": offset}})
+            txns += page["investment_transactions"]
+            for sec in page.get("securities") or []:
+                securities[sec["security_id"]] = sec
+            offset = len(txns)
+            if offset >= page.get("total_investment_transactions", 0) or not page["investment_transactions"]:
+                break
+        return {"investment_transactions": txns, "securities": list(securities.values())}
 
     async def remove_item(self, access_token: str) -> None:
         await self._post("/item/remove", {"access_token": access_token})
