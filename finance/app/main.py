@@ -29,6 +29,7 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .transit import transit_options
 from .investments import PLANS, limits, returns
+from .loans import loans
 from .bills import CADENCES, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
@@ -169,6 +170,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     templates.env.globals["asset_v"] = str(int(max(f.stat().st_mtime for f in (HERE / "static").rglob("*") if f.is_file())))
     # Keep a short trailing part with the word before it: "403 (b)" never breaks before "(b)".
     templates.env.filters["keep"] = lambda text: re.sub(r" (\(?\w{1,3}\)?)$", "\u00a0\\1", str(text or ""))
+    templates.env.filters["month_label"] = lambda m: date(int(m[:4]), int(m[5:7]), 1).strftime("%b %Y") if m else ""
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = {
@@ -1022,6 +1024,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         inv = await run_in_threadpool(returns, db, now)
         return templates.TemplateResponse(request, "insights.html", {
             "nw": nw, "flow": flow, "notes": observations(flow, cats, now), "data": data,
+            "loans": loans(db, now), "loan_bills": [b for b in bill_status(db, now) if b.get("kind") != "income" and not b.get("archived_on")],
             "inv": inv, "limits": limits(db, now), "plans": PLANS, "tracked_ids": {a["id"] for a in inv["accounts"]},
             "manual_kinds": MANUAL_KINDS, "manual_debts": MANUAL_DEBTS, "balances": balances,
             "today": now.isoformat(), "kind_labels": KIND_LABELS,
@@ -1113,6 +1116,72 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if not conn.execute("UPDATE accounts SET track_returns=? WHERE account_id=?", (track, account_id)).rowcount:
                 raise HTTPException(404, "Account not found")
+        return {"ok": True}
+
+    @app.post("/api/loans")
+    async def save_loan(request: Request):
+        """Loan details, and a new loan account when there is no account_id yet."""
+        body = await request.json()
+        aid = str(body.get("account_id") or "")
+
+        def opt_num(key, label):
+            raw = str(body.get(key) or "").strip().rstrip("%")
+            if not raw:
+                return None
+            try:
+                return round(num(raw), 4)
+            except ValueError:
+                raise HTTPException(400, f"Enter the {label} as a number")
+
+        def opt_day(key):
+            raw = str(body.get(key) or "").strip()
+            if not raw:
+                return None
+            try:
+                return date.fromisoformat(raw).isoformat()
+            except ValueError:
+                raise HTTPException(400, "Enter a valid date")
+
+        rate, payment = opt_num("rate", "interest rate"), opt_num("payment", "monthly payment")
+        pslf = 1 if body.get("pslf") else 0
+        count = opt_num("pslf_count", "qualifying payment count")
+        if count is not None and not 0 <= count <= 120:
+            raise HTTPException(400, "Qualifying payments are between 0 and 120")
+        bill = body.get("bill_id")
+        bill = int(bill) if str(bill or "").isdigit() else None
+        with db.connect() as conn:
+            if not aid:
+                name = str(body.get("name") or "").strip()[:60]
+                if not name:
+                    raise HTTPException(400, "Name the loan")
+                aid = "manual:" + secrets.token_hex(8)
+                conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype, currency) "
+                             "VALUES (?, 'manual', ?, 'liability', 'loan', 'USD')", (aid, name))
+            elif not conn.execute("SELECT 1 FROM accounts WHERE account_id=?", (aid,)).fetchone():
+                raise HTTPException(404, "Account not found")
+            conn.execute(
+                "INSERT INTO loans (account_id, rate, payment, bill_id, pslf, pslf_count, pslf_as_of, recert) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET rate=excluded.rate, "
+                "payment=excluded.payment, bill_id=excluded.bill_id, pslf=excluded.pslf, pslf_count=excluded.pslf_count, "
+                "pslf_as_of=excluded.pslf_as_of, recert=excluded.recert",
+                (aid, rate, payment, bill, pslf, int(count) if count is not None else None, opt_day("pslf_as_of"),
+                 opt_day("recert")))
+        if str(body.get("balance") or "").strip():
+            save_balance(aid, body.get("balance"), body.get("day"))
+        return {"ok": True, "id": aid}
+
+    @app.post("/api/loans/month")
+    async def set_loan_month(request: Request):
+        """Whether a month's payment counts toward PSLF."""
+        body = await request.json()
+        month = str(body.get("month") or "")
+        if len(month) != 7 or month[4] != "-":
+            raise HTTPException(400, "Month must look like 2026-11")
+        with db.connect() as conn:
+            if body.get("counts"):
+                conn.execute("DELETE FROM loan_months WHERE account_id=? AND month=?", (str(body.get("account_id")), month))
+            else:
+                conn.execute("INSERT OR REPLACE INTO loan_months VALUES (?, ?, 0)", (str(body.get("account_id")), month))
         return {"ok": True}
 
     @app.post("/api/investments/plan")

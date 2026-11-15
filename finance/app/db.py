@@ -171,6 +171,26 @@ CREATE TABLE IF NOT EXISTS plan_contributions (
     PRIMARY KEY (year, plan)
 );
 
+-- Loan details for a debt account (a loan added by hand, or a Plaid loan account).
+CREATE TABLE IF NOT EXISTS loans (
+    account_id      TEXT PRIMARY KEY,
+    rate            REAL,                   -- yearly interest rate, percent
+    payment         REAL,                   -- monthly payment
+    bill_id         INTEGER,                -- recurring bill whose tagged charges are the payments
+    pslf            INTEGER NOT NULL DEFAULT 0,
+    pslf_count      INTEGER,                -- qualifying payments shown on studentaid.gov
+    pslf_as_of      TEXT,                   -- the date that count was last updated
+    recert          TEXT                    -- next income-driven repayment recertification
+);
+
+-- A month whose loan payment doesn't count toward PSLF (counts = 0), for example between jobs.
+CREATE TABLE IF NOT EXISTS loan_months (
+    account_id      TEXT NOT NULL,
+    month           TEXT NOT NULL,          -- YYYY-MM
+    counts          INTEGER NOT NULL,
+    PRIMARY KEY (account_id, month)
+);
+
 -- Money in transit: the account chosen for the other side of a transfer ('' = not a transfer
 -- between my accounts). Without a row, the account is worked out from past transfers.
 CREATE TABLE IF NOT EXISTS transit_choices (

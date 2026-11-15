@@ -858,3 +858,14 @@ a.tile:active { transform: scale(0.98); }
 .period-table .needs { grid-column: 2 / -1; color: var(--text-2); font-size: 0.85rem; text-align: center; }
 .ira-items .tax-year { flex: none; max-width: 52%; }
 .activity .grow { display: flex; flex-direction: column; min-width: 0; }
+
+/* Loans */
+.loan-list .grow { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pslf-fill { background: var(--green); }
+.loan-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 8px; }
+.loan-summary div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); }
+.loan-summary b { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.loan-summary .up, .loan-list .up { color: var(--green); }
+.pslf-months .grow { display: flex; flex-direction: column; min-width: 0; }
+.pslf-month { width: auto; height: 34px; padding: 0 30px 0 12px; border-radius: var(--r-pill); font-size: 0.82rem; flex: none; }
+.loan-form + * { margin-top: 0; }

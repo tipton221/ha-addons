@@ -202,6 +202,96 @@
     {% if limits.ira_needs_investments %}IRA contributions are counted from Plaid Investments activity: add investments to that connection in Accounts › Connections.{% elif not limits.has_ira %}No IRA is connected.{% endif %}</p>
 </section>
 
+{% macro loan_form(l=none) %}
+<form class="loan-form editor-form" data-account="{{ l.id if l else '' }}" autocomplete="off">
+  {% if not l %}<label>Name<input name="name" type="text" maxlength="60" required placeholder="Student loans"></label>{% endif %}
+  {% if not l or l.source != "plaid" %}
+  <div class="grid2">
+    <label>{{ "Balance" if not l else "New balance" }}<input name="balance" type="text" inputmode="numeric" class="money" placeholder="{{ '{:,.2f}'.format(l.balance) if l else '0.00' }}"></label>
+    <label>As of<input name="day" type="date" value="{{ today }}" max="{{ today }}"></label>
+  </div>
+  {% endif %}
+  <div class="grid2">
+    <label>Interest rate (%)<input name="rate" type="text" inputmode="decimal" placeholder="3.40" value="{{ l.rate if l and l.rate is not none else '' }}"></label>
+    <label>Monthly payment<input name="payment" type="text" inputmode="numeric" class="money" placeholder="0.00" value="{{ '{:,.2f}'.format(l.payment) if l and l.payment else '' }}"></label>
+  </div>
+  <label>Payments are the recurring bill
+    <select name="bill_id">
+      <option value="">None</option>
+      {% for b in loan_bills %}<option value="{{ b.id }}" {% if l and l.bill_id == b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Next recertification (income-driven plans)<input name="recert" type="date" value="{{ l.recert if l and l.recert else '' }}"></label>
+  <label class="inline"><input name="pslf" type="checkbox" {% if l and l.pslf %}checked{% endif %}> Working toward Public Service Loan Forgiveness</label>
+  <div class="grid2 pslf-fields">
+    <label>Qualifying payments<input name="pslf_count" type="text" inputmode="numeric" placeholder="0" value="{{ l.pslf_info.base if l and l.pslf_info else '' }}"></label>
+    <label>As of<input name="pslf_as_of" type="date" max="{{ today }}" value="{{ l.pslf_info.as_of if l and l.pslf_info else '' }}"></label>
+  </div>
+  <p class="hint">Use the lowest count among your loans on studentaid.gov and its "last updated" date. Each later month with a payment adds one (pick the bill above so payments are found); mark a month that doesn't count in the list above.</p>
+  <div class="sheet-actions">
+    <button type="button" class="sheet-close">Cancel</button>
+    <button type="submit" class="primary">Save</button>
+  </div>
+</form>
+{% endmacro %}
+
+<section class="card" id="loans">
+  <div class="card-head"><h2>Loans</h2></div>
+  {% if loans %}
+  <ul class="list loan-list">
+    {% for l in loans %}{% set p = l.pslf_info %}
+    <li class="edit-row" role="button" tabindex="0" data-editor="loan-{{ loop.index }}">
+      <div class="grow">
+        <strong>{{ l.name | keep }}</strong>
+        <span class="muted small">{% if l.has_details %}{{ l.rate }}% · {{ (l.payment or 0) | money }} a month{% else %}Add the rate and payment{% endif %}{% if l.as_of %} · balance as of {{ l.as_of | shortdate }}{% endif %}</span>
+        {% if p %}
+        <span class="limit-bar"><span class="limit-fill pslf-fill" data-pct="{{ p.pct }}"></span></span>
+        <span class="small"><b>{{ p.count }} of 120</b> qualifying payments{% if p.left and p.last_month %} · 120th about {{ p.last_month | month_label }} · <span class="up">≈ {{ p.forgiven | money }} forgiven</span>{% elif not p.left %} · <span class="up">done: apply for forgiveness</span>{% endif %}</span>
+        {% elif l.payoff %}
+        <span class="muted small">{% if l.payoff.months is not none %}Paid off about {{ l.payoff.month | month_label }}{% else %}The payment doesn't cover the interest{% endif %}</span>
+        {% endif %}
+        {% if l.recert %}<span class="small {{ 'warn-text' if l.recert_days < 60 else 'muted' }}">Recertify by {{ l.recert | shortdate }}{% if l.recert_days >= 0 %} · in {{ l.recert_days }} days{% endif %}</span>{% endif %}
+      </div>
+      <span class="amount">{{ l.balance | money }}</span>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="loan-{{ loop.index }}">
+        <h3 class="sheet-title">{{ l.name | keep }}</h3>
+        {% if p and p.left and p.last_month %}
+        <div class="loan-summary">
+          <div><span class="muted small">Payments left</span><b>{{ p.left }}</b></div>
+          <div><span class="muted small">120th payment</span><b>{{ p.last_month | month_label }}</b></div>
+          <div><span class="muted small">Still to pay</span><b>{{ p.to_pay | money }}</b></div>
+          <div><span class="muted small">Forgiven</span><b class="up">≈ {{ p.forgiven | money }}</b></div>
+        </div>
+        <p class="hint">{{ p.base }} as of {{ p.as_of | shortdate }}{% if p.added %}, plus {{ p.added }} since{% endif %}. Assumes {{ (l.payment or 0) | money }} every month at {{ l.rate }}%; the forgiven amount is the balance left after the 120th payment. Recalculate when your payment changes at recertification.</p>
+        {% elif l.payoff and l.payoff.months is not none %}
+        <p class="hint">At {{ (l.payment or 0) | money }} a month it's paid off about {{ l.payoff.month | month_label }}, with about {{ l.payoff.interest | money }} more interest.</p>
+        {% endif %}
+        {% if p and p.months %}
+        <p class="section-label">Payments since {{ p.as_of | shortdate }}</p>
+        <ul class="list pslf-months">
+          {% for m in p.months %}
+          <li class="plain-row"><span class="grow"><strong>{{ m.label }}</strong><span class="muted small">{{ m.amount | money }} · {% for d in m.days %}{{ d | shortdate }}{% if not loop.last %}, {% endif %}{% endfor %}</span></span>
+            <select class="pslf-month" data-account="{{ l.id }}" data-month="{{ m.month }}" aria-label="Counts toward PSLF">
+              <option value="1" {% if m.counts %}selected{% endif %}>Counts</option>
+              <option value="0" {% if not m.counts %}selected{% endif %}>Doesn't count</option>
+            </select></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {{ loan_form(l) }}
+      </template>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No loans yet.</p>
+  {% endif %}
+  <button class="add-btn" data-editor="loan-new">＋ Add a loan</button>
+  <template id="loan-new"><h3 class="sheet-title">Add a loan</h3>{{ loan_form() }}</template>
+  <p class="muted small">A loan added here also counts in net worth. Projections step month by month: interest at the rate you enter, minus the payment.</p>
+</section>
+
 <section class="card" id="spending">
   <div class="card-head">
     <h2>Spending</h2>

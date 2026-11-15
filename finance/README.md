@@ -43,6 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.14.0:
+
+- Insights › Loans: each loan's balance, rate, and payment, with a payoff date projected month by month. A loan added here is a manual debt account, so it counts in net worth; a Plaid loan account can carry the same details.
+- Public Service Loan Forgiveness: the count from studentaid.gov (and its date) plus one for each later month with a payment to the loan's recurring bill, at most one a month. Any month can be marked as not counting. Shows payments left, the month of the 120th, what's still to pay, and the balance projected to be forgiven.
+- The next income-driven recertification date, highlighted within 60 days.
+
 Version 1.13.2:
 
 - Plaid Investments history is requested in full (24 months) on every sync. Right after Investments is added Plaid may still be loading it, and a shorter window never picked it up.
