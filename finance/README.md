@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.0.3:
+
+- A loan's balance keeps itself current between the balances you enter: from the latest one, interest accrues daily and each payment tagged with the loan's bill comes off as it posts. Net worth uses the same estimate. Entering a balance from the servicer resets it.
+- Loan progress reads "29% paid off" with the dollars beside it, and the bar has even spacing above and below.
+
 Version 2.0.2:
 
 - Insight tiles always pair up two per row: when there's an odd number, one more is added (money saved or invested over the last three months, else a category well below its usual last month, else last month's top category).

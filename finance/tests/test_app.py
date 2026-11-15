@@ -1721,3 +1721,23 @@ def test_insight_tiles_pair_up(tmp_path):
     # An even count gets nothing extra.
     tiles = observations(flow, cats, D(2026, 11, 10))
     assert len(tiles) % 2 == 0
+
+
+def test_loan_balance_rolls_forward_with_payments(tmp_path, monkeypatch):
+    from app.insights import net_worth
+    from app.loans import loans
+    rows = [("d8", "chk", "2026-12-08", "LOAN SERVICER", "Loan Servicer", 250.0, 0, "LOAN_PAYMENTS", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 0, 0)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES ('Loan servicer', 'loan servicer', 250, 'monthly', 8)")
+        bill = conn.execute("SELECT id FROM bills").fetchone()[0]
+        conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES ('manual:l', 'manual', 'Loan', 'liability', 'loan')")
+        conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('manual:l', '2026-11-15', 24000)")
+        conn.execute("INSERT INTO loans (account_id, rate, payment, bill_id, pslf) VALUES ('manual:l', 3.65, 250, ?, 0)", (bill,))
+    today = D(2026, 12, 10)
+    (loan,) = loans(db, today)
+    # 23 days of interest to Dec 8 (3.65% of 24,000 is $2.40 a day), the payment, then 2 more days.
+    after_payment = 24000 + 2.4 * 23 - 250
+    expected = round(after_payment + after_payment * 0.0365 / 365 * 2, 2)
+    assert loan["balance"] == expected and loan["estimated"] and loan["paid_since"] == 1
+    assert any(a["id"] == "manual:l" and a["value"] == -expected for a in net_worth(db, today)["accounts"])

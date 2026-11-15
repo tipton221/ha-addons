@@ -909,3 +909,10 @@ a.tile:active { transform: scale(0.98); }
 .payoff-fill { background: var(--blue); }
 .pslf-fields { border: 0; margin: 0; padding: 0; min-width: 0; transition: opacity .2s; }
 .pslf-fields[disabled] { opacity: 0.4; }
+
+/* Loans: the bar sits evenly between the line above it and the stats below */
+.pslf-block { gap: 12px; padding: 14px 16px 16px; }
+.pslf-block .loan-stats { margin-top: 4px; }
+.pslf-block .pslf-top b { font-size: 1.05rem; }
+.pslf-top { gap: 10px; }
+.pslf-top > span { white-space: nowrap; }

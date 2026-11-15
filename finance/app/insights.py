@@ -117,6 +117,7 @@ def account_series(db: Database, today: date) -> list[dict]:
                       for r in conn.execute("SELECT account_id, rate, payment FROM loans")}
 
     ynab = {a["account_id"]: _running(ynab_days[a["account_id"]]) for a in accts if a["source"] == "ynab"}
+    pays = None   # loan payments since each manual loan's latest balance, loaded when needed
     linked = {y for ys in links.values() for y in ys}
     today_s = today.isoformat()
     out = []
@@ -163,12 +164,20 @@ def account_series(db: Database, today: date) -> list[dict]:
                 return (y[1], "ynab") if y else (None, None)
         elif a["source"] == "manual":
             ms, sign = Series(manual[aid]), (-1 if debt else 1)
+            if debt and pays is None:
+                from .loans import loan_payments
+                pays = loan_payments(db)
+            after = pays.get(aid) if debt else None
             # A debt entered by hand existed before its first balance: earlier months carry it back,
             # undoing the loan's payments (less interest) month by month when its terms are known.
             back = loan_terms.get(aid, (0.0, 0.0)) if debt and ms.first else None
 
-            def value(day, ms=ms, sign=sign, back=back):
+            def value(day, ms=ms, sign=sign, back=back, after=after, terms=loan_terms.get(aid, (0.0, 0.0))):
                 m = ms.at(day)
+                if m and after and m[0] == ms.days[-1] and day > m[0]:
+                    # After the latest balance: its payments since come off, interest goes on.
+                    from .loans import roll_forward
+                    return sign * roll_forward(abs(m[1]), m[0], terms[0], after, day), "estimate"
                 if m:
                     return sign * abs(m[1]), "manual"
                 if back is None:
