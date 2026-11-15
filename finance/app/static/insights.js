@@ -126,8 +126,8 @@
     const vals = months.map((m) => m.spending);
     const avg = vals.slice(0, -1).filter((v) => v > 0);
     const average = avg.length ? avg.reduce((a, b) => a + b, 0) / avg.length : 0;
-    const f = frame(host, months.length, Math.min(0, ...vals), Math.max(...vals, average), 170);
-    const w = Math.min(28, f.band * 0.62);
+    const f = frame(host, months.length, Math.min(0, ...vals), Math.max(...vals, average), host.clientWidth > 600 ? 260 : 210);
+    const w = Math.min(44, f.band * 0.6);
     months.forEach((m, i) => {
       const top = f.y(Math.max(m.spending, 0)), bottom = f.y(Math.min(m.spending, 0));
       el("rect", { x: f.x(i) - w / 2, y: top, width: w, height: Math.max(bottom - top, 1), rx: Math.min(6, w / 3),
@@ -169,15 +169,48 @@
     }
   }
 
+  // The month's spending transactions, largest first, as the same editable rows as the Inbox.
+  const purchases = {};
+  async function loadPurchases(month) {
+    const top = document.getElementById("spend-top");
+    const all = document.getElementById("spend-all");
+    const allList = document.getElementById("spend-all-list");
+    if (!top) return;
+    if (!purchases[month]) {
+      try {
+        const r = await fetch(`/api/insights/spending?m=${month}`, { credentials: "same-origin" });
+        purchases[month] = r.ok ? await r.text() : "";
+      } catch { purchases[month] = ""; }
+    }
+    if (document.getElementById("spend-month").dataset.month !== month) return;  // switched again meanwhile
+    const tpl = document.createElement("template");
+    tpl.innerHTML = purchases[month];
+    const rows = [...tpl.content.querySelectorAll(".txn-item")];
+    top.replaceChildren(...rows.slice(0, 3));
+    allList.replaceChildren(...rows.slice(3));
+    document.getElementById("spend-biggest").hidden = !rows.length;
+    all.hidden = rows.length <= 3;
+    document.getElementById("spend-all-label").textContent = `See all ${rows.length}`;
+    if (restoring && restoring.allOpen) { all.open = true; }
+    if (restoring) { window.scrollTo(0, restoring.y); restoring = null; }
+  }
+
   function spending(data) {
     const months = data.months;
     if (!months.length) return;
     const shown = months.slice(-12);
     let sel = shown.length - 1;
+    if (restoring && restoring.month) {
+      const i = shown.findIndex((m) => m.m === restoring.month);
+      if (i >= 0) sel = i;
+    }
     const cats = data.categories;
     const render = () => {
       const m = shown[sel];
-      document.getElementById("spend-month").textContent = monthLabel(m.m, true);
+      const label = document.getElementById("spend-month");
+      label.textContent = monthLabel(m.m, true);
+      label.dataset.month = m.m;
+      state.month = m.m;
       document.getElementById("spend-prev").disabled = sel === 0;
       document.getElementById("spend-next").disabled = sel === shown.length - 1;
       document.getElementById("spend-total").textContent = money(m.spending);
@@ -215,26 +248,7 @@
         li.appendChild(a);
         ul.appendChild(li);
       }
-      const big = document.getElementById("spend-biggest");
-      big.innerHTML = "";
-      if (m.biggest.length) {
-        const h = document.createElement("p");
-        h.className = "section-label";
-        h.textContent = "Largest purchases";
-        big.appendChild(h);
-        const list = document.createElement("ul");
-        list.className = "list biggest";
-        for (const b of m.biggest) {
-          const li = document.createElement("li");
-          li.className = "plain-row";
-          li.innerHTML = `<span class="grow"><strong></strong><span class="muted small"></span></span><span class="amount"></span>`;
-          li.querySelector("strong").textContent = b.name;
-          li.querySelector(".muted").textContent = `${MONTHS[+b.date.slice(5, 7) - 1]} ${+b.date.slice(8)} · ${(cats[b.cat] || { name: "Other" }).name}`;
-          li.querySelector(".amount").textContent = money(-b.amount);
-          list.appendChild(li);
-        }
-        big.appendChild(list);
-      }
+      loadPurchases(m.m);
     };
     document.getElementById("spend-prev").addEventListener("click", () => { if (sel > 0) { sel--; render(); } });
     document.getElementById("spend-next").addEventListener("click", () => { if (sel < shown.length - 1) { sel++; render(); } });
@@ -263,6 +277,34 @@
     }, () => { f.tip.hidden = true; });
   }
 
+  // ---------- coming back: after following a link (a category, a transaction) or saving, return to
+  // the same place, month, and range instead of the top ----------
+
+  const KEY = "insights-return";
+  const state = { month: null, range: 0 };
+  let restoring = null;
+  let leaving = false;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+    sessionStorage.removeItem(KEY);
+    if (saved && Date.now() - saved.at < 30 * 60 * 1000) restoring = saved;
+  } catch { /* storage blocked */ }
+  document.addEventListener("click", (ev) => {
+    const a = ev.target.closest("a[href]");
+    if ((a && !a.closest(".tabbar")) || ev.target.closest(".sheet button:not(.sheet-close)")) leaving = true;
+  }, true);
+  document.addEventListener("submit", () => { leaving = true; }, true);
+  window.addEventListener("pagehide", () => {
+    if (!leaving) return;
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify({
+        at: Date.now(), y: window.scrollY, month: state.month, range: state.range,
+        allOpen: !!document.getElementById("spend-all")?.open,
+        byMonth: !!document.querySelector("#networth details")?.open,
+      }));
+    } catch { /* storage blocked */ }
+  });
+
   // ---------- page ----------
 
   function init() {
@@ -270,8 +312,14 @@
     if (!raw) return;
     const data = JSON.parse(raw.textContent);
     const nwHost = document.getElementById("nw-chart");
-    let range = 0;
+    let range = restoring ? restoring.range || 0 : 0;
+    if (restoring) {
+      document.querySelectorAll("#networth [data-range]").forEach((x) => x.classList.toggle("on", +x.dataset.range === range));
+      const d = document.querySelector("#networth details");
+      if (d && restoring.byMonth) d.open = true;
+    }
     const drawNetWorth = () => {
+      state.range = range;
       if (!nwHost) return;
       const pts = range ? data.networth.slice(-range - 1) : data.networth;
       netWorth(nwHost, pts);
@@ -289,6 +337,7 @@
     }));
     drawNetWorth();
     const redrawSpending = spending(data);
+    if (restoring && !document.getElementById("spend-top")) { window.scrollTo(0, restoring.y); restoring = null; }
     const flowHost = document.getElementById("flow-chart");
     if (flowHost) cashFlow(flowHost, data.months);
     let width = window.innerWidth;

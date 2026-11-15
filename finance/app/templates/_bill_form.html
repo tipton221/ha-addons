@@ -11,7 +11,7 @@
   </div>
   <div class="grid2">
     <label>Title<input name="title" type="text" required maxlength="80" value="{{ v.name if v else '' }}"></label>
-    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="{{ 'Average of recent ones' if v and v.varies else '0.00' }}" value="{{ '%.2f' % v.amount if v and v.amount else '' }}" {% if v and v.varies %}disabled{% endif %}></label>
+    <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="{{ 'Average of recent ones' if v and v.varies else '0.00' }}" value="{{ '{:,.2f}'.format(v.amount) if v and v.amount else '' }}" {% if v and v.varies %}disabled{% endif %}></label>
     <label>Repeats
       <select name="cadence">
         {% for c in ["monthly", "biweekly", "quarterly", "semiannual", "yearly"] %}

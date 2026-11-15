@@ -54,22 +54,29 @@
 <section class="card" id="spending">
   <div class="card-head">
     <h2>Spending</h2>
-    <div class="month-nav">
-      <button type="button" class="icon-btn small" id="spend-prev" aria-label="Previous month">‹</button>
+    <div class="month-nav" role="group" aria-label="Month">
+      <button type="button" id="spend-prev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
       <span id="spend-month"></span>
-      <button type="button" class="icon-btn small" id="spend-next" aria-label="Next month">›</button>
+      <button type="button" id="spend-next" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
     </div>
   </div>
   {% if flow %}
   <div class="stat-row">
     <div class="stat main"><span class="big-number" id="spend-total"></span><span class="stat-change" id="spend-vs"></span></div>
   </div>
-  <div class="chart short" id="spend-chart" role="img" aria-label="Spending by month"></div>
+  <div class="chart" id="spend-chart" role="img" aria-label="Spending by month"></div>
   <div class="breakdown">
     <div class="donut" id="spend-donut" aria-hidden="true"></div>
     <ul class="cat-bars" id="spend-cats"></ul>
   </div>
-  <div id="spend-biggest"></div>
+  <div id="spend-biggest">
+    <p class="section-label">Largest purchases</p>
+    <ul class="list dated-rows" id="spend-top"></ul>
+    <details class="see-all" id="spend-all">
+      <summary><span class="chev-down" aria-hidden="true">›</span> <span id="spend-all-label">See all</span></summary>
+      <ul class="list dated-rows" id="spend-all-list"></ul>
+    </details>
+  </div>
   <p class="muted small">Transfers between your accounts, card payments, saving, and loan payments are not spending. Set what a category counts as in Accounts › Categories.</p>
   {% else %}
   <p class="muted">No transactions yet.</p>
@@ -98,22 +105,23 @@
   <div class="card-head"><h2>Accounts in net worth</h2></div>
   <ul class="list">
     {% for a in nw.accounts %}
-    <li class="{{ 'edit-row' if a.editable else 'plain-row' }}" {% if a.editable %}role="button" tabindex="0" data-editor="bal-{{ loop.index }}"{% endif %}>
+    <li class="edit-row" role="button" tabindex="0" data-editor="bal-{{ loop.index }}">
       <div class="grow">
         <strong>{{ a.name }}</strong>
-        <span class="muted small">{% if a.manual %}{{ a.kind }} · entered by hand{% elif a.source == "manual" %}YNAB, updated by hand{% elif a.source == "ynab" %}From YNAB{% elif a.source == "estimate" %}Worked out from transactions{% else %}Plaid{% endif %}{% set hist = balances.get(a.id) %}{% if hist %} · updated {{ hist[0].day | shortdate }}{% endif %}</span>
+        {% set hist = balances.get(a.id) %}
+        <span class="muted small">{% if a.manual %}{{ a.kind }} · entered by hand{% if hist %} {{ hist[0].day | shortdate }}{% endif %}{% elif a.source == "manual" %}From YNAB · entered by hand {{ hist[0].day | shortdate }}{% elif a.source == "ynab" %}From YNAB{% elif a.source == "estimate" %}Worked out from transactions{% else %}Plaid{% endif %}</span>
       </div>
       <span class="amount {{ 'inflow' if not a.debt else '' }}">{{ a.value | money }}</span>
-      {% if a.editable %}<span class="chev" aria-hidden="true">›</span>
+      <span class="chev" aria-hidden="true">›</span>
       <template id="bal-{{ loop.index }}">
         <h3 class="sheet-title">{{ a.name }}</h3>
+        {% if a.editable %}
         <form class="balance-form editor-form" data-account="{{ a.id }}" autocomplete="off">
           <div class="grid2">
-            <label>{{ "Amount owed" if a.debt else "Balance" }}<input name="balance" type="text" inputmode="decimal" required placeholder="0.00"></label>
+            <label>{{ "Amount owed" if a.debt else "Balance" }}<input name="balance" type="text" inputmode="numeric" class="money" required placeholder="0.00"></label>
             <label>As of<input name="day" type="date" value="{{ today }}" max="{{ today }}"></label>
           </div>
           <p class="hint">{% if a.manual %}Enter the balance whenever you check it. Net worth uses the latest one up to each month.{% else %}This account comes from YNAB with no Plaid connection. A balance entered here is used from its date on, in place of YNAB's.{% endif %}</p>
-          {% set hist = balances.get(a.id) %}
           {% if hist %}
           <p class="section-label">Entered</p>
           <ul class="list balance-list">
@@ -131,18 +139,36 @@
             </div>
           </details>
           {% endif %}
+          <button type="button" class="wide-btn net-worth-toggle" data-account="{{ a.id }}">Leave out of net worth</button>
           <div class="sheet-actions">
             <button type="button" class="sheet-close">Cancel</button>
             <button type="submit" class="primary">Save balance</button>
           </div>
         </form>
+        {% else %}
+        <p class="hint">{% if a.source == "estimate" %}Plaid hasn't saved a balance for this account yet, so today's value is worked out from its transactions.{% else %}Plaid updates this balance on every sync.{% endif %} Leave it out if it shouldn't count in net worth, for example an account you closed or don't own.</p>
+        <button type="button" class="wide-btn net-worth-toggle" data-account="{{ a.id }}">Leave out of net worth</button>
+        <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
+        {% endif %}
       </template>
-      {% endif %}
     </li>
     {% else %}
     <li class="muted">No accounts yet.</li>
     {% endfor %}
   </ul>
+  {% if nw.excluded %}
+  <details class="scheduled excluded">
+    <summary><span class="chev-down" aria-hidden="true">›</span> Left out <span class="count zero">{{ nw.excluded | length }}</span></summary>
+    <ul class="list">
+      {% for a in nw.excluded %}
+      <li class="plain-row">
+        <div class="grow"><strong>{{ a.name }}</strong><span class="muted small">Not counted in net worth or its history</span></div>
+        <button type="button" class="ghost small net-worth-toggle" data-account="{{ a.id }}" data-include="1">Include</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
   <button class="add-btn" data-editor="manual-new">＋ Add an account by hand</button>
   <p class="muted small">For accounts Plaid can't connect, like a 403(b), a car, or a loan. Plaid accounts update on their own.
     {% if nw.accounts | selectattr("source", "equalto", "ynab") | list %}An account listed "From YNAB" that you also connected through Plaid counts twice: link the two on <a href="/compare">Compare with Plaid</a>, and its history comes from YNAB up to the Plaid connection.{% endif %}</p>
@@ -156,7 +182,7 @@
         </select>
       </label>
       <div class="grid2">
-        <label>Balance or amount owed<input name="balance" type="text" inputmode="decimal" required placeholder="0.00"></label>
+        <label>Balance or amount owed<input name="balance" type="text" inputmode="numeric" class="money" required placeholder="0.00"></label>
         <label>As of<input name="day" type="date" value="{{ today }}" max="{{ today }}"></label>
       </div>
       <div class="sheet-actions">

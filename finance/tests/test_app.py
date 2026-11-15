@@ -1266,3 +1266,36 @@ def test_manual_accounts_and_balances_api(tmp_path, monkeypatch):
         assert c.post("/api/manual-accounts/delete", json={"id": aid}, headers=H).status_code == 200
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM manual_balances").fetchone()[0] == 0
+
+
+def test_month_spending_list_and_net_worth_toggle(tmp_path, monkeypatch):
+    from datetime import date
+    from app.insights import net_worth
+    rows = [("a", "card", "2026-10-03", "BOOK BARN", "Book Barn", 40.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("b", "card", "2026-10-04", "TOY TOWN", "Toy Town", 90.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("c", "card", "2026-10-05", "CARD PAYMENT", None, -130.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 1),
+            ("d", "card", "2026-09-05", "TOY TOWN", "Toy Town", 15.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 100.0, None),
+                                                       ("chk", "Checking", "depository", 900.0, 900.0)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        html = c.get("/api/insights/spending?m=2026-10").text
+        assert html.index("Toy Town") < html.index("Book Barn") and "CARD PAYMENT" not in html
+        assert "Oct 4" in html  # rows show their date
+        assert c.get("/api/insights/spending?m=bad").status_code == 400
+        assert net_worth(db, date(2026, 11, 15))["now"]["net"] == 800.0
+        assert c.post("/api/accounts/card/net-worth", json={"include": False}, headers=H).status_code == 200
+        nw = net_worth(db, date(2026, 11, 15))
+        assert nw["now"]["net"] == 900.0 and [a["name"] for a in nw["excluded"]] == ["Card A"]
+        assert "Left out" in c.get("/insights").text
+        assert c.post("/api/accounts/nope/net-worth", json={"include": True}, headers=H).status_code == 404
+
+
+def test_amounts_accept_thousands_commas(tmp_path, monkeypatch):
+    db, app = client_with(tmp_path, monkeypatch, [], [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/bills", json={"name": "Big Insurance", "amount": "1,234.50", "cadence": "yearly"}, headers=H)
+        assert r.status_code == 200
+    with db.connect() as conn:
+        assert conn.execute("SELECT amount FROM bills").fetchone()[0] == 1234.5

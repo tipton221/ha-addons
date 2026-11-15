@@ -166,6 +166,7 @@ def account_series(db: Database, today: date) -> list[dict]:
             continue
         out.append({"id": aid, "name": label, "source": a["source"], "type": a.get("type"),
                     "subtype": a.get("subtype"), "debt": debt, "value": value,
+                    "included": a.get("in_net_worth") != 0,
                     "closed": a.get("subtype") == "closed" or a.get("visibility") == "archived"})
     return out
 
@@ -178,7 +179,7 @@ def net_worth(db: Database, today: date) -> dict:
         first_manual = conn.execute("SELECT MIN(day) FROM manual_balances").fetchone()[0]
     starts = [d for d in (first, first_manual) if d]
     if not starts or not series:
-        return {"points": [], "accounts": [], "now": None}
+        return {"points": [], "accounts": [], "excluded": [], "now": None}
     start = date.fromisoformat(min(starts))
     points = []
     for m in months_between(start, today):
@@ -186,6 +187,8 @@ def net_worth(db: Database, today: date) -> dict:
         day = min(month_end(y, mo), today).isoformat()
         assets = debts = 0.0
         for s in series:
+            if not s["included"]:
+                continue
             v, _ = s["value"](day)
             if v is None:
                 continue
@@ -196,9 +199,12 @@ def net_worth(db: Database, today: date) -> dict:
         points.append({"m": m, "day": day, "assets": round(assets, 2), "debts": round(debts, 2),
                        "net": round(assets + debts, 2)})
     today_s = today.isoformat()
-    accounts = []
+    accounts, excluded = [], []
     for s in series:
         v, src = s["value"](today_s)
+        if not s["included"]:
+            excluded.append({"id": s["id"], "name": s["name"], "value": v, "debt": s["debt"]})
+            continue
         if v is None or (s["closed"] and abs(v) < 0.005):
             continue
         accounts.append({"id": s["id"], "name": s["name"], "value": v, "source": src, "debt": s["debt"],
@@ -206,7 +212,8 @@ def net_worth(db: Database, today: date) -> dict:
                          "subtype": s["subtype"],
                          "kind": MANUAL_KINDS.get(s["subtype"] or "") if s["source"] == "manual" else None})
     accounts.sort(key=lambda x: (x["debt"], -abs(x["value"])))
-    return {"points": points, "accounts": accounts, "now": points[-1] if points else None}
+    excluded.sort(key=lambda x: x["name"].lower())
+    return {"points": points, "accounts": accounts, "excluded": excluded, "now": points[-1] if points else None}
 
 
 # ---------------------------------------------------------------- spending and cash flow
@@ -237,21 +244,30 @@ def classify(t: dict, kinds: dict[int, str], acct_types: dict[str, str]) -> tupl
     return "spending", amount
 
 
-def monthly(db: Database, rows: list[dict], today: date) -> dict:
-    """Per month: income, spending (with categories), saving, debt payments, and what was kept."""
+def classified(db: Database, rows: list[dict]):
+    """Each counted transaction with its (bucket, amount)."""
     kinds = category_kinds(db)
     with db.connect() as conn:
         acct_types = {r["account_id"]: r["type"] for r in conn.execute("SELECT account_id, type FROM accounts")}
         peers = {r["id"]: r["account_id"] for r in conn.execute(
             "SELECT id, account_id FROM transactions WHERE source='plaid' AND id IN "
             "(SELECT transfer_peer FROM transactions WHERE transfer_peer IS NOT NULL)")}
-    months: dict[str, dict] = {}
     for t in rows:
         t["transfer_peer_account"] = peers.get(t.get("transfer_peer") or "")
         c = classify(t, kinds, acct_types)
-        if not c:
-            continue
-        bucket, amount = c
+        if c:
+            yield t, c[0], c[1]
+
+
+def spending_rows(db: Database, rows: list[dict]) -> list[dict]:
+    """The transactions counted as spending, largest first (refunds last)."""
+    return sorted((t for t, bucket, _ in classified(db, rows) if bucket == "spending"), key=lambda t: -t["amount"])
+
+
+def monthly(db: Database, rows: list[dict], today: date) -> dict:
+    """Per month: income, spending (with categories), saving, debt payments, and what was kept."""
+    months: dict[str, dict] = {}
+    for t, bucket, amount in classified(db, rows):
         m = months.setdefault(t["date"][:7], {"income": 0.0, "spending": 0.0, "saving": 0.0, "debt": 0.0,
                                               "cats": defaultdict(float), "count": 0, "biggest": []})
         m[bucket] += amount

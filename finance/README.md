@@ -43,7 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.0:
+Version 1.11.1:
+
+- Insights remembers where you were (scroll, month, range, open lists) when you follow a link or save and then come back; a plain tab visit starts at the top. Spending shows the three largest purchases with "See all" for every spending transaction in the month, largest first, as editable rows. Larger spending chart, a compact month stepper, and any account can be left out of net worth (with its history) or included again.
+- Money fields add thousands commas as you type (1,234.50), and the app accepts amounts with commas.
 
 - Insights tab: net worth by month back to the start of your YNAB history (Plaid balances from each account's connection on, the linked YNAB accounts before that, YNAB-only accounts, and accounts you add by hand), with an interactive chart, 1Y/3Y/5Y/All ranges, assets and debts, and a month-by-month table. Spending by month with a category donut and list (each links to Search), compared with your average, and the largest purchases. Cash flow by month: income, spending, debt payments, saving, and how much you kept. A few plain observations (spending pace, categories above their usual, share of income kept).
 - Categories have a "Counts as" setting (Spending, Income, Saving or investing, Debt payment, Transfer) that Insights uses. Income, Loans, and Transfers and payments start as Income, Debt payment, and Transfer.

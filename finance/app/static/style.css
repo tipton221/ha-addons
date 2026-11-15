@@ -688,9 +688,19 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 .chart-tip small.up { color: var(--green); }
 .chart-tip small.down { color: var(--red); }
 
-.month-nav { display: flex; align-items: center; gap: 4px; font-weight: 600; font-size: 0.92rem; }
-.month-nav span { min-width: 74px; text-align: center; }
-.icon-btn.small { width: 34px; min-height: 34px; font-size: 1.2rem; line-height: 1; }
+/* Month picker: one small capsule with chevrons, like a date stepper. */
+.month-nav {
+  display: inline-flex; align-items: center; height: 32px; padding: 0 2px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--glass-border); font-weight: 600; font-size: 0.88rem;
+}
+.month-nav span { min-width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
+.month-nav button {
+  width: 28px; min-height: 28px; height: 28px; padding: 0; border: 0; background: transparent; box-shadow: none;
+  color: var(--blue); border-radius: var(--r-pill); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.month-nav button svg { width: 15px; height: 15px; }
+.month-nav button:hover { background: rgba(255, 255, 255, 0.08); }
+.month-nav button:disabled { color: var(--text-3); background: transparent; }
 
 .breakdown { display: flex; gap: 22px; align-items: center; margin: 8px 0 6px; }
 .donut { flex: none; }
@@ -731,3 +741,11 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 .manage { margin-top: 14px; }
 .manage > summary { color: var(--blue); cursor: pointer; font-weight: 600; font-size: 0.92rem; }
 .manage-body { padding-top: 8px; }
+
+#spend-biggest { margin-top: 10px; }
+.see-all > summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; color: var(--blue); font-weight: 600; cursor: pointer; list-style: none; }
+.see-all > summary::-webkit-details-marker { display: none; }
+.see-all .chev-down { display: inline-block; font-size: 1.3rem; line-height: 1; transition: transform .25s var(--ease); }
+.see-all[open] .chev-down { transform: rotate(90deg); }
+.see-all[open] .list { animation: drop .3s var(--ease); }
+.excluded { margin-top: 10px; border-bottom: 0; border-top: 1px solid var(--hairline); }

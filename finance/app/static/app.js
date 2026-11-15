@@ -285,7 +285,7 @@ async function swapSections(ids) {
 async function refreshRows() {
   const items = [...document.querySelectorAll(".txn-item")];
   if (!items.length) return;
-  const rows = items.map((li) => ({ id: li.dataset.id, review: !!li.closest("#inbox") }));
+  const rows = items.map((li) => ({ id: li.dataset.id, review: !!li.closest("#inbox"), dated: !!li.closest(".dated-rows") }));
   const r = await api("/api/rows", { rows });
   for (const li of items) {
     const html = r.rows[li.dataset.id];
@@ -309,7 +309,7 @@ function refreshColors() {
 // After an edit: pages with transaction lists update in place; other pages reload.
 async function refreshInPlace() {
   const page = document.body.dataset.page;
-  if (page !== "home" && page !== "search") { setTimeout(() => reloadHere(), 600); return; }
+  if (page !== "home" && page !== "search" && page !== "insights") { setTimeout(() => reloadHere(), 600); return; }
   try {
     refreshColors();
     await refreshRows();
@@ -438,11 +438,14 @@ const editor = {
   },
 };
 
-// ---------- money fields: digits fill in from the cents, like a register (1500 -> 15.00) ----------
+// ---------- money fields: digits fill in from the cents, like a register (150000 -> 1,500.00) ----------
+
+const moneyText = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const moneyValue = (s) => parseFloat(String(s || "").replace(/[,$]/g, ""));
 
 function formatMoneyInput(input) {
-  const digits = input.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 10);
-  input.value = digits ? (Number(digits) / 100).toFixed(2) : "";
+  const digits = input.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 11);
+  input.value = digits ? moneyText(Number(digits) / 100) : "";
 }
 
 document.addEventListener("input", (ev) => {
@@ -485,7 +488,7 @@ const sheet = {
       const form = document.getElementById("sheet-form");
       form.merchant.value = t.display_name;
       form.note.value = t.note;
-      form.tip.value = t.tip ? t.tip.toFixed(2) : "";
+      form.tip.value = t.tip ? moneyText(t.tip) : "";
       this.tipStart = form.tip.value;
       this.syncTip("amount");
       const tipHint = document.getElementById("sheet-tip-hint");
@@ -600,11 +603,11 @@ const sheet = {
     const total = Math.abs(t.amount);
     const round1 = (x) => String(Math.round(x * 10) / 10);
     if (from === "amount") {
-      const tip = parseFloat(form.tip.value);
+      const tip = moneyValue(form.tip.value);
       form.tip_pct.value = tip > 0 && tip < total ? round1(100 * tip / (total - tip)) : "";
     } else {
       const pct = parseFloat(form.tip_pct.value);
-      form.tip.value = pct > 0 ? (total * pct / (100 + pct)).toFixed(2) : "";
+      form.tip.value = pct > 0 ? moneyText(total * pct / (100 + pct)) : "";
     }
   },
 
@@ -810,6 +813,18 @@ document.addEventListener("click", async (ev) => {
     closeAllSheets();
     toast(restore ? "Restored" : "Archived");
     await refreshInPlace();
+  } catch (e) { toast(e.message, true); }
+});
+
+// Insights: leave an account out of net worth, or include it again.
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".net-worth-toggle");
+  if (!btn) return;
+  try {
+    await api(`/api/accounts/${encodeURIComponent(btn.dataset.account)}/net-worth`, { include: !!btn.dataset.include });
+    closeAllSheets();
+    toast(btn.dataset.include ? "Included" : "Left out");
+    setTimeout(() => reloadHere(), 500);
   } catch (e) { toast(e.message, true); }
 });
 
