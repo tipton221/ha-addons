@@ -124,6 +124,13 @@ CREATE TABLE IF NOT EXISTS merchant_rules (
 
 -- Balances entered by hand: for accounts added in the app (source 'manual') and for YNAB
 -- accounts with no Plaid connection. Debts are stored as the positive amount owed.
+-- Money in transit: the account chosen for the other side of a transfer ('' = not a transfer
+-- between my accounts). Without a row, the account is worked out from past transfers.
+CREATE TABLE IF NOT EXISTS transit_choices (
+    txn_id          TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS manual_balances (
     account_id      TEXT NOT NULL,
     day             TEXT NOT NULL,          -- YYYY-MM-DD, Pacific

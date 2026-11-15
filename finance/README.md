@@ -43,8 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.5:
+Version 1.12.0:
 
+- Money in transit: when a card payment or transfer shows on one account but not yet the other (in either order), balances count it as if both sides had posted, for up to 7 days. The other account is worked out from where past transfers like it went, and can be changed or dismissed on the Bills page. Coverage, the Inbox summary, and today's net worth all use the adjusted balances. After 7 days with no match it is listed but no longer counted.
+- Transfers pair when the two sides post up to 7 days apart (was 5).
 - Find new bills shows what it found and asks first: tick the ones to add, or mark one "Not a bill" so it isn't suggested again.
 - Search also matches a transaction's bill name.
 - Cash flow and net worth table headings sit exactly over their columns (the smaller heading text was narrowing the first column).

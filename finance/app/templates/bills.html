@@ -11,12 +11,51 @@
 <section class="card">
   <h2>Coverage through {{ cov.payday.isoformat() | shortdate }}</h2>
   <dl class="sums">
-    <div><dt>Cash</dt><dd>{{ cov.cash | money }}</dd></div>
-    <div><dt>Card balances</dt><dd>-{{ cov.cards | money }}</dd></div>
+    <div><dt>Cash{% if cov.transit_cash %} <span class="muted small">incl. {{ cov.transit_cash | money }} in transit</span>{% endif %}</dt><dd>{{ cov.cash | money }}</dd></div>
+    <div><dt>Card balances{% if cov.transit_cards %} <span class="muted small">incl. {{ cov.transit_cards | money }} in transit</span>{% endif %}</dt><dd>-{{ cov.cards | money }}</dd></div>
     <div><dt>Pending card charges</dt><dd>-{{ cov.pending | money }}</dd></div>
     <div><dt>Bills due before payday</dt><dd>-{{ cov.due_total | money }}</dd></div>
     <div class="total {{ 'ok' if cov.ok else 'short' }}"><dt>Left</dt><dd>{{ cov.left | money }}</dd></div>
   </dl>
+  {% if cov.transit %}
+  <div class="due-head">
+    <h3>In transit</h3>
+    <span class="muted small">One account shows it, the other doesn't yet</span>
+  </div>
+  <ul class="list transit-list">
+    {% for t in cov.transit %}
+    <li class="edit-row" role="button" tabindex="0" data-editor="transit-{{ loop.index }}">
+      <div class="grow">
+        <strong>{% if t.out %}{{ t.account_name }} to {{ t.other_name }}{% else %}{{ t.other_name }} to {{ t.account_name }}{% endif %}</strong>
+        <span class="muted small {% if t.late %}warn-text{% endif %}">{{ t.date | shortdate }} ·
+          {% if t.late %}No match in {{ t.other_name }} after 7 days, so it isn't counted
+          {% elif t.other_pending %}Pending in {{ t.other_name }}
+          {% else %}Waiting on {{ t.other_name }}{% endif %}</span>
+      </div>
+      <span class="amount">{{ t.amount | money }}</span>
+      <span class="chev" aria-hidden="true">›</span>
+      <template id="transit-{{ loop.index }}">
+        <h3 class="sheet-title">{{ t.amount | money }} {{ "to" if t.out else "from" }} {{ t.other_name }}</h3>
+        <form class="transit-form editor-form" data-id="{{ t.id }}" autocomplete="off">
+          <p class="hint">{{ t.account_name }} shows this payment or transfer on {{ t.date | shortdate }}{% if t.pending %} (pending){% endif %}.
+            Until the matching {{ "charge" if t.out else "deposit" }} shows up in the other account, balances count it as if it had, for up to 7 days.
+            {% if not t.chosen %}The other account is worked out from where past transfers like this one went.{% endif %}</p>
+          <label>Other account
+            <select name="account">
+              {% for o in transit_accounts if o.id != t.account %}<option value="{{ o.id }}" {% if o.id == t.other %}selected{% endif %}>{{ o.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <button type="button" class="wide-btn transit-ignore" data-id="{{ t.id }}">Not a transfer between my accounts</button>
+          <div class="sheet-actions">
+            <button type="button" class="sheet-close">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+      </template>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   {% if cov.due %}
   <div class="due-head">
     <h3>Due before payday</h3>

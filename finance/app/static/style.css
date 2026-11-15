@@ -816,3 +816,8 @@ a.tile:active { transform: scale(0.98); }
 .candidate .grow { display: flex; flex-direction: column; min-width: 0; }
 .candidate .grow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .candidate .not-bill { flex: none; }
+
+/* Money in transit */
+.transit-list .grow { display: flex; flex-direction: column; min-width: 0; }
+.due-head h3 { white-space: nowrap; }
+.hero .transit-note { display: block; margin-top: 8px; font-size: 0.8rem; color: var(--text-2); }

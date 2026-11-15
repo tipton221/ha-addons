@@ -247,7 +247,7 @@ def set_merchant_rule(db: Database, key: str, *, display_name: str | None = ...,
 
 TRANSFER_PRIMARY = {"TRANSFER_IN", "TRANSFER_OUT"}
 TRANSFER_CATEGORY = "Transfers and payments"
-TRANSFER_WINDOW_DAYS = 5
+TRANSFER_WINDOW_DAYS = 7  # same as the in-transit wait (transit.WAIT_DAYS)
 
 
 def _transfer_like(t) -> bool:

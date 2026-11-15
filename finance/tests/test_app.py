@@ -1366,3 +1366,62 @@ def test_find_bills_asks_before_adding_and_search_finds_bill_names(tmp_path, mon
             conn.execute("UPDATE bills SET name='Creative Suite Plan', match='photo app', amount=22.99, due_day=4 WHERE match='phone co'")
         page = c.get("/search?q=suite").text
         assert "Photo App" in page and "Phone Co" not in page
+
+
+def test_payment_in_transit_both_directions(tmp_path):
+    from app.bills import coverage
+    from app.insights import net_worth
+    from app.ledger import pair_transfers
+    from app.transit import in_transit
+    today = D(2026, 11, 15)
+    PAY = ("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")
+    rows = []
+    for m in (8, 9, 10):  # past payments from savings to the card, both sides posted
+        rows += [(f"o{m}", "sav", f"2026-{m:02d}-10", "CARD CO PAYMENT", None, 400.0, 0, *PAY, 1),
+                 (f"i{m}", "card", f"2026-{m:02d}-11", "PAYMENT RECEIVED", None, -400.0, 0, *PAY, 1)]
+    db = Database(tmp_path / "f.db")
+    seed(db, rows, accounts=[("sav", "Savings Co", "depository", 5000.0, 5000.0),
+                             ("card", "Card A", "credit", 1000.0, None)])
+    with db.connect() as conn:
+        assert pair_transfers(conn) == 3
+    sched = {"kind": "semimonthly", "days": [1, 15]}
+
+    def add(*r):
+        seed(db, [r])
+
+    def state():
+        t, cov = in_transit(db, today), coverage(db, sched, today)
+        acc = {a["id"]: a["value"] for a in net_worth(db, today)["accounts"]}
+        return t, cov, acc
+
+    # The card shows the payment first: savings still has the money, so it is taken off there.
+    add("p1", "card", "2026-11-14", "PAYMENT RECEIVED", None, -3000.0, 0, *PAY, 0)
+    t, cov, acc = state()
+    assert [(i["other"], i["waiting"]) for i in t["items"]] == [("sav", True)]
+    assert cov["cash"] == 2000.0 and cov["transit_cash"] == -3000.0
+    assert acc["sav"] == 2000.0
+    # Savings shows it pending: available balance already counts it, current balance doesn't yet.
+    add("p1s", "sav", "2026-11-15", "CARD CO PAYMENT", None, 3000.0, 1, None, None, 0)
+    t, cov, acc = state()
+    assert cov["transit_cash"] == 0 and acc["sav"] == 2000.0 and t["items"][0]["other_pending"]
+    # It posts: the two sides pair and nothing is in transit.
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET pending=0 WHERE id='p1s'")
+        pair_transfers(conn)
+    t, cov, acc = state()
+    assert t["items"] == [] and t["nw"] == {}
+
+    # The other way: savings sends a payment the card hasn't shown yet, so the card owes less.
+    add("p2", "sav", "2026-11-13", "CARD CO PAYMENT", None, 700.0, 0, *PAY, 0)
+    t, cov, acc = state()
+    assert cov["cards"] == 300.0 and cov["transit_cards"] == -700.0
+    assert acc["card"] == -300.0
+
+    # After 7 days with no match it is listed for review but no longer counted.
+    add("p3", "card", "2026-11-03", "PAYMENT RECEIVED", None, -50.0, 0, *PAY, 0)
+    late = [i for i in in_transit(db, today)["items"] if i["id"] == "p3"]
+    assert late and late[0]["late"] and in_transit(db, today)["cards"] == -700.0
+    # "Not a transfer between my accounts" drops it.
+    with db.connect() as conn:
+        conn.execute("INSERT INTO transit_choices VALUES ('p2', '')")
+    assert in_transit(db, today)["items"][0]["id"] != "p2" and in_transit(db, today)["cards"] == 0

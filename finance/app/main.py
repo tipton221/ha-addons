@@ -26,6 +26,7 @@ from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
+from .transit import transit_options
 from .bills import CADENCES, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
@@ -707,7 +708,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         income = [b for b in everything if b["kind"] == "income"]
         return templates.TemplateResponse(request, "bills.html", {
             "bills": bills, "income": income, "archived": archived, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
-            "cov": coverage(db, schedule(), today),
+            "cov": coverage(db, schedule(), today), "transit_accounts": transit_options(db),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })
@@ -793,6 +794,22 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 conn.execute("INSERT OR IGNORE INTO bills_dismissed VALUES (?)", (row["match"],))
             conn.execute("DELETE FROM bills WHERE id=?", (bill_id,))
             conn.execute("UPDATE transactions SET bill_id=NULL WHERE bill_id=?", (bill_id,))
+        return {"ok": True}
+
+    @app.post("/api/transit")
+    async def save_transit(request: Request):
+        """The other account of a payment in transit, or "" when it isn't a transfer between my accounts."""
+        body = await request.json()
+        txn = str(body.get("id") or "")
+        account = body.get("account")
+        with db.connect() as conn:
+            if not conn.execute("SELECT 1 FROM transactions WHERE source='plaid' AND id=?", (txn,)).fetchone():
+                raise HTTPException(404, "Transaction not found")
+            if account and not conn.execute("SELECT 1 FROM accounts WHERE source='plaid' AND account_id=?",
+                                            (account,)).fetchone():
+                raise HTTPException(400, "Pick an account")
+            conn.execute("INSERT INTO transit_choices VALUES (?, ?) ON CONFLICT(txn_id) DO UPDATE SET "
+                         "account_id=excluded.account_id", (txn, account or ""))
         return {"ok": True}
 
     @app.post("/api/bills/detect")

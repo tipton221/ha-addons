@@ -1155,6 +1155,26 @@ document.addEventListener("submit", async (ev) => {
   } catch (e) { toast(e.message, true); }
 });
 
+// Money in transit: choose the other account, or say it isn't a transfer between my accounts.
+async function saveTransit(id, account) {
+  try {
+    await api("/api/transit", { id, account });
+    closeAllSheets();
+    toast("Saved");
+    setTimeout(() => reloadHere(), 600);
+  } catch (e) { toast(e.message, true); }
+}
+document.addEventListener("submit", (ev) => {
+  const form = ev.target.closest(".transit-form");
+  if (!form) return;
+  ev.preventDefault();
+  saveTransit(form.dataset.id, form.elements.account.value);
+});
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".transit-ignore");
+  if (btn) saveTransit(btn.dataset.id, "");
+});
+
 // Tab bar: the highlight slides to the tapped tab right away, while the next page loads,
 // instead of waiting for that page to arrive.
 document.addEventListener("pointerdown", (ev) => {
