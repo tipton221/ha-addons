@@ -635,7 +635,7 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 /* ---------- insights ---------- */
 
 /* Highlight tiles at the top of Insights */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 0 0 16px; }
 .tile {
   position: relative; display: flex; flex-direction: column; gap: 3px; padding: 16px 16px 15px; min-width: 0;
   border-radius: var(--r-lg); background: rgba(17, 18, 25, 0.96); border: 1px solid var(--glass-border);
@@ -651,19 +651,19 @@ label.cat-chip:has(input:checked) { color: color-mix(in srgb, var(--c) 55%, #fff
 a.tile { transition: transform .15s var(--ease), border-color .2s; }
 a.tile:hover { border-color: color-mix(in srgb, var(--tone) 45%, transparent); }
 a.tile:active { transform: scale(0.98); }
-.tile-icon {
-  position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
-  color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent);
+.tile-badge {
+  align-self: flex-start; order: -1; margin-bottom: 8px; padding: 3px 9px; border-radius: var(--r-pill);
+  font-size: 0.72rem; font-weight: 700; color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
 }
-.tile-icon svg { width: 15px; height: 15px; }
+.tile.tone-neutral .tile-badge { color: var(--text-2); }
 .tile-label { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 0.8rem; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.04em; padding-right: 36px; }
+  text-transform: uppercase; letter-spacing: 0.04em; }
 .tile-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--gray)); flex: none; }
 .tile-value { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
   font-stretch: 88%; font-variation-settings: "wdth" 88; line-height: 1.15; margin-top: 4px; }
 .tile-detail { color: var(--text-2); font-size: 0.86rem; line-height: 1.35; }
-@media (max-width: 640px) { .tiles { grid-template-columns: 1fr 1fr; gap: 10px; } .tile-value { font-size: 1.35rem; } }
-@media (max-width: 380px) { .tiles { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; gap: 10px; } }
 
 .range-chips { display: flex; gap: 6px; }
 .range-chips .filter { min-height: 30px; padding: 4px 11px; font-size: 0.8rem; }
@@ -726,9 +726,16 @@ a.tile:active { transform: scale(0.98); }
 .month-nav button:hover { background: rgba(255, 255, 255, 0.08); }
 .month-nav button:disabled { color: var(--text-3); background: transparent; }
 
-.breakdown { display: flex; gap: 22px; align-items: center; margin: 8px 0 6px; }
-.donut { flex: none; }
-.donut svg { display: block; }
+.breakdown { display: flex; gap: 28px; align-items: center; margin: 14px 0 6px; }
+.donut { flex: none; width: 280px; display: flex; justify-content: center; }
+.donut svg { display: block; overflow: visible; }
+.donut .slice { cursor: pointer; transition: opacity .2s var(--ease), stroke-width .2s var(--ease); outline: none; }
+.donut .slice.dim { opacity: 0.28; }
+.donut .slice.on { filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.18)); }
+.donut-center text { pointer-events: none; }
+.dc-label { fill: var(--text-2); font-size: 13px; font-weight: 600; }
+.dc-value { fill: var(--text); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dc-pct { fill: var(--text-3); font-size: 12px; }
 .donut-empty { fill: none; stroke: var(--hairline); }
 .cat-bars { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; display: grid; gap: 4px; }
 .cat-bars a {
@@ -742,8 +749,8 @@ a.tile:active { transform: scale(0.98); }
 .cb-fill { display: block; height: 100%; border-radius: 3px; }
 .cb-pct { grid-area: pct; color: var(--text-2); font-size: 0.78rem; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 560px) {
-  .breakdown { flex-direction: column; align-items: stretch; gap: 10px; }
-  .donut { align-self: center; }
+  .breakdown { flex-direction: column; align-items: stretch; gap: 14px; }
+  .donut { align-self: center; width: min(280px, 100%); }
 }
 
 .month-table li, .flow-table li {

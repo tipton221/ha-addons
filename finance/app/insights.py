@@ -299,26 +299,27 @@ def monthly(db: Database, rows: list[dict], today: date) -> dict:
 
 
 def observations(flow: list[dict], cats: dict[int, dict], today: date) -> list[dict]:
-    """A few tiles at the top of Insights: this month's spending pace, categories well above their
-    usual last month, and how much of the last three months' income was kept.
+    """Tiles at the top of Insights: this month's spending so far and where it's heading, categories
+    well above their usual last month, and how much of the last three months' income was left over.
 
-    Each tile: tone (good, bad, or neutral), label, value, detail, and optionally a category id
-    (for its color) and a Search link."""
+    Each tile: tone (good, bad, or neutral), badge (what the color means, in words), label, value,
+    detail, and optionally a category id (for its color dot) and a Search link."""
     tiles = []
     if len(flow) < 2:
         return tiles
     current, done = flow[-1], flow[:-1]
     full = [m for m in done[-6:] if m["spending"] > 0]
+    this_month = calendar.month_name[today.month]
     if full and today.day >= 5:
         avg = sum(m["spending"] for m in full) / len(full)
         days = calendar.monthrange(today.year, today.month)[1]
-        pace = current["spending"] / today.day * days
-        diff = pace - avg
+        projected = current["spending"] / today.day * days
+        diff = projected - avg
         tone = "bad" if diff > 0.1 * avg else "good" if diff < -0.1 * avg else "neutral"
-        tiles.append({"tone": tone, "label": "This month's pace", "value": fmt(pace),
-                      "detail": (f"{fmt(abs(diff))} {'above' if diff > 0 else 'below'} your {len(full)}-month "
-                                 f"average of {fmt(avg)}" if tone != "neutral"
-                                 else f"Close to your {len(full)}-month average of {fmt(avg)}")})
+        tiles.append({"tone": tone, "badge": {"bad": "Above usual", "good": "Below usual", "neutral": "Near usual"}[tone],
+                      "label": f"{this_month} spending so far", "value": fmt(current["spending"]),
+                      "detail": f"At this rate, about {fmt(projected)} by {calendar.month_abbr[today.month]} {days}. "
+                                f"Your {len(full)}-month average is {fmt(avg)}."})
     last, before = done[-1], done[-7:-1]
     if before:
         y, mo = int(last["m"][:4]), int(last["m"][5:])
@@ -328,27 +329,28 @@ def observations(flow: list[dict], cats: dict[int, dict], today: date) -> list[d
             usual = sum(m["cats"].get(cid, 0) for m in before) / len(before)
             if spent >= 50 and spent > 1.4 * usual + 25:
                 spikes.append((spent - usual, cid, spent, usual))
-        for _, cid, spent, usual in sorted(spikes, reverse=True)[:3]:
+        for diff, cid, spent, usual in sorted(spikes, reverse=True)[:3]:
             cat = cats.get(int(cid)) if cid != "None" else None
             href = f"/search?start={last['m']}-01&end={last['m']}-{end:02d}" + (f"&category={cid}" if cat else "")
-            tiles.append({"tone": "bad", "label": f"{(cat or {}).get('name', 'Other')} in {calendar.month_abbr[mo]}",
-                          "value": fmt(spent), "detail": f"{fmt(spent - usual)} above its usual {fmt(usual)}",
+            tiles.append({"tone": "bad", "badge": f"+{fmt(diff)} vs usual",
+                          "label": f"{(cat or {}).get('name', 'Other')} in {calendar.month_name[mo]}",
+                          "value": fmt(spent), "detail": f"Usually about {fmt(usual)} a month. Tap to see the transactions.",
                           "cat": int(cid) if cat else None, "href": href})
     recent = done[-3:]
     income = sum(m["income"] for m in recent)
     out = sum(m["spending"] + m["debt"] for m in recent)
     kept = income - out
-    n = len(recent)
-    label = f"Kept, last {n} month{'' if n == 1 else 's'}"
+    span = f"{calendar.month_abbr[int(recent[0]['m'][5:])]} to {calendar.month_abbr[int(recent[-1]['m'][5:])]}"
+    label = f"Income left over, {span}"
     if income <= 0:
-        tiles.append({"tone": "neutral", "label": label, "value": "No income found", "text": True,
+        tiles.append({"tone": "neutral", "badge": "No income found", "label": label, "value": "Not available", "text": True,
                       "detail": "Set your paycheck's category to count as Income (Accounts › Categories)"})
     else:
         rate = round(100 * kept / income)
-        tiles.append({"tone": "good" if rate >= 20 else "neutral" if rate >= 0 else "bad", "label": label,
-                      "value": ("-" if kept < 0 else "") + fmt(kept),
-                      "detail": (f"{rate}% of {fmt(income)} income" if kept >= 0
-                                 else f"Spending and debt payments were {fmt(abs(kept))} more than the {fmt(income)} that came in")})
+        tone = "good" if rate >= 20 else "neutral" if rate >= 0 else "bad"
+        tiles.append({"tone": tone, "badge": f"Kept {rate}%" if kept >= 0 else "Spent more than came in",
+                      "label": label, "value": ("-" if kept < 0 else "") + fmt(kept),
+                      "detail": f"{fmt(income)} came in. Spending and debt payments were {fmt(out)}."})
     return tiles
 
 

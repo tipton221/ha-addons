@@ -43,7 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.1:
+Version 1.11.2:
+
+- Insights tiles say what their color means in a badge (Above usual, Below usual, +$X vs usual, Kept N%), use plain labels ("November spending so far", with where the month is heading), and stack one per row on phones.
+- The spending donut is larger and interactive: hover or tap a slice, or hover a category in the list, to see its name, amount, and share in the middle; click (or tap again) to open those transactions in Search.
 
 - Insights remembers where you were (scroll, month, range, open lists) when you follow a link or save and then come back; a plain tab visit starts at the top. Spending shows the three largest purchases with "See all" for every spending transaction in the month, largest first, as editable rows. Larger spending chart, a compact month stepper, and any account can be left out of net worth (with its history) or included again.
 - Money fields add thousands commas as you type (1,234.50), and the app accepts amounts with commas.

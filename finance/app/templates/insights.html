@@ -14,7 +14,7 @@
 <section class="tiles" aria-label="Highlights">
   {% for n in notes %}
   {% if n.href %}<a class="tile tone-{{ n.tone }}" href="{{ n.href }}">{% else %}<div class="tile tone-{{ n.tone }}">{% endif %}
-    <span class="tile-icon" aria-hidden="true">{% if n.tone == "bad" %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>{% elif n.tone == "good" %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>{% endif %}</span>
+    <span class="tile-badge">{{ n.badge }}</span>
     <span class="tile-label">{% if n.cat %}<i class="tile-dot cat-{{ n.cat }}"></i>{% endif %}{{ n.label }}</span>
     <span class="tile-value{% if n.text %} as-text{% endif %}">{{ n.value }}</span>
     <span class="tile-detail">{{ n.detail }}</span>
