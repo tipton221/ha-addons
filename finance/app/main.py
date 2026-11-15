@@ -706,9 +706,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         everything = [b for b in everything if not b["archived_on"]]
         bills = [b for b in everything if b["kind"] != "income"]
         income = [b for b in everything if b["kind"] == "income"]
+        cov = coverage(db, schedule(), today)
+        ids = [i["id"] for i in cov["transit"]]
+        transit_txns = {t["id"]: t for t in resolve(db, list_transactions(
+            db, where=f"t.id IN ({','.join('?' * len(ids))})", params=tuple(ids), limit=0))} if ids else {}
         return templates.TemplateResponse(request, "bills.html", {
             "bills": bills, "income": income, "archived": archived, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
-            "cov": coverage(db, schedule(), today), "transit_accounts": transit_options(db),
+            "cov": cov, "transit_accounts": transit_options(db), "transit_txns": transit_txns,
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })

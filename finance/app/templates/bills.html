@@ -27,7 +27,8 @@
     <li class="edit-row" role="button" tabindex="0" data-editor="transit-{{ loop.index }}">
       <div class="grow">
         <strong>{% if t.out %}{{ t.account_name }} to {{ t.other_name }}{% else %}{{ t.other_name }} to {{ t.account_name }}{% endif %}</strong>
-        <span class="muted small {% if t.late %}warn-text{% endif %}">{{ t.date | shortdate }} ·
+        {% set tx = transit_txns.get(t.id) %}
+        <span class="muted small {% if t.late %}warn-text{% endif %}">{{ t.date | shortdate }} ·{% if tx %} {{ tx.display_name }} ·{% endif %}
           {% if t.late %}No match in {{ t.other_name }} after 7 days, so it isn't counted
           {% elif t.other_pending %}Pending in {{ t.other_name }}
           {% else %}Waiting on {{ t.other_name }}{% endif %}</span>
@@ -37,6 +38,18 @@
       <template id="transit-{{ loop.index }}">
         <h3 class="sheet-title">{{ t.amount | money }} {{ "to" if t.out else "from" }} {{ t.other_name }}</h3>
         <form class="transit-form editor-form" data-id="{{ t.id }}" autocomplete="off">
+          {% if tx %}
+          <div class="transit-txn">
+            <div class="tt-top"><span>{{ tx.display_name }}</span><span class="amount {% if tx.amount < 0 %}inflow{% endif %}">{{ (0 - tx.amount) | money }}</span></div>
+            <div class="meta">
+              {% if tx.category_info %}<span class="chip cat-{{ tx.category_info.id }}">{{ tx.category_info.name }}</span>{% endif %}
+              {% if tx.pending %}<span class="pill">Pending</span>{% endif %}
+              <span>{{ tx.date | shortdate }} · {{ tx.account_label }}</span>
+            </div>
+            {% if tx.name and tx.name != tx.display_name %}<div class="meta">Bank description: {{ tx.name }}</div>{% endif %}
+            {% if tx.note %}<div class="meta">Note: {{ tx.note }}</div>{% endif %}
+          </div>
+          {% endif %}
           <p class="hint">{{ t.account_name }} shows this payment or transfer on {{ t.date | shortdate }}{% if t.pending %} (pending){% endif %}.
             Until the matching {{ "charge" if t.out else "deposit" }} shows up in the other account, balances count it as if it had, for up to 7 days.
             {% if not t.chosen %}The other account is worked out from where past transfers like this one went.{% endif %}</p>

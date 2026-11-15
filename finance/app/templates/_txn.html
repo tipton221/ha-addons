@@ -2,7 +2,7 @@
 <li class="txn-item" data-source="{{ t.source }}" data-id="{{ t.id }}"{% if t.transfer_peer %} data-peer="{{ t.transfer_peer }}"{% endif %}>
   <div class="txn" role="button" tabindex="0" aria-label="Edit {{ t.display_name }}">
     <div class="main">
-      <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}</div>
+      <div class="name"><span>{{ t.display_name }}</span>{% if t.pending %}<span class="pill">Pending</span>{% endif %}{% if t.in_transit %}<span class="pill transit-pill" title="Counted as posted until {{ t.in_transit.other_name }} shows it">In transit</span>{% endif %}</div>
       <div class="meta">
         {% if t.category_info %}<span class="chip cat-{{ t.category_info.id }}">{{ t.category_info.name }}</span>{% endif %}
         {% if t.tip_info %}
