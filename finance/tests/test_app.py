@@ -1206,8 +1206,9 @@ def test_net_worth_joins_ynab_history_plaid_and_manual(tmp_path, monkeypatch):
         conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES ('manual:car', '2026-11-01', 4000)")
     nw = net_worth(db, date(2026, 11, 15))
     by_month = {p["m"]: p for p in nw["points"]}
-    assert by_month["2026-09"]["net"] == 6000.0           # YNAB only: 1000 + 5000
-    assert by_month["2026-10"]["net"] == 6550.0           # 1300 + 5250
+    # YNAB 1000 + 5000, less the car loan carried back from its first balance (no terms: flat 4000).
+    assert by_month["2026-09"]["net"] == 2000.0
+    assert by_month["2026-10"]["net"] == 2550.0           # 1300 + 5250 - 4000
     nov = by_month["2026-11"]
     assert nov["assets"] == 7500.0 and nov["debts"] == -4200.0  # Plaid 1500, manual 6000; card 200 and loan 4000
     names = {a["name"]: a for a in nw["accounts"]}
@@ -1661,6 +1662,17 @@ def test_loans_pslf_count_and_projection(tmp_path, monkeypatch):
         assert "Loans" in c.get("/insights").text
         # It counts in net worth as a debt.
         from app.insights import net_worth
-        assert any(a["id"] == aid and a["value"] == -24000.0 for a in net_worth(db, today)["accounts"])
+        nw = net_worth(db, today)
+        assert any(a["id"] == aid and a["value"] == -24000.0 for a in nw["accounts"])
+        # Before its first balance the loan still counts, a little higher each month further back.
+        from app.insights import account_series
+        loan_value = next(a for a in account_series(db, today) if a["id"] == aid)["value"]
+        oct_end, jun_end = loan_value("2026-10-15")[0], loan_value("2026-06-15")[0]
+        assert loan_value("2026-10-15")[1] == "estimate"
+        assert -24250 < oct_end < -24150 and jun_end < oct_end
+        expected = 24000.0
+        for _ in range(5):
+            expected = (expected + 250) / (1 + 3.4 / 100 / 12)
+        assert jun_end == -round(expected, 2)
     assert project(10000, 6, 40)["months"] is None          # 40 a month never covers $50 of interest
     assert project(1200, 0, 100)["months"] == 12
