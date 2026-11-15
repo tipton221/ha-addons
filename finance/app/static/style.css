@@ -759,13 +759,15 @@ a.tile:active { transform: scale(0.98); }
   display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--hairline);
   font-variant-numeric: tabular-nums; font-size: 0.9rem; align-items: baseline;
 }
-.month-table li { grid-template-columns: 1.2fr 1fr 1fr; }
-.flow-table li { grid-template-columns: 1.1fr repeat(5, 1fr); }
-.month-table li > span:not(:first-child), .flow-table li > span:not(:first-child) { text-align: right; }
+.month-table li { grid-template-columns: 7.5em 1fr 1fr; }
+.flow-table li { grid-template-columns: 7.5em repeat(5, 1fr); }
+/* Numbers and their headings are centered on each column; the month leads each row. */
+.month-table li > span:not(:first-child), .flow-table li > span:not(:first-child) { text-align: center; }
+.month-table li:not(.mt-head) > span:first-child, .flow-table li:not(.mt-head) > span:first-child { font-weight: 700; color: var(--text); }
 .mt-head { color: var(--text-2); font-size: 0.78rem !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
 .flow-table small { color: var(--text-2); font-size: 0.75rem; }
 @media (max-width: 560px) {
-  .flow-table li { grid-template-columns: 1fr 1fr 1fr 1fr; font-size: 0.82rem; }
+  .flow-table li { grid-template-columns: 5.6em 1fr 1fr 1fr; font-size: 0.82rem; gap: 4px; }
   .flow-table li > span:nth-child(4), .flow-table li > span:nth-child(5) { display: none; }
 }
 
@@ -793,7 +795,7 @@ a.tile:active { transform: scale(0.98); }
 .tile-value.as-text { font-size: 1.2rem; font-stretch: 100%; font-variation-settings: normal; letter-spacing: 0; }
 
 /* Cash flow Net column: the amount, then the share of income on its own line, on every row */
-.net-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+.net-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; }
 .net-cell small { color: var(--text-2); }
 .flow-table li > span { white-space: nowrap; }
 

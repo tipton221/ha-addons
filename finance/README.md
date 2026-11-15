@@ -43,7 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.11.3:
+Version 1.11.4:
+
+- Bills learn from your choices: setting a transaction to a bill by hand adds that transaction's bank merchant to the bill, so its other charges (same amount, about a cycle apart, a few days either way) get the tag automatically even when the bank's name doesn't contain the bill's match text.
+- Cash flow and net worth tables: headings and numbers centered on each column, the month in bold, and a narrower month column so the number columns have more room.
 
 - Insight tiles: red for worse than usual, green for better, gray for neutral. More room between the numbers at the top of Net worth and Spending.
 - Cash flow: Kept is now Net, with its share of income on a second line on every row so rows are the same height. Saved also counts transfers Plaid marks as going to (or coming from) a retirement or investment account, such as a Roth IRA contribution, even when that account isn't connected.
