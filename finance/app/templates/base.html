@@ -14,11 +14,11 @@
   <link rel="icon" href="/static/icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {% if nav is defined %}<link rel="stylesheet" href="/colors.css">{% endif %}
   {% block head %}{% endblock %}
-  {% if nav is defined %}<script src="/static/start.js"></script>{% endif %}
-  <script src="/static/app.js" defer></script>
+  {% if nav is defined %}<script src="/static/start.js?v={{ asset_v }}"></script>{% endif %}
+  <script src="/static/app.js?v={{ asset_v }}" defer></script>
 </head>
 <body data-page="{% block page %}{% endblock %}">
   <main class="wrap">

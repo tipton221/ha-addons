@@ -22,12 +22,14 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from .db import Database
-from .insights import account_series
+from .insights import Series, account_series
 
 PERIODS = (("3m", "3M"), ("6m", "6M"), ("ytd", "YTD"), ("1y", "1Y"), ("all", "All"))
 FLOW_SUBTYPES = {"contribution", "deposit", "withdrawal", "distribution", "transfer"}
 FLOW_TYPES = {"cash", "transfer"}
-CONTRIBUTION_SUBTYPES = {"contribution", "deposit"}
+# Money coming into an IRA. Some providers report contributions as transfers in.
+CONTRIBUTION_SUBTYPES = {"contribution", "deposit", "transfer"}
+GAP_DAYS = 35   # a hand-entered balance further than this before a period's start can't anchor it
 IRA_SUBTYPES = {"ira", "roth"}          # Plaid subtypes under the personal IRA limit
 # Employee deferral limits (IRS). 403(b), 401(k), and 457(b) each have the plan limit; a 457(b)
 # has its own, separate from a 403(b) or 401(k). Catch-up amounts (age 50+) are not included.
@@ -156,6 +158,17 @@ def returns(db: Database, today: date) -> dict:
     accts = tracked(db, today)
     cash = flows(db, [a["id"] for a in accts])
     with db.connect() as conn:
+        entered = defaultdict(list)
+        for r in conn.execute("SELECT account_id, day, balance FROM manual_balances ORDER BY day"):
+            entered[r["account_id"]].append((r["day"], r["balance"]))
+    # Balances entered by hand are the record for gains: other history for that account (YNAB
+    # balances, where contributions can't be told apart from growth) is left out here.
+    for a in accts:
+        if entered.get(a["id"]):
+            ser = Series(entered[a["id"]])
+            a["value"] = lambda day, ser=ser: (ser.at(day)[1], "manual") if ser.at(day) else (None, None)
+            a["entries"] = [d for d, _ in entered[a["id"]]]
+    with db.connect() as conn:
         holdings = defaultdict(list)
         for r in conn.execute("SELECT * FROM holdings ORDER BY value DESC"):
             holdings[r["account_id"]].append(dict(r))
@@ -178,8 +191,18 @@ def returns(db: Database, today: date) -> dict:
             continue
         t_v0 = t_v1 = 0.0
         t_cash: list[tuple[str, float]] = []
+        partial = False
         for a, a_out in rows:
             s = start.isoformat()
+            entries = a.get("entries")
+            if entries:
+                before = [d for d in entries if d <= s]
+                after = [d for d in entries if s < d <= end_s]
+                if before and after and (start - date.fromisoformat(before[-1])).days > GAP_DAYS:
+                    # The nearest balance is long before the period starts: its gain can't be known.
+                    a_out["periods"][key] = {"gain": None, "pct": None, "since": None, "put_in": None, "needs": s}
+                    partial = True
+                    continue
             v0 = a["value"](s)[0]
             since = None
             in_period = [(d, f) for d, f in cash.get(a["id"], []) if s < d <= end_s]
@@ -191,14 +214,15 @@ def returns(db: Database, today: date) -> dict:
                 in_period = [(d, f) for d, f in in_period if d > since] + [(since, start_val)]
                 v0 = 0.0
             v1 = a_out["value"]
-            gain, pct = dietz(v0, v1, in_period, start, today)
+            # History starting inside the period: measure from its first balance, not the period start.
+            gain, pct = dietz(v0, v1, in_period, date.fromisoformat(since) - timedelta(days=1) if since else start, today)
             a_out["periods"][key] = {"gain": gain, "pct": pct, "since": since,
                                      "put_in": round(sum(f for d, f in in_period if d != since), 2)}
             t_v0 += v0
             t_v1 += v1
             t_cash += in_period
         gain, pct = dietz(t_v0, t_v1, t_cash, start, today)
-        totals[key] = {"gain": gain, "pct": pct, "value": round(t_v1, 2)}
+        totals[key] = {"gain": gain, "pct": pct, "value": round(t_v1, 2), "partial": partial}
     return {"accounts": [r for _, r in rows], "totals": totals, "periods": PERIODS,
             "value": round(sum(r["value"] for _, r in rows), 2)}
 
@@ -211,13 +235,14 @@ def ira_contributions(db: Database) -> list[dict]:
         rows = [dict(r) for r in conn.execute(
             "SELECT t.id, t.account_id, t.date, t.name, t.amount, t.subtype, t.tax_year, "
             "COALESCE(a.display_name, a.name) AS account FROM investment_txns t JOIN accounts a ON a.account_id = t.account_id "
-            f"WHERE a.subtype IN ({','.join('?' * len(IRA_SUBTYPES))}) AND t.type='cash' AND t.amount < 0 "
+            f"WHERE a.subtype IN ({','.join('?' * len(IRA_SUBTYPES))}) AND t.type IN ('cash', 'transfer') AND t.amount < 0 "
             f"AND t.subtype IN ({','.join('?' * len(CONTRIBUTION_SUBTYPES))}) ORDER BY t.date DESC",
             tuple(IRA_SUBTYPES) + tuple(CONTRIBUTION_SUBTYPES))]
     for r in rows:
         d = date.fromisoformat(r["date"])
         r["amount"] = -r["amount"]
-        r["year"] = r["tax_year"] or d.year
+        r["own_year"] = d.year
+        r["year"] = d.year if r["tax_year"] is None else r["tax_year"]   # 0: not a contribution
         r["can_switch"] = (d.month, d.day) <= IRA_PRIOR_YEAR_UNTIL
     return rows
 
@@ -240,8 +265,9 @@ def limits(db: Database, today: date) -> dict:
     for y in years:
         lim = LIMITS.get(y) or LIMITS[max(LIMITS)]
         ira = [c for c in contribs if c["year"] == y]
+        ignored = [c for c in contribs if c["year"] == 0 and c["own_year"] == y]
         plans = [{"plan": p, "label": label, "amount": plan.get((y, p)), "limit": lim["plan"]}
                  for p, label in PLANS.items() if p == "403b" or plan.get((y, p)) is not None]
         out.append({"year": y, "ira": round(sum(c["amount"] for c in ira), 2), "ira_limit": lim["ira"],
-                    "ira_items": ira, "plans": plans, "known": y in LIMITS})
+                    "ira_items": ira, "ira_ignored": ignored, "plans": plans, "known": y in LIMITS})
     return {"years": out, "has_ira": bool(has_ira), "ira_needs_investments": bool(ira_without_activity)}
