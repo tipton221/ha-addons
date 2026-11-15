@@ -1225,7 +1225,8 @@ def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
             ("loan", "chk", "2026-10-05", "LOAN SERVICER", "Loan Servicer", 200.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT", 1),
             ("ccpay", "chk", "2026-10-06", "CARD PAYMENT", None, 30.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 1),
             ("inv", "chk", "2026-10-07", "TO BROKERAGE", None, 500.0, 0, "TRANSFER_OUT", "X", 1),
-            ("inv2", "brk", "2026-10-07", "FROM CHECKING", None, -500.0, 0, "TRANSFER_IN", "X", 1)]
+            ("inv2", "brk", "2026-10-07", "FROM CHECKING", None, -500.0, 0, "TRANSFER_IN", "X", 1),
+            ("roth", "chk", "2026-10-08", "TO ROTH IRA", None, 250.0, 0, "TRANSFER_OUT", "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS", 1)]
     db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 0, 0),
                                                        ("card", "Card", "credit", 0, None),
                                                        ("brk", "Brokerage", "investment", 0, None)])
@@ -1234,7 +1235,7 @@ def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
         conn.execute("UPDATE transactions SET transfer_peer='inv' WHERE id='inv2'")
     flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
     oct_ = flow[-1]
-    assert (oct_["income"], oct_["spending"], oct_["debt"], oct_["saving"]) == (3000.0, 30.0, 200.0, 500.0)
+    assert (oct_["income"], oct_["spending"], oct_["debt"], oct_["saving"]) == (3000.0, 30.0, 200.0, 750.0)
     # A paycheck the bank calls "Other" still counts as income once it's tagged as recurring income.
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET category=NULL, category_detail=NULL WHERE id='pay'")
@@ -1253,7 +1254,7 @@ def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
                                            "color": "orange", "kind": "saving"}, headers=H)
         assert r.status_code == 200
     flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
-    assert flow[-1]["spending"] == 0 and flow[-1]["saving"] == 530.0
+    assert flow[-1]["spending"] == 0 and flow[-1]["saving"] == 780.0
 
 
 def test_manual_accounts_and_balances_api(tmp_path, monkeypatch):

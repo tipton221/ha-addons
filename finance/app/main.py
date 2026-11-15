@@ -28,7 +28,7 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCES, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
-from .insights import (KIND_LABELS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
+from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
                        spending_rows)
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
@@ -614,7 +614,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
             "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
             "categories": categories(db), "colors": COLORS, "rules": merchant_rule_list(),
-            "kind_labels": KIND_LABELS,
+            "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS,
         })
 
     def merchant_rule_list() -> list[dict]:

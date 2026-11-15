@@ -313,7 +313,7 @@
     track(f, shown.length, (i) => {
       const m = shown[i];
       showTip(f, i, `<b>${monthLabel(m.m, true)}</b><small>In ${money(m.income, false)}</small>` +
-        `<small>Out ${money(outs[i], false)}</small><small class="${m.kept >= 0 ? "up" : "down"}">Kept ${money(m.kept, false)}</small>`);
+        `<small>Out ${money(outs[i], false)}</small><small class="${m.kept >= 0 ? "up" : "down"}">Net ${money(m.kept, false)}</small>`);
     }, () => { f.tip.hidden = true; });
   }
 
