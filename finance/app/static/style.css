@@ -925,3 +925,8 @@ a.tile:active { transform: scale(0.98); }
 /* Loan details separated by middle dots, like the other summary lines */
 .loan-meta { gap: 4px 5px; }
 .loan-meta > span + span::before { content: "·"; margin-right: 5px; }
+
+/* Net worth by month: month left, net worth centered, change right, spanning the card */
+.month-table li { grid-template-columns: 1fr auto 1fr; }
+.month-table li > span:last-child { text-align: right; }
+.month-table li > span:nth-child(2) { text-align: center; }

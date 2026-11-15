@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.0.6:
+
+- Net worth by month spans the card: month left, net worth centered, change right.
+
 Version 2.0.5:
 
 - Loan stats line up with the progress bar: the first flush left, the middle centered, the last flush right.
