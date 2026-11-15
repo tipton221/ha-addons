@@ -28,10 +28,10 @@
       <div class="grow">
         <strong>{% if t.out %}{{ t.account_name }} to {{ t.other_name }}{% else %}{{ t.other_name }} to {{ t.account_name }}{% endif %}</strong>
         {% set tx = transit_txns.get(t.id) %}
-        <span class="muted small {% if t.late %}warn-text{% endif %}">{{ t.date | shortdate }} ·{% if tx %} {{ tx.display_name }} ·{% endif %}
-          {% if t.late %}No match in {{ t.other_name }} after 7 days, so it isn't counted
-          {% elif t.other_pending %}Pending in {{ t.other_name }}
-          {% else %}Waiting on {{ t.other_name }}{% endif %}</span>
+        <span class="muted small transit-meta">{{ t.date | shortdate }}{% if tx %} · {{ tx.display_name }}{% endif %}
+          {% if t.late %}<span class="pill tag transit-status late">No match after 7 days · not counted</span>
+          {% elif t.other_pending %}<span class="pill tag transit-status">Pending in {{ t.other_name }}</span>
+          {% else %}<span class="pill tag transit-status">Waiting on {{ t.other_name }}</span>{% endif %}</span>
       </div>
       <span class="amount">{{ t.amount | money }}</span>
       <span class="chev" aria-hidden="true">›</span>
