@@ -1181,3 +1181,88 @@ def test_each_sync_keeps_one_balance_per_account_per_day(tmp_path):
     with db.connect() as conn:
         rows = [dict(r) for r in conn.execute("SELECT * FROM balance_history")]
     assert len(rows) == 1 and rows[0]["current_balance"] == 60.0 and rows[0]["available_balance"] == 900.0
+
+
+def test_net_worth_joins_ynab_history_plaid_and_manual(tmp_path, monkeypatch):
+    from datetime import date
+    from app.insights import net_worth
+    db, app = client_with(tmp_path, monkeypatch, [], [("chk", "Everyday Checking", "depository", 1500.0, 1500.0),
+                                                       ("card", "Card A", "credit", 200.0, None)])
+    with db.connect() as conn:
+        for aid, name, t in (("ynab:chk", "Old Checking", "checking"), ("ynab:ret", "Retirement Plan", "otherAsset")):
+            conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES (?, 'ynab', ?, ?, 'open')",
+                         (aid, name, t))
+        for i, (aid, d, amt) in enumerate((("ynab:chk", "2026-09-02", -1000.0), ("ynab:chk", "2026-10-05", -300.0),
+                                           ("ynab:ret", "2026-09-02", -5000.0), ("ynab:ret", "2026-10-20", -250.0))):
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount) VALUES "
+                         "('ynab', ?, ?, ?, 'x', ?)", (f"y{i}", aid, d, amt))
+        conn.execute("INSERT INTO account_links VALUES ('chk', 'ynab:chk')")
+        # Plaid balances start on Nov 13; before that the checking account's history comes from YNAB.
+        conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('chk', '2026-11-13', 1500)")
+        conn.execute("INSERT INTO balance_history (account_id, day, current_balance) VALUES ('card', '2026-11-13', 200)")
+        conn.execute("INSERT INTO manual_balances VALUES ('ynab:ret', '2026-11-10', 6000)")
+        conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype) VALUES "
+                     "('manual:car', 'manual', 'Car loan', 'liability', 'loan')")
+        conn.execute("INSERT INTO manual_balances VALUES ('manual:car', '2026-11-01', 4000)")
+    nw = net_worth(db, date(2026, 11, 15))
+    by_month = {p["m"]: p for p in nw["points"]}
+    assert by_month["2026-09"]["net"] == 6000.0           # YNAB only: 1000 + 5000
+    assert by_month["2026-10"]["net"] == 6550.0           # 1300 + 5250
+    nov = by_month["2026-11"]
+    assert nov["assets"] == 7500.0 and nov["debts"] == -4200.0  # Plaid 1500, manual 6000; card 200 and loan 4000
+    names = {a["name"]: a for a in nw["accounts"]}
+    assert "Old Checking" not in names                     # counted through its Plaid account
+    assert names["Retirement Plan"]["source"] == "manual" and names["Car loan"]["value"] == -4000
+
+
+def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
+    from datetime import date
+    from app.insights import monthly
+    from app.ledger import list_transactions, resolve
+    rows = [("pay", "chk", "2026-10-01", "ACME PAYROLL", "Acme", -3000.0, 0, "INCOME", "INCOME_WAGES", 1),
+            ("food", "card", "2026-10-03", "CORNER CAFE", "Corner Cafe", 40.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("back", "card", "2026-10-04", "CORNER CAFE", "Corner Cafe", -10.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("loan", "chk", "2026-10-05", "LOAN SERVICER", "Loan Servicer", 200.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT", 1),
+            ("ccpay", "chk", "2026-10-06", "CARD PAYMENT", None, 30.0, 0, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", 1),
+            ("inv", "chk", "2026-10-07", "TO BROKERAGE", None, 500.0, 0, "TRANSFER_OUT", "X", 1),
+            ("inv2", "brk", "2026-10-07", "FROM CHECKING", None, -500.0, 0, "TRANSFER_IN", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 0, 0),
+                                                       ("card", "Card", "credit", 0, None),
+                                                       ("brk", "Brokerage", "investment", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET transfer_peer='inv2' WHERE id='inv'")
+        conn.execute("UPDATE transactions SET transfer_peer='inv' WHERE id='inv2'")
+    flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
+    oct_ = flow[-1]
+    assert (oct_["income"], oct_["spending"], oct_["debt"], oct_["saving"]) == (3000.0, 30.0, 200.0, 500.0)
+    assert oct_["kept"] == 2770.0 and oct_["rate"] == 92
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/insights")
+        assert page.status_code == 200 and 'id="insights-data"' in page.text
+        # A category set to count as saving moves its spending into Saved.
+        cats = {x["name"]: x for x in c.get("/api/categories").json()["categories"]}
+        r = c.post("/api/categories", json={"id": cats["Restaurants"]["id"], "name": "Restaurants",
+                                           "color": "orange", "kind": "saving"}, headers=H)
+        assert r.status_code == 200
+    flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
+    assert flow[-1]["spending"] == 0 and flow[-1]["saving"] == 530.0
+
+
+def test_manual_accounts_and_balances_api(tmp_path, monkeypatch):
+    db, app = client_with(tmp_path, monkeypatch, [], [("chk", "Checking", "depository", 0, 0)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        r = c.post("/api/manual-accounts", json={"name": "Retirement Plan", "kind": "retirement",
+                                                 "balance": "12,500.50", "day": "2026-11-01"}, headers=H)
+        aid = r.json()["id"]
+        assert aid.startswith("manual:")
+        assert c.post("/api/balances", json={"account_id": aid, "balance": "abc"}, headers=H).status_code == 400
+        assert c.post("/api/balances", json={"account_id": aid, "balance": "1", "day": "2999-01-01"}, headers=H).status_code == 400
+        assert c.post("/api/balances", json={"account_id": "chk", "balance": "1"}, headers=H).status_code == 400  # Plaid
+        assert c.post("/api/balances", json={"account_id": aid, "balance": "13000"}, headers=H).status_code == 200
+        assert "Retirement Plan" in c.get("/insights").text
+        assert c.post("/api/manual-accounts/delete", json={"id": "chk"}, headers=H).status_code == 400
+        assert c.post("/api/manual-accounts/delete", json={"id": aid}, headers=H).status_code == 200
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM manual_balances").fetchone()[0] == 0

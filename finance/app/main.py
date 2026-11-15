@@ -28,6 +28,7 @@ from .db import Database
 from .plaid import Plaid, PlaidError
 from .bills import CADENCES, bill_status, coverage, detect, normalize, save_detected
 from .compare import compare_all
+from .insights import KIND_LABELS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import refresh_accounts, sync_all, sync_ynab
@@ -605,6 +606,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
             "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
             "categories": categories(db), "colors": COLORS, "rules": merchant_rule_list(),
+            "kind_labels": KIND_LABELS,
         })
 
     def merchant_rule_list() -> list[dict]:
@@ -647,17 +649,19 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         body = await request.json()
         name = str(body.get("name") or "").strip()[:40]
         color = valid_color(body.get("color"))
+        kind = body.get("kind") if body.get("kind") in KINDS else "spending"
         if not name:
             raise HTTPException(400, "Name the category")
         try:
             with db.connect() as conn:
                 if body.get("id"):
-                    conn.execute("UPDATE categories SET name=?, color=? WHERE id=?", (name, color, int(body["id"])))
+                    conn.execute("UPDATE categories SET name=?, color=?, kind=? WHERE id=?",
+                                 (name, color, kind, int(body["id"])))
                     new_id = int(body["id"])
                 else:
                     sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM categories").fetchone()[0]
-                    new_id = conn.execute("INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)",
-                                          (name, color, sort)).lastrowid
+                    new_id = conn.execute("INSERT INTO categories (name, color, sort, kind) VALUES (?, ?, ?, ?)",
+                                          (name, color, sort, kind)).lastrowid
         except sqlite3.IntegrityError:
             raise HTTPException(400, "A category with that name already exists")
         return {"ok": True, "id": new_id}
@@ -927,6 +931,99 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         stamp = datetime.now(PACIFIC).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="transactions-{stamp}.csv"'})
+
+    # ---------- insights ----------
+
+    @app.get("/insights", response_class=HTMLResponse)
+    async def insights_page(request: Request):
+        now = today()
+        nw = await run_in_threadpool(net_worth, db, now)
+        rows = resolve(db, list_transactions(db, limit=0))
+        flow = monthly(db, rows, now)["months"]
+        cats = {c["id"]: c for c in categories(db)}
+        data = {
+            "networth": nw["points"],
+            "months": flow,
+            "categories": {str(i): {"name": c["name"], "color": c["color"]} for i, c in cats.items()},
+            "today": now.isoformat(),
+        }
+        with db.connect() as conn:
+            balances = {}
+            for r in conn.execute("SELECT account_id, day, balance FROM manual_balances ORDER BY day DESC"):
+                balances.setdefault(r["account_id"], []).append(dict(r))
+        return templates.TemplateResponse(request, "insights.html", {
+            "nw": nw, "flow": flow, "notes": observations(flow, cats, now), "data": data,
+            "manual_kinds": MANUAL_KINDS, "manual_debts": MANUAL_DEBTS, "balances": balances,
+            "today": now.isoformat(), "kind_labels": KIND_LABELS,
+        })
+
+    @app.post("/api/manual-accounts")
+    async def save_manual_account(request: Request):
+        body = await request.json()
+        name = str(body.get("name") or "").strip()[:60]
+        kind = body.get("kind")
+        if not name:
+            raise HTTPException(400, "Name the account")
+        if kind not in MANUAL_KINDS:
+            raise HTTPException(400, "Choose what kind of account it is")
+        aid = str(body.get("id") or "")
+        with db.connect() as conn:
+            if aid:
+                if not aid.startswith("manual:"):
+                    raise HTTPException(400, "Only accounts added here can be renamed here")
+                conn.execute("UPDATE accounts SET name=?, subtype=?, type=? WHERE account_id=? AND source='manual'",
+                             (name, kind, "liability" if kind in MANUAL_DEBTS else "asset", aid))
+            else:
+                aid = "manual:" + secrets.token_hex(8)
+                conn.execute("INSERT INTO accounts (account_id, source, name, type, subtype, currency) "
+                             "VALUES (?, 'manual', ?, ?, ?, 'USD')",
+                             (aid, name, "liability" if kind in MANUAL_DEBTS else "asset", kind))
+        if body.get("balance") not in (None, ""):
+            save_balance(aid, body.get("balance"), body.get("day"))
+        return {"ok": True, "id": aid}
+
+    def save_balance(aid: str, value, day) -> None:
+        try:
+            amount = round(float(str(value).replace(",", "").replace("$", "")), 2)
+        except ValueError:
+            raise HTTPException(400, "Enter the balance as a number")
+        day = str(day or "") or today().isoformat()
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            raise HTTPException(400, "Enter a valid date")
+        if day > today().isoformat():
+            raise HTTPException(400, "The date can't be in the future")
+        with db.connect() as conn:
+            src = conn.execute("SELECT source FROM accounts WHERE account_id=?", (aid,)).fetchone()
+            if not src or src["source"] not in ("manual", "ynab"):
+                raise HTTPException(400, "Balances can only be entered for manual or YNAB accounts")
+            conn.execute("INSERT INTO manual_balances (account_id, day, balance) VALUES (?, ?, ?) "
+                         "ON CONFLICT(account_id, day) DO UPDATE SET balance=excluded.balance", (aid, day, amount))
+
+    @app.post("/api/balances")
+    async def add_balance(request: Request):
+        body = await request.json()
+        save_balance(str(body.get("account_id") or ""), body.get("balance"), body.get("day"))
+        return {"ok": True}
+
+    @app.post("/api/balances/delete")
+    async def delete_balance(request: Request):
+        body = await request.json()
+        with db.connect() as conn:
+            conn.execute("DELETE FROM manual_balances WHERE account_id=? AND day=?",
+                         (str(body.get("account_id") or ""), str(body.get("day") or "")))
+        return {"ok": True}
+
+    @app.post("/api/manual-accounts/delete")
+    async def delete_manual_account(request: Request):
+        aid = str((await request.json()).get("id") or "")
+        if not aid.startswith("manual:"):
+            raise HTTPException(400, "Only accounts added here can be removed here")
+        with db.connect() as conn:
+            conn.execute("DELETE FROM manual_balances WHERE account_id=?", (aid,))
+            conn.execute("DELETE FROM accounts WHERE account_id=? AND source='manual'", (aid,))
+        return {"ok": True}
 
     @app.get("/compare", response_class=HTMLResponse)
     async def compare_page(request: Request):

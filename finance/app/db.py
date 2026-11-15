@@ -122,6 +122,15 @@ CREATE TABLE IF NOT EXISTS merchant_rules (
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL
 );
 
+-- Balances entered by hand: for accounts added in the app (source 'manual') and for YNAB
+-- accounts with no Plaid connection. Debts are stored as the positive amount owed.
+CREATE TABLE IF NOT EXISTS manual_balances (
+    account_id      TEXT NOT NULL,
+    day             TEXT NOT NULL,          -- YYYY-MM-DD, Pacific
+    balance         REAL NOT NULL,
+    PRIMARY KEY (account_id, day)
+);
+
 -- Which YNAB accounts track the same card or bank account as a Plaid account.
 -- More than one is allowed, e.g. when a card was converted and YNAB kept the old account.
 CREATE TABLE IF NOT EXISTS account_links (
@@ -173,6 +182,9 @@ class Database:
                 ("short_name", "TEXT"),      # shown on filter pills
                 ("visibility", "TEXT NOT NULL DEFAULT 'everyday'"),  # everyday, less (used), archived
             ],
+            "categories": [
+                ("kind", "TEXT"),            # spending, income, saving, debt, or transfer (see insights.py)
+            ],
             "bills": [
                 ("color", "TEXT NOT NULL DEFAULT 'purple'"), ("varies", "INTEGER NOT NULL DEFAULT 0"),
                 ("account_id", "TEXT"),                     # chosen card; NULL means the card of the last charge
@@ -186,6 +198,10 @@ class Database:
             for name, decl in cols:
                 if name not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        # Categories without a kind get one from their name (Income, Transfers and payments, Loans).
+        conn.execute("UPDATE categories SET kind = CASE name WHEN 'Income' THEN 'income' "
+                     "WHEN 'Transfers and payments' THEN 'transfer' WHEN 'Loans' THEN 'debt' "
+                     "ELSE 'spending' END WHERE kind IS NULL")
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:

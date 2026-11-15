@@ -43,7 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
-Version 1.10.5:
+Version 1.11.0:
+
+- Insights tab: net worth by month back to the start of your YNAB history (Plaid balances from each account's connection on, the linked YNAB accounts before that, YNAB-only accounts, and accounts you add by hand), with an interactive chart, 1Y/3Y/5Y/All ranges, assets and debts, and a month-by-month table. Spending by month with a category donut and list (each links to Search), compared with your average, and the largest purchases. Cash flow by month: income, spending, debt payments, saving, and how much you kept. A few plain observations (spending pace, categories above their usual, share of income kept).
+- Categories have a "Counts as" setting (Spending, Income, Saving or investing, Debt payment, Transfer) that Insights uses. Income, Loans, and Transfers and payments start as Income, Debt payment, and Transfer.
+- Accounts added by hand (retirement, investment, cash, property, other asset, loan, other debt) with balances entered whenever you check them; YNAB accounts with no Plaid connection can take a newer balance the same way.
+- Saving on a page that reloads itself (Bills, Accounts) no longer sends you to the Inbox.
 
 - Dark, Apple-style design: glass cards, rounded corners, a floating tab bar on phones, narrowed SF Pro headings on Apple devices, and animations for syncing and reviewing.
 - Inbox: a collapsed Scheduled list of every upcoming bill (next due at the bottom) that follows the account filter, unreviewed transactions on top with one-tap review and mark all, then every transaction grouped by day, with paging and an account filter (all accounts, or one at a time; filters reset when the page reloads).
@@ -64,7 +69,7 @@ Version 1.10.5:
 - Search: quick picks for each month and the last five years (a month and a year together mean that month of that year), dates that stay empty until tapped, several accounts or categories at once, spent or received, has a note, tagged as a recurring bill or income, includes a tip, pending, amount changed since pending, and transfers only.
 - Bills shows the bills due before payday with their date, frequency, and card.
 - Each bank connection has an Accounts button to share another account from that bank (Plaid account selection). New connections list their accounts right away.
-- Moving between Inbox, Bills, Search, and Accounts slides the tab highlight (view transitions where supported).
+- Moving between Inbox, Bills, Insights, Search, and Accounts slides the tab highlight (view transitions where supported).
 - Every sync keeps each account's balance for the day (balance_history), for net worth trends.
 - Home screen and browser icons, and a web app manifest.
 - Bills with detection, editing, tag colors (named or custom hex), varying amounts shown as an average (≈), the card each bill is paid with (the card of its last charge unless you pick one), and coverage through the next payday; search with CSV export; Plaid versus YNAB comparison.

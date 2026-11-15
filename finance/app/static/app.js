@@ -16,6 +16,13 @@ const b64u = {
   },
 };
 
+// Reload the current page after a save. Marked first, so start.js doesn't send it to the Inbox
+// the way it does for a reload you start yourself.
+function reloadHere() {
+  try { sessionStorage.setItem("finance-keep", "1"); } catch { /* storage blocked */ }
+  location.reload();
+}
+
 async function api(path, body) {
   const r = await fetch(path, {
     method: "POST",
@@ -149,7 +156,7 @@ async function syncNow(ev) {
     btn.classList.remove("spin");
     btn.classList.add("done-pop");
     toast("Synced");
-    setTimeout(() => location.reload(), 650);
+    setTimeout(() => reloadHere(), 650);
   } catch (e) {
     btn.classList.remove("spin");
     btn.disabled = false;
@@ -302,12 +309,12 @@ function refreshColors() {
 // After an edit: pages with transaction lists update in place; other pages reload.
 async function refreshInPlace() {
   const page = document.body.dataset.page;
-  if (page !== "home" && page !== "search") { setTimeout(() => location.reload(), 600); return; }
+  if (page !== "home" && page !== "search") { setTimeout(() => reloadHere(), 600); return; }
   try {
     refreshColors();
     await refreshRows();
     if (page === "home") await swapSections(["coverage", "scheduled-wrap"]);
-  } catch (e) { location.reload(); }
+  } catch (e) { reloadHere(); }
 }
 
 // ---------- name suggestions while typing in the transaction editor ----------
@@ -754,7 +761,15 @@ const forms = {
   },
   async "cat-form"(form) {
     await api("/api/categories", { id: form.dataset.id || null, name: form.elements.title.value,
-                                   color: colorValue(form) });
+                                   color: colorValue(form), kind: form.elements.kind.value });
+  },
+  async "balance-form"(form) {
+    const f = form.elements;
+    await api("/api/balances", { account_id: form.dataset.account, balance: f.balance.value, day: f.day.value });
+  },
+  async "manual-form"(form) {
+    const f = form.elements;
+    await api("/api/manual-accounts", { name: f.name.value, kind: f.kind.value, balance: f.balance.value, day: f.day.value });
   },
   async "acct-form"(form) {
     const f = form.elements;
@@ -782,7 +797,7 @@ document.addEventListener("submit", async (ev) => {
     closeAllSheets();
     toast("Saved");
     if (key === "bill-form") await refreshInPlace();
-    else setTimeout(() => location.reload(), 600);
+    else setTimeout(() => reloadHere(), 600);
   } catch (e) { if (btn) btn.disabled = false; toast(e.message, true); }
 });
 
@@ -795,6 +810,30 @@ document.addEventListener("click", async (ev) => {
     closeAllSheets();
     toast(restore ? "Restored" : "Archived");
     await refreshInPlace();
+  } catch (e) { toast(e.message, true); }
+});
+
+// Insights: balances entered by hand, and accounts added by hand.
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".delete-balance, .delete-manual, .rename-manual");
+  if (!btn) return;
+  try {
+    if (btn.classList.contains("delete-balance")) {
+      await api("/api/balances/delete", { account_id: btn.dataset.account, day: btn.dataset.day });
+      await fold(btn.closest("li"), 0);
+      toast("Removed");
+      return;
+    }
+    if (btn.classList.contains("delete-manual")) {
+      if (!confirm("Remove this account and every balance entered for it?")) return;
+      await api("/api/manual-accounts/delete", { id: btn.dataset.id });
+    } else {
+      const form = btn.closest("form");
+      await api("/api/manual-accounts", { id: btn.dataset.id, name: form.elements.name.value, kind: btn.dataset.kind });
+    }
+    closeAllSheets();
+    toast("Saved");
+    setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });
 
@@ -819,7 +858,7 @@ document.addEventListener("click", async (ev) => {
     closeAllSheets();
     toast("Removed");
     if (isBill) await refreshInPlace();
-    else setTimeout(() => location.reload(), 600);
+    else setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });
 
@@ -1045,7 +1084,7 @@ const pages = {
         const list = (links[sel.dataset.plaid] ||= []);
         if (sel.value) list.push(sel.value);
       });
-      try { await api("/api/links", { links }); location.reload(); } catch (e) { say(e.message, true); }
+      try { await api("/api/links", { links }); reloadHere(); } catch (e) { say(e.message, true); }
     });
     const names = document.getElementById("ynab-names");
     if (names) names.addEventListener("click", async () => {
@@ -1053,7 +1092,7 @@ const pages = {
       try {
         const r = await api("/api/ynab-names");
         toast(`${r.merchants} merchants renamed, ${r.one_off} one-off names, ${r.notes} notes`);
-        setTimeout(() => location.reload(), 1200);
+        setTimeout(() => reloadHere(), 1200);
       } catch (e) { toast(e.message, true); names.disabled = false; }
     });
   },
@@ -1065,7 +1104,7 @@ const pages = {
       try {
         const r = await api("/api/bills/detect");
         toast(r.added ? `Added ${r.added} bill${r.added > 1 ? "s" : ""}` : "No new recurring charges found");
-        if (r.added) setTimeout(() => location.reload(), 900);
+        if (r.added) setTimeout(() => reloadHere(), 900);
       } catch (e) { toast(e.message, true); }
       detect.classList.remove("spin");
     });
