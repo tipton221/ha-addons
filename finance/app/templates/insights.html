@@ -292,7 +292,7 @@
             {% if l.payoff.months is not none %}
             <div><span class="muted small">Payments left</span><b>{{ l.payoff.months }}</b></div>
             <div><span class="muted small">Paid off</span><b>{{ l.payoff.month | month_label }}</b></div>
-            <div><span class="muted small">Interest to go</span><b>${{ '{:,.0f}'.format(l.payoff.interest) }}</b></div>
+            <div><span class="muted small">Total to pay</span><b>${{ '{:,.0f}'.format(l.balance + l.payoff.interest) }}</b><span class="muted small">${{ '{:,.0f}'.format(l.payoff.interest) }} interest</span></div>
             {% else %}
             <div><span class="muted small">Paid off</span><b>Never at this payment</b></div>
             {% endif %}

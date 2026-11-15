@@ -45,7 +45,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 Version 2.0.1:
 
-- Every loan shows a progress bar (paid so far of its original amount, a new optional field), payments left, the payoff month, and the interest still to go, not only loans working toward PSLF.
+- Every loan shows a progress bar (paid so far of its original amount, a new optional field), payments left, the payoff month, and the total still to pay with its interest, not only loans working toward PSLF.
 - The PSLF count, its date, and the recertification date sit under the PSLF checkbox and are greyed out until it's checked. Optional dates stay empty ("None") until tapped instead of showing today's date.
 
 Version 2.0.0: the transaction logger becomes a full financial dashboard. Insights covers net worth back to the start of YNAB, spending and cash flow, investments (Plaid Investments, gains and Modified Dietz returns by period, a balance chart, contribution limits), and loans (payoff projections and PSLF tracking). Changes since 1.14.1:
