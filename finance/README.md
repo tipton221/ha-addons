@@ -47,6 +47,7 @@ Version 1.12.1:
 
 - An "In transit" pill on transactions counted as in transit, in the Inbox and Search lists.
 - Each in-transit item on the Bills page shows its transaction (name, category, date, account, bank description, note).
+- Only transactions in a category that counts as a transfer (Transfers and payments) can be in transit, using the category the lists show, so a recategorized one is left alone.
 - The other account is guessed only from past paired transfers with the same bank description, not from any transfer on the account, which flagged fees and unrelated transfers.
 
 Version 1.12.0:

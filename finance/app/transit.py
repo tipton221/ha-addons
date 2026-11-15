@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from .bills import normalize
 from .db import Database
-from .ledger import _transfer_like
+from .ledger import _default_category, merchant_key
 
 WAIT_DAYS = 7      # adjust balances this long while the other side hasn't posted
 REVIEW_DAYS = 30   # after that, list it as unmatched (no adjustment) this long, unless dismissed
@@ -43,7 +43,7 @@ def in_transit(db: Database, today: date) -> dict:
         accts = {r["account_id"]: dict(r) for r in conn.execute(
             "SELECT account_id, name, display_name, type, in_net_worth FROM accounts WHERE source='plaid'")}
         rows = [dict(r) for r in conn.execute(
-            "SELECT id, account_id, date, name, merchant, amount, pending, category, category_detail "
+            "SELECT id, account_id, date, name, merchant, amount, pending, category, category_detail, category_id "
             "FROM transactions WHERE source='plaid' AND transfer_peer IS NULL AND amount != 0 AND date >= ? "
             "ORDER BY date, rowid", (since,))]
         # Where each account's past transfers went: (account, direction, merchant key) -> peer accounts.
@@ -52,6 +52,15 @@ def in_transit(db: Database, today: date) -> dict:
             "JOIN transactions p ON p.source='plaid' AND p.id = t.transfer_peer "
             "WHERE t.source='plaid' AND p.account_id != t.account_id")]
         choices = {r["txn_id"]: r["account_id"] for r in conn.execute("SELECT txn_id, account_id FROM transit_choices")}
+        cats = {r["id"]: dict(r) for r in conn.execute("SELECT id, name, kind FROM categories")}
+        rule_cats = {r["merchant_key"]: r["category_id"] for r in conn.execute(
+            "SELECT merchant_key, category_id FROM merchant_rules WHERE category_id IS NOT NULL")}
+    by_name = {c["name"]: cid for cid, c in cats.items()}
+
+    def is_transfer(r: dict) -> bool:
+        """In a category that counts as a transfer (Transfers and payments), as the lists show it."""
+        cid = r["category_id"] or rule_cats.get(merchant_key(r)) or _default_category(r, by_name)
+        return (cats.get(cid) or {}).get("kind") == "transfer"
 
     # Only transfers with the same bank description as past paired ones: an account's other
     # transfers (fees, interest, contributions to accounts that never show them) are left alone.
@@ -75,7 +84,7 @@ def in_transit(db: Database, today: date) -> dict:
     items, nw = [], defaultdict(float)
     cash = cards = 0.0
     for r in rows:
-        if r["id"] in used or not _transfer_like(r):
+        if r["id"] in used or not is_transfer(r):
             continue
         a = accts.get(r["account_id"])
         if not a or a["type"] not in TRIGGER_TYPES:

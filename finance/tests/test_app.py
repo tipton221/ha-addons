@@ -1372,6 +1372,7 @@ def test_payment_in_transit_both_directions(tmp_path):
     from app.bills import coverage
     from app.insights import net_worth
     from app.ledger import pair_transfers
+    from app.ledger import seed_categories
     from app.transit import in_transit
     today = D(2026, 11, 15)
     PAY = ("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")
@@ -1382,6 +1383,7 @@ def test_payment_in_transit_both_directions(tmp_path):
     db = Database(tmp_path / "f.db")
     seed(db, rows, accounts=[("sav", "Savings Co", "depository", 5000.0, 5000.0),
                              ("card", "Card A", "credit", 1000.0, None)])
+    seed_categories(db)  # as the app does at startup
     with db.connect() as conn:
         assert pair_transfers(conn) == 3
     sched = {"kind": "semimonthly", "days": [1, 15]}
@@ -1434,3 +1436,8 @@ def test_payment_in_transit_both_directions(tmp_path):
         conn.execute("DELETE FROM transit_choices")
     flagged = {t["id"] for t in resolve(db, list_transactions(db, limit=0), today) if t["in_transit"]}
     assert flagged == {"p2"}  # p3 is past 7 days, so no pill
+    # Only rows in a category that counts as a transfer: one moved to another category is left alone.
+    with db.connect() as conn:
+        food = conn.execute("SELECT id FROM categories WHERE kind='spending' LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE transactions SET category_id=? WHERE id='p2'", (food,))
+    assert "p2" not in {i["id"] for i in in_transit(db, today)["items"]}
