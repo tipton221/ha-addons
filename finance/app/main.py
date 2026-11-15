@@ -904,10 +904,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     def is_transfer(t: dict) -> bool:
         return bool(t.get("transfer")) or (t["category_info"] or {}).get("name") == TRANSFER_CATEGORY
 
+    SORTS = {"date": "Newest first", "oldest": "Oldest first", "name": "Merchant, A to Z",
+             "largest": "Largest amount", "smallest": "Smallest amount"}
+
     @app.get("/search", response_class=HTMLResponse)
     async def search_page(request: Request):
         q = search_query(request)
+        sort = q.pop("sort", "date")
+        sort = sort if sort in SORTS else "date"
         rows = search(q) if q else resolve(db, list_transactions(db, limit=100))
+        if sort == "oldest":
+            rows.reverse()
+        elif sort == "name":
+            rows.sort(key=lambda t: (t["display_name"].casefold(), t["date"]))
+        elif sort in ("largest", "smallest"):
+            rows.sort(key=lambda t: abs(t["amount"]), reverse=sort == "largest")
         more = len(rows) > 1000
         # Totals leave out money moving between your own accounts, unless you searched by category
         # or asked for transfers.
@@ -915,7 +926,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         out = sum(t["amount"] for t in counted if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
         return templates.TemplateResponse(request, "search.html", {
-            "q": q, "groups": group_by_date(rows[:1000], today()), "count": len(rows), "truncated": more,
+            "q": q, "count": len(rows), "truncated": more, "sort": sort, "sorts": SORTS,
+            # By date the list is grouped by day; any other order is one list with dates on the rows.
+            "groups": group_by_date(rows[:1000], today()) if sort in ("date", "oldest") else [("", rows[:1000])],
+            "dated": sort not in ("date", "oldest"),
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
             "total_out": out, "total_in": inflow, "export_query": urlencode(q, doseq=True),
             "excluded": len(rows) - len(counted), "quick": quick_ranges(today(), q),

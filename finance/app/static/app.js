@@ -816,6 +816,11 @@ document.addEventListener("click", async (ev) => {
   } catch (e) { toast(e.message, true); }
 });
 
+// Search: changing the sort runs the search again in that order.
+document.addEventListener("change", (ev) => {
+  if (ev.target.id === "search-sort") document.getElementById("search-form")?.requestSubmit();
+});
+
 // Insights: leave an account out of net worth, or include it again.
 document.addEventListener("click", async (ev) => {
   const btn = ev.target.closest(".net-worth-toggle");

@@ -1235,6 +1235,13 @@ def test_monthly_cash_flow_buckets(tmp_path, monkeypatch):
     flow = monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"]
     oct_ = flow[-1]
     assert (oct_["income"], oct_["spending"], oct_["debt"], oct_["saving"]) == (3000.0, 30.0, 200.0, 500.0)
+    # A paycheck the bank calls "Other" still counts as income once it's tagged as recurring income.
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET category=NULL, category_detail=NULL WHERE id='pay'")
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, kind) VALUES ('Paycheck', 'acme', 3000, 'biweekly', 'income')")
+        bill_id = conn.execute("SELECT id FROM bills").fetchone()[0]
+        conn.execute("UPDATE transactions SET bill_id=? WHERE id='pay'", (bill_id,))
+    assert monthly(db, resolve(db, list_transactions(db, limit=0)), date(2026, 10, 31))["months"][-1]["income"] == 3000.0
     assert oct_["kept"] == 2770.0 and oct_["rate"] == 92
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
@@ -1299,3 +1306,21 @@ def test_amounts_accept_thousands_commas(tmp_path, monkeypatch):
         assert r.status_code == 200
     with db.connect() as conn:
         assert conn.execute("SELECT amount FROM bills").fetchone()[0] == 1234.5
+
+
+def test_search_sort_orders(tmp_path, monkeypatch):
+    rows = [("s1", "card", "2026-11-03", "BOOK BARN", "Book Barn", 12.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("s2", "card", "2026-11-04", "CORNER CAFE", "Corner Cafe", 6.0, 0, "FOOD_AND_DRINK", "X", 1),
+            ("s3", "card", "2026-11-05", "ACORN TOYS", "Acorn Toys", 30.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        def order(qs):
+            page = c.get("/search?" + qs).text.split("result")[1]
+            return sorted(("Book Barn", "Corner Cafe", "Acorn Toys"), key=page.index)
+        assert order("min=1") == ["Acorn Toys", "Corner Cafe", "Book Barn"]          # newest first
+        assert order("min=1&sort=oldest") == ["Book Barn", "Corner Cafe", "Acorn Toys"]
+        assert order("min=1&sort=name") == ["Acorn Toys", "Book Barn", "Corner Cafe"]
+        assert order("min=1&sort=largest") == ["Acorn Toys", "Book Barn", "Corner Cafe"]
+        assert order("min=1&sort=smallest") == ["Corner Cafe", "Book Barn", "Acorn Toys"]
+        assert "Nothing found" in c.get("/search?q=zzz&sort=name").text
