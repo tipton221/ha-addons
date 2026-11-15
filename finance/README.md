@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.0.5:
+
+- Loan stats line up with the progress bar: the first flush left, the middle centered, the last flush right.
+- A loan's rate, payment, and balance date are separated by dots.
+
 Version 2.0.3:
 
 - A loan's balance keeps itself current between the balances you enter: from the latest one, interest accrues daily and each payment tagged with the loan's bill comes off as it posts. Net worth uses the same estimate. Entering a balance from the servicer resets it.
