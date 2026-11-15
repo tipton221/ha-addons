@@ -267,7 +267,7 @@
         </div>
         <div class="loan-meta muted small">
           {% if l.has_details %}<span>{{ l.rate }}%</span><span>{{ (l.payment or 0) | money }}/mo</span>{% else %}<span>Add the rate and payment</span>{% endif %}
-          {% if l.as_of %}<span>Balance as of {{ l.as_of | shortdate }}</span>{% endif %}
+          {% if l.estimated %}<span>Estimated: {{ l.paid_since }} payment{{ "" if l.paid_since == 1 else "s" }} since {{ l.as_of | shortdate }}</span>{% elif l.as_of %}<span>Balance as of {{ l.as_of | shortdate }}</span>{% endif %}
         </div>
         {% if p %}
         <div class="pslf-block">
@@ -284,7 +284,7 @@
         {% elif l.payoff or l.paid_pct is defined %}
         <div class="pslf-block">
           {% if l.paid_pct is defined %}
-          <div class="pslf-top"><span class="pill tag payoff-pill">Paid</span><span><b>{{ l.paid_pct | round | int }}%</b><span class="muted"> of {{ l.original | money }}</span></span></div>
+          <div class="pslf-top"><span><b>{{ l.paid_pct | round | int }}%</b><span class="muted"> paid off</span></span><span class="muted small">${{ '{:,.0f}'.format(l.paid) }} of ${{ '{:,.0f}'.format(l.original) }}</span></div>
           <span class="limit-bar"><span class="limit-fill payoff-fill" data-pct="{{ l.paid_pct }}"></span></span>
           {% endif %}
           {% if l.payoff %}

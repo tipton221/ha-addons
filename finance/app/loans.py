@@ -78,6 +78,34 @@ def payments(db: Database, bill_id: int | None, since: str) -> list[dict]:
                   key=lambda t: t["date"])
 
 
+def roll_forward(balance: float, since: str, rate: float, pays: list[tuple[str, float]], day: str) -> float:
+    """A balance entered on one day, carried to a later day: interest accrues daily (simple, as on
+    federal loans) and each payment posted in between comes off."""
+    bal, last = balance, date.fromisoformat(since)
+    for d, amount in pays + [(day, 0.0)]:
+        if d <= since or d > day:
+            continue
+        cur = date.fromisoformat(d)
+        bal += bal * rate / 100 / 365 * (cur - last).days
+        bal = max(0.0, bal - amount)
+        last = cur
+    return round(bal, 2)
+
+
+def loan_payments(db: Database) -> dict[str, list[tuple[str, float]]]:
+    """For each manual loan with a payments bill: payments posted after its latest entered balance."""
+    with db.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT l.account_id, l.bill_id, (SELECT MAX(day) FROM manual_balances m WHERE m.account_id = l.account_id) AS last "
+            "FROM loans l JOIN accounts a ON a.account_id = l.account_id WHERE a.source='manual' AND l.bill_id IS NOT NULL")]
+    out = {}
+    for r in rows:
+        if r["last"]:
+            since = (date.fromisoformat(r["last"]) + timedelta(days=1)).isoformat()
+            out[r["account_id"]] = [(t["date"], t["amount"]) for t in payments(db, r["bill_id"], since)]
+    return out
+
+
 def loans(db: Database, today: date) -> list[dict]:
     out = []
     with db.connect() as conn:
@@ -85,12 +113,16 @@ def loans(db: Database, today: date) -> list[dict]:
         for r in conn.execute("SELECT account_id, month, counts FROM loan_months"):
             marks[(r["account_id"], r["month"])] = r["counts"]
     this_month = today.isoformat()[:7]
+    posted = loan_payments(db)
     for a in loan_accounts(db):
         rate, payment = a.get("rate") or 0.0, a.get("payment") or 0.0
+        since_entry = posted.get(a["account_id"], [])
+        if a["source"] == "manual" and a["as_of"] and a["as_of"] < today.isoformat():
+            a["balance"] = roll_forward(a["balance"], a["as_of"], rate, since_entry, today.isoformat())
         loan = {"id": a["account_id"], "name": a["name"], "source": a["source"], "balance": round(a["balance"], 2),
                 "as_of": a["as_of"], "rate": a.get("rate"), "payment": a.get("payment"), "bill_id": a.get("bill_id"),
                 "recert": a.get("recert"), "pslf": bool(a.get("pslf")), "has_details": a.get("rate") is not None,
-                "original": a.get("original")}
+                "original": a.get("original"), "paid_since": len(since_entry), "estimated": bool(since_entry)}
         if a.get("original") and a["original"] > 0:
             paid = max(0.0, min(1.0, (a["original"] - a["balance"]) / a["original"]))
             loan["paid_pct"] = round(100 * paid, 1)
