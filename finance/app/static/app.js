@@ -787,6 +787,7 @@ const forms = {
       balance: f.balance ? f.balance.value : undefined, day: f.day ? f.day.value : undefined,
       rate: f.rate.value, payment: f.payment.value, bill_id: f.bill_id.value, recert: f.recert.value,
       pslf: f.pslf.checked, pslf_count: f.pslf_count.value, pslf_as_of: f.pslf_as_of.value,
+      months: Object.fromEntries([...form.querySelectorAll(".pslf-month")].map((s) => [s.dataset.month, s.value === "1"])),
     });
   },
   async "plan-form"(form) {
@@ -1198,18 +1199,6 @@ document.addEventListener("change", async (ev) => {
     await api("/api/investments/tax-year", { id: sel.dataset.id, year: Number(sel.value) });
     closeAllSheets();
     toast(sel.value === "0" ? "Left out" : `Counts for ${sel.value}`);
-    setTimeout(() => reloadHere(), 600);
-  } catch (e) { toast(e.message, true); }
-});
-
-// Loans: whether a month's payment counts toward PSLF.
-document.addEventListener("change", async (ev) => {
-  const sel = ev.target.closest(".pslf-month");
-  if (!sel) return;
-  try {
-    await api("/api/loans/month", { account_id: sel.dataset.account, month: sel.dataset.month, counts: sel.value === "1" });
-    closeAllSheets();
-    toast(sel.value === "1" ? "Counts" : "Doesn't count");
     setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });

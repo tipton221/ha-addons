@@ -869,3 +869,37 @@ a.tile:active { transform: scale(0.98); }
 .pslf-months .grow { display: flex; flex-direction: column; min-width: 0; }
 .pslf-month { width: auto; height: 34px; padding: 0 30px 0 12px; border-radius: var(--r-pill); font-size: 0.82rem; flex: none; }
 .loan-form + * { margin-top: 0; }
+
+/* Investments: chart, then each account with its name across the full width */
+#inv-chart { margin: 6px 0 4px; }
+.chart .nw-line.inv-line-path { stroke: var(--teal); }
+.chart .nw-dot.inv-dot { stroke: var(--teal); }
+.inv-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.inv-name { font-size: 1rem; }
+.inv-line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.inv-line .amount { font-weight: 600; }
+.inv-gain { font-size: 0.88rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inv-gain.up { color: var(--green); }
+.inv-gain.down { color: var(--red); }
+#investments .inv-line .p { display: none; }
+#investments[data-period="3m"] .inv-line .p-3m, #investments[data-period="6m"] .inv-line .p-6m,
+#investments[data-period="ytd"] .inv-line .p-ytd, #investments[data-period="1y"] .inv-line .p-1y,
+#investments[data-period="all"] .inv-line .p-all { display: inline; }
+
+/* Loans: a header line, quiet details, then PSLF progress in its own block */
+.loan-row .grow { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.loan-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.loan-head strong { font-size: 1.02rem; }
+.loan-head .amount { font-weight: 700; white-space: nowrap; }
+.loan-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: -6px; }
+.pslf-block { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); }
+.pslf-top { display: flex; align-items: center; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.pslf-top b { font-size: 1.15rem; }
+.pslf-pill { --c: var(--green); }
+.loan-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 2px; }
+.loan-stats div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.loan-stats b { font-size: 0.95rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.loan-stats .muted.small { font-size: 0.78rem; white-space: nowrap; }
+.loan-stats .up { color: var(--green); }
+.recert-pill { --c: var(--gray); align-self: flex-start; }
+.recert-pill.soon { --c: var(--orange); }
