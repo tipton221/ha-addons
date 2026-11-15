@@ -150,23 +150,55 @@
     return average;
   }
 
-  function donut(host, slices) {
+  // Category donut: hover or tap a slice (or a row in the list) to see that category in the middle;
+  // a second tap, or a click, opens those transactions in Search.
+  function donut(host, slices, totalLabel) {
     host.innerHTML = "";
-    const size = 150, r = 62, sw = 20;
+    const size = Math.min(host.clientWidth || 260, 280), r = size * 0.4, sw = size * 0.13;
     const svg = el("svg", { viewBox: `0 0 ${size} ${size}`, width: size, height: size }, host);
     const total = slices.reduce((a, s) => a + s.value, 0);
-    if (total <= 0) { el("circle", { cx: size / 2, cy: size / 2, r, class: "donut-empty", "stroke-width": sw }, svg); return; }
-    let a0 = -Math.PI / 2;
-    const gap = slices.length > 1 ? 0.025 : 0;
-    for (const s of slices) {
-      const a1 = a0 + (s.value / total) * Math.PI * 2;
-      const s0 = a0 + gap / 2, s1 = Math.max(a1 - gap / 2, s0 + 0.001);
-      const p = (a) => `${(size / 2 + r * Math.cos(a)).toFixed(2)},${(size / 2 + r * Math.sin(a)).toFixed(2)}`;
-      const large = s1 - s0 > Math.PI ? 1 : 0;
-      el("path", { d: `M${p(s0)}A${r},${r} 0 ${large} 1 ${p(s1)}`, stroke: s.color, "stroke-width": sw, fill: "none",
-                   "stroke-linecap": "butt" }, svg);
-      a0 = a1;
+    const c = size / 2;
+    const center = el("g", { class: "donut-center" }, svg);
+    const t1 = el("text", { x: c, y: c - size * 0.07, "text-anchor": "middle", class: "dc-label" }, center);
+    const t2 = el("text", { x: c, y: c + size * 0.05, "text-anchor": "middle", class: "dc-value" }, center);
+    const t3 = el("text", { x: c, y: c + size * 0.14, "text-anchor": "middle", class: "dc-pct" }, center);
+    const show = (i) => {
+      const s = slices[i];
+      t1.textContent = s ? s.name : totalLabel;
+      t2.textContent = money(s ? s.value : total, false);
+      t3.textContent = s ? `${s.pct < 1 ? "<1" : s.pct}% of spending` : `${slices.length} categor${slices.length === 1 ? "y" : "ies"}`;
+      paths.forEach((p, j) => p.classList.toggle("dim", s !== undefined && j !== i));
+      paths.forEach((p, j) => p.classList.toggle("on", j === i));
+    };
+    const paths = [];
+    if (total <= 0) {
+      el("circle", { cx: c, cy: c, r, class: "donut-empty", "stroke-width": sw }, svg);
+      show(-1);
+      return { highlight() {} };
     }
+    let a0 = -Math.PI / 2;
+    const gap = slices.length > 1 ? 0.02 : 0;
+    let picked = -1;
+    slices.forEach((s, i) => {
+      const a1 = a0 + (s.value / total) * Math.PI * 2;
+      const s0 = a0 + gap / 2, s1 = Math.max(a1 - gap / 2, s0 + 0.002);
+      const pt = (a) => `${(c + r * Math.cos(a)).toFixed(2)},${(c + r * Math.sin(a)).toFixed(2)}`;
+      const large = s1 - s0 > Math.PI ? 1 : 0;
+      const path = el("path", { d: `M${pt(s0)}A${r},${r} 0 ${large} 1 ${pt(s1)}`, stroke: s.color, "stroke-width": sw,
+                                fill: "none", class: "slice", tabindex: 0, role: "link", "aria-label": `${s.name} ${money(s.value)}` }, svg);
+      path.addEventListener("pointerenter", (ev) => { if (ev.pointerType === "mouse") show(i); });
+      path.addEventListener("pointerleave", (ev) => { if (ev.pointerType === "mouse") show(picked); });
+      path.addEventListener("focus", () => show(i));
+      path.addEventListener("click", (ev) => {
+        if (ev.pointerType !== "mouse" && picked !== i) { picked = i; show(i); return; }  // first tap: show it
+        location.href = s.href;
+      });
+      paths.push(path);
+      a0 = a1;
+    });
+    svg.addEventListener("pointerdown", (ev) => { if (ev.target === svg) { picked = -1; show(-1); } });
+    show(-1);
+    return { highlight: (i) => show(i < 0 ? picked : i) };
   }
 
   // The month's spending transactions, largest first, as the same editable rows as the Inbox.
@@ -226,16 +258,24 @@
         .sort((a, b) => b.v - a.v);
       const positive = rows.filter((r) => r.v > 0);
       const total = positive.reduce((a, r) => a + r.v, 0);
-      donut(document.getElementById("spend-donut"), positive.map((r) => ({ value: r.v, color: color(r.cat.color) })));
+      const last = new Date(+m.m.slice(0, 4), +m.m.slice(5), 0).getDate();
+      const hrefFor = (id) => {
+        const q = new URLSearchParams({ start: `${m.m}-01`, end: `${m.m}-${String(last).padStart(2, "0")}` });
+        if (id !== "None") q.append("category", id);
+        return `/search?${q}`;
+      };
+      const ring = donut(document.getElementById("spend-donut"), positive.map((r) => ({
+        value: r.v, color: color(r.cat.color), name: r.cat.name, href: hrefFor(r.id),
+        pct: total > 0 ? Math.round((100 * r.v) / total) : 0 })), `Spent in ${MONTHS[+m.m.slice(5) - 1]}`);
       const ul = document.getElementById("spend-cats");
       ul.innerHTML = "";
-      const last = new Date(+m.m.slice(0, 4), +m.m.slice(5), 0).getDate();
       for (const r of rows) {
         const li = document.createElement("li");
         const a = document.createElement("a");
-        const q = new URLSearchParams({ start: `${m.m}-01`, end: `${m.m}-${String(last).padStart(2, "0")}` });
-        if (r.id !== "None") q.append("category", r.id);
-        a.href = `/search?${q}`;
+        a.href = hrefFor(r.id);
+        const idx = positive.indexOf(r);
+        a.addEventListener("pointerenter", () => ring.highlight(idx));
+        a.addEventListener("pointerleave", () => ring.highlight(-1));
         const pct = total > 0 && r.v > 0 ? Math.round((100 * r.v) / total) : 0;
         a.innerHTML = `<span class="cb-name"></span><span class="cb-amt"></span>` +
           `<span class="cb-track"><span class="cb-fill"></span></span><span class="cb-pct"></span>`;
