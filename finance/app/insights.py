@@ -383,7 +383,50 @@ def observations(flow: list[dict], cats: dict[int, dict], today: date) -> list[d
         tiles.append({"tone": tone, "badge": f"Kept {rate}%" if kept >= 0 else "Spent more than came in",
                       "label": label, "value": ("-" if kept < 0 else "") + fmt(kept),
                       "detail": f"{fmt(income)} came in. Spending and debt payments were {fmt(out)}."})
+    if len(tiles) % 2:
+        extra = _extra_tile(done, cats)
+        if extra:
+            tiles.append(extra)
     return tiles
+
+
+def _extra_tile(done: list[dict], cats: dict[int, dict]) -> dict | None:
+    """One more tile so they pair up two per row: money saved or invested lately, else a category
+    well below its usual last month, else last month's top category."""
+    recent = done[-3:]
+    saved = sum(m["saving"] for m in recent)
+    span = f"{calendar.month_abbr[int(recent[0]['m'][5:])]} to {calendar.month_abbr[int(recent[-1]['m'][5:])]}"
+    if saved >= 50:
+        return {"tone": "good", "badge": "Invested", "label": f"Saved or invested, {span}", "value": fmt(saved),
+                "detail": f"About {fmt(saved / len(recent))} a month into retirement, investment, or savings."}
+    last, before = done[-1], done[-7:-1]
+    y, mo = int(last["m"][:4]), int(last["m"][5:])
+    end = calendar.monthrange(y, mo)[1]
+
+    def link(cid):
+        return f"/search?start={last['m']}-01&end={last['m']}-{end:02d}&category={cid}"
+
+    if before:
+        drops = []
+        for cid in {c for m in before for c in m["cats"]}:
+            usual = sum(m["cats"].get(cid, 0) for m in before) / len(before)
+            spent = last["cats"].get(cid, 0)
+            cat = cats.get(int(cid)) if cid != "None" else None
+            if cat and usual >= 100 and spent < 0.6 * usual:
+                drops.append((usual - spent, cid, spent, usual, cat))
+        if drops:
+            diff, cid, spent, usual, cat = max(drops)
+            return {"tone": "good", "badge": f"-{fmt(diff)} vs usual", "label": f"{cat['name']} in {calendar.month_name[mo]}",
+                    "value": fmt(spent), "detail": f"Usually about {fmt(usual)} a month. Tap to see the transactions.",
+                    "cat": int(cid), "href": link(cid)}
+    named = [(v, cid) for cid, v in last["cats"].items() if cid != "None" and cats.get(int(cid)) and v > 0]
+    if named and last["spending"] > 0:
+        v, cid = max(named)
+        cat = cats[int(cid)]
+        return {"tone": "neutral", "badge": "Top category", "label": f"{cat['name']} in {calendar.month_name[mo]}",
+                "value": fmt(v), "detail": f"{round(100 * v / last['spending'])}% of {calendar.month_name[mo]}'s spending. "
+                                           "Tap to see the transactions.", "cat": int(cid), "href": link(cid)}
+    return None
 
 
 def fmt(v: float) -> str:

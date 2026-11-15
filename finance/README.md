@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.0.2:
+
+- Insight tiles always pair up two per row: when there's an odd number, one more is added (money saved or invested over the last three months, else a category well below its usual last month, else last month's top category).
+
 Version 2.0.1:
 
 - Every loan shows a progress bar (paid so far of its original amount, a new optional field), payments left, the payoff month, and the total still to pay with its interest, not only loans working toward PSLF.

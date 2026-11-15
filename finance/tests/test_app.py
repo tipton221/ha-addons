@@ -1695,3 +1695,29 @@ def test_any_loan_shows_progress_and_payoff(tmp_path, monkeypatch):
     assert car["pslf_info"] if car["pslf"] else car["recert"] is None
     with db.connect() as conn:
         assert conn.execute("SELECT pslf_count, pslf_as_of, recert FROM loans").fetchone()[:] == (None, None, None)
+
+
+def test_insight_tiles_pair_up(tmp_path):
+    from app.insights import observations
+    cats = {1: {"name": "Groceries"}, 2: {"name": "Shopping"}}
+
+    def month(m, spend, income, saving=0.0, cats_=None):
+        return {"m": m, "spending": spend, "income": income, "saving": saving, "debt": 0.0, "cats": cats_ or {}}
+    base = [month(f"2026-{m:02d}", 1000, 3000, cats_={"1": 400, "2": 600}) for m in range(4, 10)]
+    today = D(2026, 11, 3)                       # before the 5th: no "so far" tile
+    # Income left over alone (1 tile) gets a partner: last month's top category.
+    flow = base + [month("2026-10", 1000, 3000, cats_={"1": 400, "2": 600}), month("2026-11", 100, 0)]
+    tiles = observations(flow, cats, today)
+    assert len(tiles) == 2 and tiles[1]["badge"] == "Top category" and tiles[1]["label"] == "Shopping in October"
+    # With saving, the partner is the money saved or invested.
+    flow[-2]["saving"] = 750.0
+    tiles = observations(flow, cats, today)
+    assert len(tiles) == 2 and tiles[1]["label"].startswith("Saved or invested")
+    # A category well below usual comes before the top category.
+    flow[-2]["saving"] = 0.0
+    flow[-2]["cats"] = {"1": 100, "2": 600}
+    tiles = observations(flow, cats, today)
+    assert tiles[1]["label"] == "Groceries in October" and tiles[1]["tone"] == "good"
+    # An even count gets nothing extra.
+    tiles = observations(flow, cats, D(2026, 11, 10))
+    assert len(tiles) % 2 == 0
