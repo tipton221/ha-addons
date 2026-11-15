@@ -1325,3 +1325,21 @@ def test_search_sort_orders(tmp_path, monkeypatch):
         assert order("min=1&sort=largest") == ["Acorn Toys", "Book Barn", "Corner Cafe"]
         assert order("min=1&sort=smallest") == ["Corner Cafe", "Book Barn", "Acorn Toys"]
         assert "Nothing found" in c.get("/search?q=zzz&sort=name").text
+
+
+def test_bill_learns_merchant_from_hand_tagged_charge(tmp_path, monkeypatch):
+    from app.ledger import list_transactions, resolve
+    # The bank calls these "ACME INVEST XFER"; the bill's own match text ("brokerage deposit") never appears.
+    rows = [(f"x{m}", "chk", f"2026-{m:02d}-{15 + (m % 3)}", "ACME INVEST XFER", None, 250.0, 0, "TRANSFER_OUT", "X", 1)
+            for m in range(5, 11)]
+    rows.append(("other", "chk", "2026-10-02", "ACME INVEST XFER", None, 1900.0, 0, "TRANSFER_OUT", "X", 1))
+    db, app = client_with(tmp_path, monkeypatch, rows, [("chk", "Checking", "depository", 0, 0)])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) "
+                     "VALUES ('Brokerage deposit', 'brokerage deposit', 250, 'monthly', 15)")
+        bill_id = conn.execute("SELECT id FROM bills").fetchone()[0]
+    tagged = lambda: {t["id"] for t in resolve(db, list_transactions(db, limit=0)) if t["bill"]}
+    assert tagged() == set()
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET bill_id=? WHERE id='x10'", (bill_id,))
+    assert tagged() == {f"x{m}" for m in range(5, 11)}  # every monthly $250, a day or two off the 15th too

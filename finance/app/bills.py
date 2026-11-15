@@ -174,19 +174,25 @@ def _bill_status(db: Database, today: date) -> list[dict]:
         rows = [dict(r) for r in conn.execute(
             "SELECT merchant, name, date, amount, account_id, bill_id FROM transactions "
             "WHERE source='plaid' AND amount != 0 ORDER BY date DESC")]
+    learned: dict[int, set[str]] = {}
     for r in rows:
         r["key"] = normalize(r["merchant"] or r["name"])  # once per row, not once per bill
+        if r["bill_id"] and r["key"]:
+            learned.setdefault(r["bill_id"], set()).add(r["key"])
     for b in bills:
+        # What a charge's bank merchant must contain: the bill's match text, plus the merchant of every
+        # transaction you set to this bill yourself (so its other charges get the tag too).
+        b["keys"] = tuple(sorted({b["match"]} - {""} | learned.get(b["id"], set())))
         income = b.get("kind") == "income"
         # (merchant key, date, amount as a positive number, account). Income bills look at money in.
         # A transaction marked "not a bill" or set to another bill is skipped; one set to this bill always counts.
-        charges = [(b["match"] if r["bill_id"] == b["id"] else r["key"],
+        charges = [(b["keys"][0] if r["bill_id"] == b["id"] and b["keys"] else r["key"],
                     r["date"], abs(r["amount"]), r["account_id"]) for r in rows
                    if (r["amount"] < 0) == income and (r["bill_id"] is None or r["bill_id"] == b["id"])]
         if b.get("varies"):
             # Varying bills (utilities): any charge from the merchant counts, and the expected
             # amount is the average of the most recent ones.
-            hits = [c for c in charges if b["match"] and b["match"] in c[0]][:VARIES_SAMPLES]
+            hits = [c for c in charges if has_key(b, c[0])][:VARIES_SAMPLES]
             hit = hits[0] if hits else None
             if hits:
                 b["amount"] = round(statistics.mean(h[2] for h in hits), 2)
@@ -194,7 +200,7 @@ def _bill_status(db: Database, today: date) -> list[dict]:
         else:
             # Same merchant and a similar amount, so one Amazon Prime bill does not match every Amazon order.
             # A close amount (or a charge assigned to this bill) wins over a merely similar one.
-            near = [c for c in charges if b["match"] and b["match"] in c[0]
+            near = [c for c in charges if has_key(b, c[0])
                     and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])]
             hit = next((c for c in near if amount_matches(b, c[2])), near[0] if near else None)
         row = {"date": hit[1], "amount": hit[2]} if hit else None
@@ -229,6 +235,13 @@ def _bill_status(db: Database, today: date) -> list[dict]:
             advance(date.fromisoformat(row["date"]), cadence) + timedelta(days=STALE_GRACE_DAYS) < today)
         b["monthly_equivalent"] = b["amount"] * PER_MONTH.get(cadence, 1)
     return bills
+
+
+def has_key(bill: dict, key: str) -> bool:
+    """Whether a merchant key belongs to the bill: it contains the match text or a merchant
+    learned from transactions set to the bill by hand."""
+    keys = bill.get("keys") or ((bill["match"],) if bill.get("match") else ())
+    return any(k and k in key for k in keys)
 
 
 def amount_matches(bill: dict, amount: float) -> bool:
@@ -315,7 +328,7 @@ def bill_matches(bill: dict, key: str, amount: float, d: date, series: "Series |
       bill's schedule; or the exact amount repeats one cycle away and is within 35% (an older price).
     - varying bills: the charge falls on the schedule or another charge comes about a cycle away.
     One-off purchases from the same merchant (an Amazon order next to Prime Video) do neither."""
-    if not bill["match"] or bill["match"] not in key:
+    if not has_key(bill, key):
         return False
     series = series or []
     cadence = bill.get("cadence") or "monthly"
@@ -336,7 +349,7 @@ _series_cache: dict = {}
 
 def bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, float]]]:
     """Posted charges (deposits for income) from each bill's merchant, for repeat checks."""
-    key = (str(db.path), db.revision(), tuple((b["id"], b["match"], b.get("kind")) for b in bills))
+    key = (str(db.path), db.revision(), tuple((b["id"], b.get("keys") or b["match"], b.get("kind")) for b in bills))
     if key not in _series_cache:
         _series_cache.clear()
         _series_cache[key] = {bid: Series(items) for bid, items in _bill_series(db, bills).items()}
@@ -353,7 +366,7 @@ def _bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, 
     for b in bills:
         income = b.get("kind") == "income"
         out[b["id"]] = [(d, abs(a)) for k, d, a, bid in keyed
-                        if (a < 0) == income and bid in (None, b["id"]) and b["match"] and b["match"] in k]
+                        if (a < 0) == income and bid in (None, b["id"]) and has_key(b, k)]
     return out
 
 
