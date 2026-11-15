@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 1.14.2:
+
+- A debt entered by hand counts in net worth before its first balance too, so adding an existing loan doesn't look like a drop in net worth that month. With a rate and payment the balance is worked backward month by month (each earlier month adds back a payment less its interest); without them the first balance carries back as is.
+
 Version 1.14.1:
 
 - Investments: a balance chart (week by week) for the chosen period, and each account's name on its own line across the full width.

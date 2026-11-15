@@ -113,6 +113,8 @@ def account_series(db: Database, today: date) -> list[dict]:
         manual = defaultdict(list)
         for r in conn.execute("SELECT account_id, day, balance FROM manual_balances"):
             manual[r["account_id"]].append((r["day"], r["balance"]))
+        loan_terms = {r["account_id"]: (r["rate"] or 0.0, r["payment"] or 0.0)
+                      for r in conn.execute("SELECT account_id, rate, payment FROM loans")}
 
     ynab = {a["account_id"]: _running(ynab_days[a["account_id"]]) for a in accts if a["source"] == "ynab"}
     linked = {y for ys in links.values() for y in ys}
@@ -161,10 +163,24 @@ def account_series(db: Database, today: date) -> list[dict]:
                 return (y[1], "ynab") if y else (None, None)
         elif a["source"] == "manual":
             ms, sign = Series(manual[aid]), (-1 if debt else 1)
+            # A debt entered by hand existed before its first balance: earlier months carry it back,
+            # undoing the loan's payments (less interest) month by month when its terms are known.
+            back = loan_terms.get(aid, (0.0, 0.0)) if debt and ms.first else None
 
-            def value(day, ms=ms, sign=sign):
+            def value(day, ms=ms, sign=sign, back=back):
                 m = ms.at(day)
-                return (sign * abs(m[1]), "manual") if m else (None, None)
+                if m:
+                    return sign * abs(m[1]), "manual"
+                if back is None:
+                    return None, None
+                first_day, bal = ms.days[0], abs(ms.values[0])
+                months = round((date.fromisoformat(first_day) - date.fromisoformat(day)).days / 30.44)
+                rate, payment = back
+                for _ in range(months):
+                    if payment <= 0:
+                        break
+                    bal = (bal + payment) / (1 + rate / 100 / 12)
+                return sign * round(bal, 2), "estimate"
         else:
             continue
         out.append({"id": aid, "name": label, "source": a["source"], "type": a.get("type"),
