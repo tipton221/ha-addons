@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS investment_txns (
 );
 CREATE INDEX IF NOT EXISTS investment_txns_account ON investment_txns (account_id, date);
 
+-- Which year an IRA contribution counts for (0: not a contribution). id is an investment_txns id,
+-- or "ynab:" + a YNAB transaction id for contributions known only from YNAB.
+CREATE TABLE IF NOT EXISTS contribution_years (
+    id              TEXT PRIMARY KEY,
+    year            INTEGER NOT NULL
+);
+
 -- Current holdings per investment account (replaced on every sync).
 CREATE TABLE IF NOT EXISTS holdings (
     account_id      TEXT NOT NULL,

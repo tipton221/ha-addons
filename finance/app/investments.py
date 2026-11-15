@@ -172,6 +172,10 @@ def returns(db: Database, today: date) -> dict:
         holdings = defaultdict(list)
         for r in conn.execute("SELECT * FROM holdings ORDER BY value DESC"):
             holdings[r["account_id"]].append(dict(r))
+        activity = defaultdict(list)
+        for r in conn.execute("SELECT * FROM investment_txns ORDER BY date DESC"):
+            if len(activity[r["account_id"]]) < 25:
+                activity[r["account_id"]].append(dict(r))
     end_s = today.isoformat()
     rows = []
     totals = {}
@@ -183,7 +187,8 @@ def returns(db: Database, today: date) -> dict:
         first = _first_day(a["value"], date(1990, 1, 1), today)
         first_any = min(first_any or first, first)
         a_out = {"id": a["id"], "name": a["name"], "value": round(now, 2), "source": a["source"],
-                 "periods": {}, "holdings": holdings.get(a["id"], []), "first": first.isoformat()}
+                 "periods": {}, "holdings": holdings.get(a["id"], []), "first": first.isoformat(),
+                 "activity": activity.get(a["id"], [])}
         rows.append((a, a_out))
     for key, _label in PERIODS:
         start = period_start(key, today) if key != "all" else (first_any - timedelta(days=1) if first_any else None)
@@ -230,20 +235,51 @@ def returns(db: Database, today: date) -> dict:
 # ---------------------------------------------------------------- contribution limits
 
 def ira_contributions(db: Database) -> list[dict]:
-    """Contributions into IRA accounts (Plaid Investments activity), with the year each counts for."""
+    """Money into IRA accounts, with the year each counts for. From Plaid Investments activity, and
+    before that activity starts (or when the provider doesn't report it), from YNAB transfers into
+    the IRA's linked YNAB account."""
+    ira_marks = ",".join("?" * len(IRA_SUBTYPES))
     with db.connect() as conn:
+        accts = {r["account_id"]: r["name"] for r in conn.execute(
+            f"SELECT account_id, COALESCE(display_name, name) AS name FROM accounts WHERE source='plaid' "
+            f"AND subtype IN ({ira_marks})", tuple(IRA_SUBTYPES))}
+        choices = {r["id"]: r["year"] for r in conn.execute("SELECT id, year FROM contribution_years")}
         rows = [dict(r) for r in conn.execute(
-            "SELECT t.id, t.account_id, t.date, t.name, t.amount, t.subtype, t.tax_year, "
-            "COALESCE(a.display_name, a.name) AS account FROM investment_txns t JOIN accounts a ON a.account_id = t.account_id "
-            f"WHERE a.subtype IN ({','.join('?' * len(IRA_SUBTYPES))}) AND t.type IN ('cash', 'transfer') AND t.amount < 0 "
-            f"AND t.subtype IN ({','.join('?' * len(CONTRIBUTION_SUBTYPES))}) ORDER BY t.date DESC",
+            "SELECT t.id, t.account_id, t.date, t.name, t.amount, t.type, t.subtype, t.tax_year FROM investment_txns t "
+            f"WHERE t.account_id IN (SELECT account_id FROM accounts WHERE source='plaid' AND subtype IN ({ira_marks})) "
+            f"AND t.type IN ('cash', 'transfer') AND t.amount < 0 "
+            f"AND t.subtype IN ({','.join('?' * len(CONTRIBUTION_SUBTYPES))})",
             tuple(IRA_SUBTYPES) + tuple(CONTRIBUTION_SUBTYPES))]
+        plaid_from = {r["account_id"]: r["d"] for r in conn.execute(
+            "SELECT account_id, MIN(date) AS d FROM investment_txns GROUP BY account_id")}
+        links = defaultdict(list)
+        for r in conn.execute("SELECT plaid_account_id, ynab_account_id FROM account_links"):
+            links[r["plaid_account_id"]].append(r["ynab_account_id"])
+        for aid in accts:
+            ynab_ids = links.get(aid, [])
+            if not ynab_ids:
+                continue
+            for r in conn.execute(f"SELECT id, date, name, amount, raw FROM transactions WHERE source='ynab' AND "
+                                  f"account_id IN ({','.join('?' * len(ynab_ids))}) AND amount < 0", tuple(ynab_ids)):
+                if aid in plaid_from and r["date"] >= plaid_from[aid]:
+                    continue
+                try:
+                    raw = json.loads(r["raw"] or "{}")
+                except ValueError:
+                    raw = {}
+                if raw.get("transfer_account_id"):
+                    rows.append({"id": "ynab:" + r["id"], "account_id": aid, "date": r["date"], "name": r["name"],
+                                 "amount": r["amount"], "type": "ynab", "subtype": "transfer", "tax_year": None})
     for r in rows:
         d = date.fromisoformat(r["date"])
         r["amount"] = -r["amount"]
+        r["account"] = accts.get(r["account_id"], "")
         r["own_year"] = d.year
-        r["year"] = d.year if r["tax_year"] is None else r["tax_year"]   # 0: not a contribution
+        chosen = choices.get(r["id"], r["tax_year"])
+        r["year"] = d.year if chosen is None else chosen   # 0: not a contribution
         r["can_switch"] = (d.month, d.day) <= IRA_PRIOR_YEAR_UNTIL
+        r["source"] = "YNAB" if r["type"] == "ynab" else "Plaid"
+    rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
 
 

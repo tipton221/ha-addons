@@ -76,7 +76,7 @@
     {% for a in inv.accounts %}
     <li class="edit-row" role="button" tabindex="0" data-editor="inv-{{ loop.index }}">
       <div class="grow">
-        <strong>{{ a.name }}</strong>
+        <strong>{{ a.name | keep }}</strong>
         {% if a.first >= today %}<span class="muted small">History starts today; gains show from tomorrow</span>{% else %}
         {% for key, _ in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
         <span class="muted small p p-{{ key }}">{% if p.needs %}Needs a balance near {{ p.needs | shortdate }}{% elif p.put_in %}{{ p.put_in | money }} put in{% else %}Nothing put in{% endif %}{% if p.since %} · since {{ p.since | shortdate }}{% endif %}</span>
@@ -91,7 +91,7 @@
       </div>
       <span class="chev" aria-hidden="true">›</span>
       <template id="inv-{{ loop.index }}">
-        <h3 class="sheet-title">{{ a.name }}</h3>
+        <h3 class="sheet-title">{{ a.name | keep }}</h3>
         <ul class="list period-table">
           <li class="mt-head"><span>Period</span><span>Put in</span><span>Gain</span><span>Return</span></li>
           {% for key, label in inv.periods %}{% set p = a.periods.get(key) %}{% if p %}
@@ -114,6 +114,17 @@
               {% if h.cost_basis %}{% set g = (h.value or 0) - h.cost_basis %}<span class="small {{ 'up' if g >= 0 else 'down' }}">{{ signed(g) }} vs cost</span>{% endif %}</span></li>
           {% endfor %}
         </ul>
+        {% endif %}
+        {% if a.activity %}
+        <p class="section-label">Activity from Plaid</p>
+        <ul class="list activity">
+          {% for t in a.activity %}
+          <li class="plain-row"><span class="grow"><strong>{{ t.name or (t.subtype or t.type or "") | capitalize }}</strong>
+            <span class="muted small">{{ t.date | shortdate }} · {{ t.type }}{% if t.subtype and t.subtype != t.type %} / {{ t.subtype }}{% endif %}</span></span>
+            <span class="amount {% if t.amount < 0 %}inflow{% endif %}">{{ (0 - t.amount) | money }}</span></li>
+          {% endfor %}
+        </ul>
+        <p class="hint">Latest 25. Money in shows as positive. Contributions, deposits, withdrawals, and transfers count as money put in or taken out; buys, sells, and dividends are part of the gain.</p>
         {% endif %}
         <button type="button" class="wide-btn track-toggle" data-account="{{ a.id }}">Hide from Investments</button>
         <div class="sheet-actions"><button type="button" class="sheet-close">Close</button></div>
@@ -145,7 +156,7 @@
         {% macro ira_rows(items) %}
         <ul class="list ira-items">
           {% for c in items %}{% set d = c.own_year %}
-          <li class="plain-row"><span class="grow"><strong>{{ c.amount | money }}</strong><span class="muted small">{{ c.date | shortdate }} · {{ c.name or c.subtype | capitalize }} · {{ c.account }}</span></span>
+          <li class="plain-row"><span class="grow"><strong>{{ c.amount | money }}</strong><span class="muted small">{{ c.date | shortdate }} · {{ c.name or c.subtype | capitalize }} · {{ c.account }} · from {{ c.source }}</span></span>
             <select class="tax-year" data-id="{{ c.id }}" aria-label="Counts for">
               <option value="{{ d }}" {% if c.year == d %}selected{% endif %}>Counts for {{ d }}</option>
               {% if c.can_switch %}<option value="{{ d - 1 }}" {% if c.year == d - 1 %}selected{% endif %}>Counts for {{ d - 1 }}</option>{% endif %}

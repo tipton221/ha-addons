@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import csv
 import io
 import json
+import re
 import secrets
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -166,6 +167,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     # Static files carry a version in their URL, so an update never runs with an old cached script.
     templates.env.globals["asset_v"] = str(int(max(f.stat().st_mtime for f in (HERE / "static").rglob("*") if f.is_file())))
+    # Keep a short trailing part with the word before it: "403 (b)" never breaks before "(b)".
+    templates.env.filters["keep"] = lambda text: re.sub(r" (\(?\w{1,3}\)?)$", "\u00a0\\1", str(text or ""))
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = {
@@ -1139,8 +1142,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def set_contribution_year(request: Request):
         """Count an early-year IRA contribution for the year before (or back for its own year)."""
         body = await request.json()
+        cid = str(body.get("id") or "")
         with db.connect() as conn:
-            row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (str(body.get("id") or ""),)).fetchone()
+            if cid.startswith("ynab:"):
+                row = conn.execute("SELECT date FROM transactions WHERE source='ynab' AND id=?", (cid[5:],)).fetchone()
+            else:
+                row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (cid,)).fetchone()
             if not row:
                 raise HTTPException(404, "Contribution not found")
             d = date.fromisoformat(row["date"])
@@ -1149,8 +1156,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             early = (d.month, d.day) <= (4, 15)
             if year not in ((y, y - 1, 0) if early else (y, 0)):
                 raise HTTPException(400, "It can count for its own year, the year before (through April 15), or not at all")
-            conn.execute("UPDATE investment_txns SET tax_year=? WHERE id=?",
-                         (None if year == y else year, str(body["id"])))
+            if year == y:
+                conn.execute("DELETE FROM contribution_years WHERE id=?", (cid,))
+            else:
+                conn.execute("INSERT INTO contribution_years VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET year=excluded.year",
+                             (cid, year))
+            conn.execute("UPDATE investment_txns SET tax_year=NULL WHERE id=?", (cid,))
         return {"ok": True}
 
     @app.post("/api/balances/delete")

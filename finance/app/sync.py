@@ -153,8 +153,10 @@ async def refresh_accounts(db: Database, plaid: Plaid, item: dict) -> None:
                 (a["account_id"], datetime.now(PACIFIC).date().isoformat(), b.get("current"), b.get("available")))
 
 
-INVESTMENT_HISTORY_DAYS = 730   # Plaid keeps up to 24 months of investment transactions
-INVESTMENT_RECENT_DAYS = 30     # later syncs refresh this much (late or corrected entries)
+# Plaid keeps up to 24 months of investment transactions. Every sync asks for all of it: right after
+# Investments is added, Plaid may still be loading the history, and a shorter window would never
+# pick it up later.
+INVESTMENT_HISTORY_DAYS = 730
 INVESTMENT_UNAVAILABLE = {"PRODUCTS_NOT_SUPPORTED", "NO_INVESTMENT_ACCOUNTS", "PRODUCT_NOT_ENABLED",
                           "INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED_FOR_INSTITUTION"}
 
@@ -164,7 +166,7 @@ async def sync_investments(db: Database, plaid: Plaid, item: dict) -> dict:
     try:
         holdings = await plaid.investments_holdings(item["access_token"])
         today = datetime.now(PACIFIC).date()
-        days = INVESTMENT_RECENT_DAYS if item.get("investments_synced") else INVESTMENT_HISTORY_DAYS
+        days = INVESTMENT_HISTORY_DAYS
         activity = await plaid.investments_transactions(
             item["access_token"], (today - timedelta(days=days)).isoformat(), today.isoformat())
     except PlaidError as e:
