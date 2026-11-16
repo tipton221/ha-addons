@@ -1846,3 +1846,29 @@ def test_web_push_encryption_and_messages(tmp_path, monkeypatch):
     assert _json.loads(decrypt(r.content, ua, auth)) == {"title": "T", "badge": 1}
     with db.connect() as conn:  # the gone subscription is dropped
         assert [x[0] for x in conn.execute("SELECT endpoint FROM push_subs")] == ["https://push.example.test/abc"]
+
+
+def test_all_caught_up_clears_other_devices(tmp_path, monkeypatch):
+    import app.main as main_mod
+    sent = []
+
+    async def fake_send(db, message, subject, client=None, skip=""):
+        sent.append((message, skip))
+        return 1
+    monkeypatch.setattr(main_mod, "push_send", fake_send)
+    rows = [("a", "card", "2026-11-15", "SHOP", "Shop", 5.0, 0, "GENERAL_MERCHANDISE", "X", 0)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        db.set_kv("push_last_badge", "1")
+        clear = lambda: c.post("/api/push/all-clear", json={"endpoint": "https://push.example.test/me"}, headers=H).json()
+        assert clear() == {"sent": 0}                          # setting off
+        c.post("/api/push/settings", json={"clear_others": True}, headers=H)
+        assert clear() == {"sent": 0}                          # one still waiting
+        with db.connect() as conn:
+            conn.execute("UPDATE transactions SET reviewed=1")
+        assert clear() == {"sent": 1}
+        msg, skip = sent[-1]
+        assert msg["title"] == "All caught up" and msg["quiet"] and msg["badge"] == 0 and skip.endswith("/me")
+        assert clear() == {"sent": 0}                          # only once until something new is pushed

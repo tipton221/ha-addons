@@ -1242,6 +1242,22 @@ function appBadge() {
     return sum + (el && !el.hidden ? Number(el.textContent) || 0 : 0);
   }, 0);
   (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { /* not allowed yet */ });
+  if (!n) allClear();
+}
+
+// Caught up: close this device's Finance notifications, and (if that setting is on) have the server
+// replace the old notification on the other devices. Once per page.
+let allClearSent = false;
+async function allClear() {
+  if (allClearSent || !("serviceWorker" in navigator)) return;
+  allClearSent = true;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    if (!reg) return;
+    if (reg.getNotifications) (await reg.getNotifications({ tag: "finance" })).forEach((x) => x.close());
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await api("/api/push/all-clear", { endpoint: sub.endpoint });
+  } catch { /* nothing to clear */ }
 }
 // Notifications: a service worker shows pushes from the Pi and keeps the icon badge current.
 const pushOK = () => "serviceWorker" in navigator && "PushManager" in window && typeof Notification !== "undefined";
@@ -1272,6 +1288,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     const denied = Notification.permission === "denied";
     on.hidden = !!sub || denied; test.hidden = !sub; off.hidden = !sub;
+    document.getElementById("push-clear-row").hidden = !sub;
     text.textContent = denied
       ? "Notifications are off for this app. Turn them on in Settings › Notifications › Finance, then come back here."
       : sub ? "On for this device: new transactions and connection problems send a notification, and the icon shows the count."
@@ -1290,6 +1307,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       toast("Notifications on");
     } catch (e) { toast(e.message || "Couldn't turn on notifications", true); }
     await show();
+  });
+  document.getElementById("push-clear-others").addEventListener("change", async (ev) => {
+    try { await api("/api/push/settings", { clear_others: ev.target.checked }); toast("Saved"); }
+    catch (e) { toast(e.message, true); }
   });
   test.addEventListener("click", async () => {
     try { await api("/api/push/test"); toast("Sent"); } catch (e) { toast(e.message, true); }

@@ -171,6 +171,7 @@
   <div class="card-head"><h2>Notifications</h2></div>
   <p class="muted small" id="push-text">Get a notification when new transactions arrive or a bank connection needs attention, and keep the count on the app's icon current. On this device only.</p>
   <button type="button" class="wide-btn" id="push-enable">Turn on notifications</button>
+  <label class="inline" id="push-clear-row" hidden><input type="checkbox" id="push-clear-others" {% if push_clear_others %}checked{% endif %}> When I'm caught up here, clear my other devices too (they get a quiet "All caught up" notification in place of the old one)</label>
   <button type="button" class="wide-btn" id="push-test" hidden>Send a test</button>
   <button type="button" class="wide-btn" id="push-disable" hidden>Turn off on this device</button>
 </section>
