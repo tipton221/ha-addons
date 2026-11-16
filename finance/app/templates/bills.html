@@ -22,8 +22,8 @@
   <details class="scheduled sched-panel transit-panel" id="transit"{% if late %} open{% endif %}>
     <summary>
       <span class="sched-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></svg></span>
-      <span class="sched-title">In transit <span class="count sched-count">{{ cov.transit | length }}</span></span>
-      <span class="muted small sched-next">{% if late %}{{ late | length }} with no match after 7 days{% else %}One account shows it, the other doesn't yet{% endif %}</span>
+      <span class="sched-title{% if not late %} alone{% endif %}">In transit <span class="count sched-count">{{ cov.transit | length }}</span></span>
+      {% if late %}<span class="muted small sched-next">{{ late | length }} with no match after 7 days</span>{% endif %}
       {% set counted = cov.transit | rejectattr("late") | list %}
       <span class="sched-total small">{% if counted %}{{ counted | sum(attribute="amount") | money }}{% endif %}</span>
       <span class="chev-down" aria-hidden="true">›</span>
@@ -34,13 +34,14 @@
       <div class="grow">
         <strong>{% if t.out %}{{ t.account_name }} to {{ t.other_name }}{% else %}{{ t.other_name }} to {{ t.account_name }}{% endif %}</strong>
         {% set tx = transit_txns.get(t.id) %}
-        <span class="muted small transit-meta">{{ t.date | shortdate }}{% if tx %} · {{ tx.display_name }}{% endif %}
-          {% if t.late %}<span class="pill tag transit-status late">No match after 7 days · not counted</span>
-          {% elif t.other_pending %}<span class="pill tag transit-status">Pending in {{ t.other_name }}</span>
-          {% else %}<span class="pill tag transit-status">Waiting on {{ t.other_name }}</span>{% endif %}</span>
+        <span class="muted small transit-meta">{{ t.date | shortdate }}{% if tx %} · {{ tx.display_name }}{% endif %}</span>
       </div>
       <span class="amount">{{ t.amount | money }}</span>
       <span class="chev" aria-hidden="true">›</span>
+      <span class="transit-status-row">
+          {% if t.late %}<span class="pill tag transit-status late">No match after 7 days · not counted</span>
+          {% elif t.other_pending %}<span class="pill tag transit-status">Pending in {{ t.other_name }}</span>
+          {% else %}<span class="pill tag transit-status">Waiting on {{ t.other_name }}</span>{% endif %}</span>
       <template id="transit-{{ loop.index }}">
         <h3 class="sheet-title">{{ t.amount | money }} {{ "to" if t.out else "from" }} {{ t.other_name }}</h3>
         <form class="transit-form editor-form" data-id="{{ t.id }}" autocomplete="off">

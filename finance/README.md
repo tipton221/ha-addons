@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.5:
+
+- In transit items: the accounts use the full width (smaller on phones), the amount sits beside the date, and the status pill has its own line so it doesn't wrap. The panel header drops its explanation line and only shows a line when something has no match after 7 days.
+
 Version 2.2.4:
 
 - Editing a transaction applies to just that one by default; choose "All from this merchant" to change every transaction from it.
