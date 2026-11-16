@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.3:
+
+- The Scheduled panel's "Next" line gets its own row across the panel and wraps instead of being cut off.
+
 Version 2.2.2:
 
 - The Inbox's Scheduled list collapses into a tinted panel with a calendar icon, the count, the next bill and its date, and the totals, so it's hard to miss.

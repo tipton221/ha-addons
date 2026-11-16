@@ -965,3 +965,16 @@ details.sched-panel > summary { padding: 12px 14px; gap: 12px; cursor: pointer; 
 .sched-panel .list { padding: 0 14px; }
 .sched-panel .chev-down { flex: none; width: 14px; text-align: center; margin-right: 2px; }
 .sched-panel { overflow: hidden; }
+
+/* Scheduled panel: icon, title, totals, and chevron on the first line; the next bill gets its own
+   line underneath, as wide as the panel allows, so its name isn't cut off */
+details.sched-panel > summary { display: grid; grid-template-columns: auto 1fr auto auto; column-gap: 12px; row-gap: 2px; align-items: center; }
+.sched-panel .sched-icon { grid-row: 1 / span 2; }
+.sched-panel .sched-title { grid-column: 2; grid-row: 1; }
+.sched-panel .sched-total { grid-column: 3; grid-row: 1 / span 2; }
+.sched-panel .chev-down { grid-column: 4; grid-row: 1 / span 2; }
+.sched-panel .sched-next { grid-column: 2 / 4; grid-row: 2; font-weight: 500; }
+@media (max-width: 640px) {
+  .sched-panel .sched-total { grid-row: 1; }
+  .sched-panel .sched-next { grid-column: 2 / 5; }
+}
