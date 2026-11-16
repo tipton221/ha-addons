@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.1.1:
+
+- The Inbox tab shows a red badge with the number of transactions to review, on every page, and it counts down as you review them.
+
 Version 2.1.0:
 
 - Bills can repeat every N months or every N years (for example a license renewed every 2 years).

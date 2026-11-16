@@ -171,6 +171,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     # Keep a short trailing part with the word before it: "403 (b)" never breaks before "(b)".
     templates.env.filters["keep"] = lambda text: re.sub(r" (\(?\w{1,3}\)?)$", "\u00a0\\1", str(text or ""))
     templates.env.filters["month_label"] = lambda m: date(int(m[:4]), int(m[5:7]), 1).strftime("%b %Y") if m else ""
+    def inbox_count() -> int:
+        with db.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM transactions WHERE source='plaid' AND reviewed=0").fetchone()[0]
+    templates.env.globals["inbox_count"] = inbox_count  # the badge on the Inbox tab
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = CadenceLabels()

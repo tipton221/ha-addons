@@ -1775,3 +1775,17 @@ def test_every_n_years_and_payment_window(tmp_path, monkeypatch):
     assert b["next_due"] == D(2029, 3, 31) and not coverage(db, sched, later)["due"]
     tagged = {t["id"] for t in resolve(db, list_transactions(db, limit=0), later) if t["bill"]}
     assert "r2" in tagged
+
+
+def test_inbox_tab_badge(tmp_path, monkeypatch):
+    rows = [("a", "card", "2026-11-15", "SHOP", "Shop", 5.0, 0, "GENERAL_MERCHANDISE", "X", 0),
+            ("b", "card", "2026-11-15", "SHOP", "Shop", 6.0, 0, "GENERAL_MERCHANDISE", "X", 0),
+            ("c", "card", "2026-11-14", "SHOP", "Shop", 7.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        page = c.get("/bills").text
+        assert 'id="tab-badge" aria-label="2 to review">2</span>' in page
+        with db.connect() as conn:
+            conn.execute("UPDATE transactions SET reviewed=1")
+        assert 'aria-label="0 to review" hidden>0</span>' in c.get("/bills").text

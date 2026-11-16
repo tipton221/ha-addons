@@ -959,6 +959,8 @@ const pages = {
       const n = list.querySelectorAll(".txn-item:not(.leaving)").length;
       count.textContent = n;
       count.classList.toggle("zero", !n);
+      const badge = document.getElementById("tab-badge");
+      if (badge) { badge.textContent = n; badge.hidden = !n; badge.setAttribute("aria-label", `${n} to review`); }
       count.classList.remove("done-pop"); void count.offsetWidth; count.classList.add("done-pop");
       if (!n) {
         const empty = document.getElementById("inbox-empty");
