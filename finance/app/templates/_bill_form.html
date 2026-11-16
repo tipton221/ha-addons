@@ -12,16 +12,18 @@
   <div class="grid2">
     <label>Title<input name="title" type="text" required maxlength="80" value="{{ v.name if v else '' }}"></label>
     <label>Amount<input name="amount" type="text" inputmode="numeric" class="money" placeholder="{{ 'Average of recent ones' if v and v.varies else '0.00' }}" value="{{ '{:,.2f}'.format(v.amount) if v and v.amount else '' }}" {% if v and v.varies %}disabled{% endif %}></label>
+    {% set cp = cadence_parts(v.cadence if v else "monthly") %}
     <label>Repeats
-      <select name="cadence">
-        {% for c in ["monthly", "biweekly", "quarterly", "semiannual", "yearly"] %}
-        <option value="{{ c }}" {% if v and v.cadence == c %}selected{% endif %}>{{ {"monthly": "Monthly", "biweekly": "Every 2 weeks", "quarterly": "Every 3 months", "semiannual": "Every 6 months", "yearly": "Yearly"}[c] }}</option>
+      <select name="cadence" class="cadence-pick">
+        {% for c, label in [("monthly", "Monthly"), ("biweekly", "Every 2 weeks"), ("quarterly", "Every 3 months"), ("semiannual", "Every 6 months"), ("yearly", "Yearly"), ("months", "Every … months"), ("years", "Every … years")] %}
+        <option value="{{ c }}" {% if cp[0] == c %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>
+    <label class="every-field" {% if cp[0] not in ("months", "years") %}hidden{% endif %}>{{ "Years" if cp[0] == "years" else "Months" }} between<input name="every" type="number" min="1" max="600" value="{{ cp[1] }}" placeholder="2"></label>
     <label>Day of month<input name="due_day" type="number" min="1" max="31" value="{{ v.due_day if v and v.due_day else '' }}"></label>
     <label>Match text<input name="match" type="text" value="{{ v.match if v else '' }}" placeholder="same as title"></label>
-    <label>Next date (optional)<input name="next_due" type="date" value="{{ v.next_due_override if v and v.next_due_override else '' }}"></label>
+    <label><span class="date-fixed" {% if v and v.window_months %}hidden{% endif %}>Next date (optional)</span><span class="date-window" {% if not (v and v.window_months) %}hidden{% endif %}>Due by</span><input name="next_due" type="date" value="{{ v.next_due_override if v and v.next_due_override else '' }}"></label>
   </div>
   {% set labels = {} %}{% for a in accounts %}{% set _ = labels.update({a.account_id: a.label}) %}{% endfor %}
   <label><span class="kind-bill" {% if income %}hidden{% endif %}>Paid with</span><span class="kind-income" {% if not income %}hidden{% endif %}>Deposited to</span>
@@ -39,6 +41,11 @@
   <label>Tag color</label>
   {{ color_picker(v.color if v and v.color else ("green" if income else "purple"), colors, "purple") }}
   <label class="inline"><input name="varies" type="checkbox" {% if v and v.varies %}checked{% endif %}> Amount varies (use the average of recent ones)</label>
+  <label class="inline"><input name="date_varies" type="checkbox" class="date-varies" {% if v and v.window_months %}checked{% endif %}> Date varies (paid any time in a window before it's due)</label>
+  <fieldset class="window-fields"{% if not (v and v.window_months) %} disabled{% endif %}>
+    <label>Can be paid up to this many months early<input name="window_months" type="number" min="1" max="120" value="{{ v.window_months if v and v.window_months else '' }}" placeholder="2"></label>
+    <p class="hint">Set "Due by" to the deadline, like a registration's expiration. A payment any time in the window counts, the next due date follows the schedule rather than the day you paid, and coverage sets the amount aside from the day the window opens until it's paid.</p>
+  </fieldset>
   <label class="inline kind-income" {% if not income %}hidden{% endif %}><input name="is_payday" type="checkbox" {% if v and v.is_payday %}checked{% endif %}> This is my paycheck (its dates are my paydays)</label>
   <label class="inline kind-bill" {% if income %}hidden{% endif %}><input name="active" type="checkbox" {% if not b or b.active %}checked{% endif %}> Count toward coverage</label>
   {% if b %}

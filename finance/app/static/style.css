@@ -930,3 +930,7 @@ a.tile:active { transform: scale(0.98); }
 .month-table li { grid-template-columns: 1fr auto 1fr; }
 .month-table li > span:last-child { text-align: right; }
 .month-table li > span:nth-child(2) { text-align: center; }
+
+/* Bills: payment window fields, greyed out until "Date varies" is on */
+.window-fields { border: 0; margin: 0; padding: 0; min-width: 0; transition: opacity .2s; }
+.window-fields[disabled] { opacity: 0.4; }

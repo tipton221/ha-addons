@@ -740,6 +740,17 @@ document.addEventListener("change", (ev) => {
     t.form.querySelectorAll(".kind-income").forEach((el) => { el.hidden = !income; });
   }
   if (t.matches('#sheet-form input[name="scope"], #sheet-form input[name="similar"]')) sheet.updateHint();
+  if (t.matches(".bill-form .cadence-pick")) {
+    const every = t.form.querySelector(".every-field");
+    const custom = t.value === "months" || t.value === "years";
+    every.hidden = !custom;
+    every.firstChild.textContent = t.value === "years" ? "Years between" : "Months between";
+  }
+  if (t.matches(".bill-form .date-varies")) {
+    t.form.querySelector(".window-fields").disabled = !t.checked;
+    t.form.querySelectorAll(".date-fixed").forEach((el) => { el.hidden = t.checked; });
+    t.form.querySelectorAll(".date-window").forEach((el) => { el.hidden = !t.checked; });
+  }
   if (t.matches('.bill-form input[name="varies"]')) {
     const amount = t.form.elements.amount;
     amount.disabled = t.checked;
@@ -768,6 +779,7 @@ const forms = {
       next_due: f.next_due.value, active: f.active.checked, color: colorValue(form),
       varies: f.varies.checked, account_id: f.account_id.value, kind: f.kind.value,
       is_payday: f.is_payday.checked,
+      every: f.every.value, date_varies: f.date_varies.checked, window_months: f.window_months.value,
       from_txn: form.dataset.fromTxn || null,
     });
   },

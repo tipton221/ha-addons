@@ -30,13 +30,59 @@ STALE_GRACE_DAYS = 10  # a bill this late with no charge has probably ended
 CADENCE_MONTHS = {"monthly": 1, "quarterly": 3, "semiannual": 6, "yearly": 12}
 CADENCES = ("monthly", "biweekly", "quarterly", "semiannual", "yearly")  # biweekly is for paychecks
 PER_MONTH = {"monthly": 1, "biweekly": 26 / 12, "quarterly": 1 / 3, "semiannual": 1 / 6, "yearly": 1 / 12}
+# Any other schedule is stored as "months:N" or "years:N" (for example "years:2" for a license renewal).
+NAMED = {1: "monthly", 3: "quarterly", 6: "semiannual", 12: "yearly"}
+WINDOW_GRACE_DAYS = 30   # a bill paid in a window still counts as paid this long after its due date
+
+
+def step_months(cadence: str | None) -> int:
+    """Months between occurrences (biweekly is handled separately)."""
+    c = cadence or "monthly"
+    if c in CADENCE_MONTHS:
+        return CADENCE_MONTHS[c]
+    unit, _, n = c.partition(":")
+    try:
+        n = max(1, int(n))
+    except ValueError:
+        return 1
+    return n * 12 if unit == "years" else n
+
+
+def make_cadence(kind: str, every) -> str:
+    """The stored schedule for a choice in the form: a named one, or every N months or years."""
+    if kind in CADENCES:
+        return kind
+    try:
+        n = max(1, min(int(every), 600))
+    except (TypeError, ValueError):
+        return "monthly"
+    months = n * 12 if kind == "years" else n if kind == "months" else 1
+    if months in NAMED:
+        return NAMED[months]
+    return f"years:{months // 12}" if months % 12 == 0 else f"months:{months}"
+
+
+def cadence_text(cadence: str | None) -> str:
+    labels = {"monthly": "Monthly", "biweekly": "Every 2 weeks", "quarterly": "Every 3 months",
+              "semiannual": "Every 6 months", "yearly": "Yearly"}
+    if cadence in labels:
+        return labels[cadence]
+    m = step_months(cadence)
+    return f"Every {m // 12} years" if m % 12 == 0 else f"Every {m} months"
+
+
+class CadenceLabels(dict):
+    """For templates: cadence_label[b.cadence] reads any schedule."""
+
+    def __missing__(self, key):
+        return cadence_text(key)
 
 
 def advance(d: date, cadence: str, day: int | None = None) -> date:
     """The next occurrence after d."""
     if cadence == "biweekly":
         return d + timedelta(days=14)
-    return add_months(d, CADENCE_MONTHS.get(cadence, 1), day)
+    return add_months(d, step_months(cadence), day)
 
 # Plaid categories that recur but are not bills: card payments, transfers, income.
 SKIP_PRIMARY = {"TRANSFER_IN", "TRANSFER_OUT", "INCOME", "BANK_FEES"}
@@ -63,7 +109,7 @@ def add_months(d: date, months: int, day: int | None = None) -> date:
 
 
 def next_due(last_seen: date, cadence: str, today: date) -> date:
-    step = CADENCE_MONTHS.get(cadence, 1)
+    step = step_months(cadence)
     due = add_months(last_seen, step)
     while due < today:
         due = add_months(due, step, last_seen.day)
@@ -211,6 +257,9 @@ def _bill_status(db: Database, today: date) -> list[dict]:
             near = [c for c in charges if has_key(b, c[0])
                     and abs(c[2] - b["amount"]) <= AMOUNT_TOLERANCE * max(b["amount"], c[2])]
             hit = next((c for c in near if amount_matches(b, c[2])), near[0] if near else None)
+        # Every payment that counts for the bill (for a bill paid any time in a window).
+        paid_days = sorted({date.fromisoformat(c[1]) for c in charges if has_key(b, c[0]) and (
+            b.get("varies") or amount_matches(b, c[2]) or c[0] == (b["keys"][0] if b["keys"] else None))})
         row = {"date": hit[1], "amount": hit[2]} if hit else None
         b["last_date"] = row["date"] if row else None
         b["last_amount"] = row["amount"] if row else None
@@ -219,6 +268,36 @@ def _bill_status(db: Database, today: date) -> list[dict]:
         b["account_choice"] = b.get("account_id")
         b["account_id"] = b["account_choice"] or b["auto_account_id"]
         cadence = b["cadence"]
+        window = b.get("window_months") or 0
+        if window and cadence != "biweekly":
+            # Paid any time in a window before its due date: the due dates follow the schedule (paying
+            # early doesn't move next year's), and a cycle is done once a payment lands in its window.
+            if b["next_due_override"]:
+                due = date.fromisoformat(b["next_due_override"])
+            elif row:
+                due = date.fromisoformat(row["date"])
+            else:
+                day = b["due_day"] or 1
+                due = date(today.year, today.month, min(day, calendar.monthrange(today.year, today.month)[1]))
+            while due + timedelta(days=WINDOW_GRACE_DAYS) < today:
+                due = advance(due, cadence)
+            for _ in range(50):
+                opens = add_months(due, -window)
+                if any(opens - timedelta(days=TAG_DATE_WINDOW_DEFAULT) <= d <= due + timedelta(days=WINDOW_GRACE_DAYS)
+                       for d in paid_days):
+                    due = advance(due, cadence)
+                else:
+                    break
+            b["next_due"] = due
+            b["window_opens"] = add_months(due, -window)
+            b["in_window"] = b["window_opens"] <= today
+            # It has ended only if a whole cycle, its window, and the grace period pass without a payment.
+            b["stale"] = bool(row) and not b["next_due_override"] and (
+                add_months(date.fromisoformat(row["date"]), step_months(cadence) + window)
+                + timedelta(days=WINDOW_GRACE_DAYS) < today)
+            b["monthly_equivalent"] = b["amount"] / step_months(cadence)
+            continue
+        b["window_opens"] = None
         if b["next_due_override"]:
             due = date.fromisoformat(b["next_due_override"])
             while due < today:
@@ -241,7 +320,7 @@ def _bill_status(db: Database, today: date) -> list[dict]:
         # A bill that skipped its last expected charge has probably ended (for example, an old lease).
         b["stale"] = bool(row) and not b["next_due_override"] and (
             advance(date.fromisoformat(row["date"]), cadence) + timedelta(days=STALE_GRACE_DAYS) < today)
-        b["monthly_equivalent"] = b["amount"] * PER_MONTH.get(cadence, 1)
+        b["monthly_equivalent"] = b["amount"] * PER_MONTH.get(cadence, 1 / step_months(cadence))
     return bills
 
 
@@ -268,9 +347,17 @@ def on_schedule(bill: dict, d: date) -> bool:
     if cadence == "biweekly":
         off = (d - anchor).days % 14
         return min(off, 14 - off) <= TAG_DATE_WINDOW["biweekly"]
-    step = CADENCE_MONTHS.get(cadence, 1)
+    step = step_months(cadence)
     day = bill.get("due_day") or anchor.day
     k = round(((d.year - anchor.year) * 12 + d.month - anchor.month) / step)
+    window = bill.get("window_months") or 0
+    if window:
+        # Anywhere from the window's opening (less a few days) to a month past a due date.
+        for j in (-1, 0, 1, 2):
+            due = add_months(anchor, (k + j) * step, anchor.day)
+            if add_months(due, -window) - timedelta(days=TAG_DATE_WINDOW_DEFAULT) <= d <= due + timedelta(days=WINDOW_GRACE_DAYS):
+                return True
+        return False
     gap = min(abs((add_months(anchor, (k + j) * step, day) - d).days) for j in (-1, 0, 1))
     return gap <= TAG_DATE_WINDOW.get(cadence, TAG_DATE_WINDOW_DEFAULT)
 
@@ -306,7 +393,7 @@ def repeats(series: "Series | list", d: date, amount: float, cadence: str, same_
     (with the same amount, unless same_amount is False, as for varying bills)."""
     if not isinstance(series, Series):
         series = Series(series)
-    period, slack = PERIOD_DAYS.get(cadence, PERIOD_DAYS["monthly"])
+    period, slack = PERIOD_DAYS.get(cadence) or (30.44 * step_months(cadence), max(5, round(1.3 * step_months(cadence) + 1)))
     day = d.toordinal()
 
     def cycle_away(other: int) -> bool:
@@ -434,7 +521,8 @@ def coverage(db: Database, schedule: dict, today: date | None = None) -> dict:
     cash += transit["cash"]
     cards += transit["cards"]
     bills = [b for b in all_bills if b.get("kind") != "income"]  # coverage counts money going out
-    due = [b for b in bills if b["active"] and not b["stale"] and today <= b["next_due"] < payday]
+    due = [b for b in bills if b["active"] and not b["stale"] and (
+        b["window_opens"] < payday if b.get("window_opens") else today <= b["next_due"] < payday)]
     due_total = sum(b["amount"] for b in due)
     reserve = sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]
                   and b["cadence"] not in ("monthly", "biweekly"))

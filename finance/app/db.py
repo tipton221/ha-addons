@@ -278,6 +278,7 @@ class Database:
                 ("kind", "TEXT NOT NULL DEFAULT 'bill'"),   # 'bill' (money out) or 'income' (money in)
                 ("is_payday", "INTEGER NOT NULL DEFAULT 0"),  # the paycheck that sets paydays
                 ("archived_on", "TEXT"),                    # set when archived: tags charges up to this date only
+                ("window_months", "INTEGER"),               # paid any time up to N months before the due date
             ],
         }
         for table, cols in wanted.items():
