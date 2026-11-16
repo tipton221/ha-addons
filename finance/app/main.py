@@ -139,7 +139,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 return 0
         rows = resolve(db, list_transactions(db, reviewed=False, limit=300))
         message = after_sync_message(db, rows, broken_items(), inbox_count() + account_issues())
-        return await push_send(db, message, push_subject()) if message else 0
+        if not message:
+            return 0
+        db.set_kv("push_last_badge", str(message["badge"]))
+        return await push_send(db, message, push_subject())
 
     def ynab_names_ready() -> bool:
         with db.connect() as conn:
@@ -662,6 +665,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         return templates.TemplateResponse(request, "accounts.html", {
             "settings": settings, "plaid_ready": plaid is not None, "items": items,
             "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
+            "push_clear_others": db.get_kv("push_clear_others") == "1",
             "categories": categories(db), "colors": COLORS, "rules": merchant_rule_list(),
             "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS,
         })
@@ -1452,9 +1456,29 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             conn.execute("DELETE FROM push_subs WHERE endpoint=?", (endpoint,))
         return {"ok": True}
 
+    @app.post("/api/push/settings")
+    async def push_settings(request: Request):
+        db.set_kv("push_clear_others", "1" if (await request.json()).get("clear_others") else "0")
+        return {"ok": True}
+
+    @app.post("/api/push/all-clear")
+    async def push_all_clear(request: Request):
+        """Sent by a device that just reached zero: if the others were last told about something,
+        replace that notification on them with a quiet "All caught up" (only with the setting on)."""
+        endpoint = str((await request.json()).get("endpoint") or "")
+        if db.get_kv("push_clear_others") != "1" or (db.get_kv("push_last_badge") or "0") == "0":
+            return {"sent": 0}
+        if inbox_count() + account_issues():
+            return {"sent": 0}
+        db.set_kv("push_last_badge", "0")
+        sent = await push_send(db, {"title": "All caught up", "body": "Nothing to review or fix.", "badge": 0,
+                                    "url": "/", "quiet": True}, push_subject(), skip=endpoint)
+        return {"sent": sent}
+
     @app.post("/api/push/test")
     async def push_test():
         n = inbox_count() + account_issues()
+        db.set_kv("push_last_badge", str(n))
         sent = await push_send(db, {"title": "Notifications are on",
                                     "body": f"{n} to review or fix. New transactions will show up here.",
                                     "badge": n, "url": "/"}, push_subject())

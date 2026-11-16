@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.1:
+
+- Reaching zero (nothing to review or fix) on a device closes that device's Finance notifications and clears its icon badge.
+- Optional, in Accounts › Notifications: when you're caught up on one device, the others get a quiet "All caught up" notification in place of the old one, with the badge cleared. Sent once until something new is announced. Every notification now shares one tag, so a newer one replaces the last.
+
 Version 2.2.0:
 
 - Notifications (Web Push) for the Home Screen (iPhone) or Dock (Mac) app, turned on per device in Accounts › Notifications. After each sync: new transactions to review (one shows its merchant, amount, and account; several are listed) and a bank connection that needs attention. Each transaction is announced once, and what was already waiting when notifications were turned on isn't. A test button sends one.

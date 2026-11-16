@@ -96,10 +96,11 @@ def vapid_header(key: ec.EllipticCurvePrivateKey, public: str, endpoint: str, su
     return f"vapid t={token}, k={public}"
 
 
-async def send(db: Database, message: dict, subject: str, client: httpx.AsyncClient | None = None) -> int:
-    """Send to every subscribed device. Returns how many accepted it; gone subscriptions are dropped."""
+async def send(db: Database, message: dict, subject: str, client: httpx.AsyncClient | None = None,
+               skip: str = "") -> int:
+    """Send to every subscribed device (but skip). Returns how many accepted it; gone subscriptions are dropped."""
     with db.connect() as conn:
-        subs = [dict(r) for r in conn.execute("SELECT endpoint, p256dh, auth FROM push_subs")]
+        subs = [dict(r) for r in conn.execute("SELECT endpoint, p256dh, auth FROM push_subs WHERE endpoint != ?", (skip,))]
     if not subs:
         return 0
     key, public = vapid_keys(db)
