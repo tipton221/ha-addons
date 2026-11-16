@@ -523,7 +523,8 @@ const sheet = {
         bill.appendChild(o);
       }
       bill.value = t.bill_choice === null ? "" : String(t.bill_choice);
-      form.scope.value = t.category_is_override || t.name_is_override ? "this" : "merchant";
+      // Edits apply to just this transaction unless "All from this merchant" is picked.
+      form.scope.value = "this";
       // Similar merchants: each one is its own choice, and none is included unless checked.
       const list = document.getElementById("sheet-similar-list");
       list.innerHTML = "";
@@ -647,7 +648,9 @@ const sheet = {
     const body = {};
     const scope = form.scope.value;
     const wasThis = t.category_is_override || t.name_is_override;
-    const scopeChanged = (scope === "this") !== wasThis;
+    // Only a change the person made counts: opening and saving with the default "Just this one"
+    // doesn't pin a merchant-wide category onto this transaction.
+    const scopeChanged = scope === "merchant" && wasThis;
     // A one-off name becomes the merchant's name when "All from this merchant" is chosen.
     if (form.merchant.value.trim() !== t.display_name || (scope === "merchant" && t.name_is_override)) {
       body.display_name = form.merchant.value;

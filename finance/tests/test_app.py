@@ -1874,3 +1874,26 @@ def test_all_caught_up_clears_other_devices(tmp_path, monkeypatch):
         msg, skip = sent[-1]
         assert msg["title"] == "All caught up" and msg["quiet"] and msg["badge"] == 0 and skip.endswith("/me")
         assert clear() == {"sent": 0}                          # only once until something new is pushed
+
+
+def test_bills_transit_panel_counts_only_what_is_counted(tmp_path, monkeypatch):
+    """The In transit panel's total leaves out an item with no match after 7 days, and opens for it."""
+    import app.main as main_mod
+    db, app = client_with(tmp_path, monkeypatch, [], [("sav", "Savings Co", "depository", 5000.0, 5000.0),
+                                                      ("card", "Card A", "credit", 0, None)])
+    base = {"date": "2026-11-14", "out": True, "account": "sav", "account_name": "Savings Co", "other": "card",
+            "other_name": "Card A", "chosen": False, "pending": False, "other_pending": False, "waiting": True}
+    items = [dict(base, id="x1", amount=300.0, late=False), dict(base, id="x2", amount=50.0, late=True)]
+    real = main_mod.coverage
+    monkeypatch.setattr(main_mod, "coverage", lambda *a, **kw: dict(real(*a, **kw), transit=items))
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        html = c.get("/bills").text
+        head = html.split('id="transit"')[1].split("</summary>")[0]
+        assert html.count('id="transit" open') == 1
+        assert "$300.00" in head and "$350.00" not in head
+        assert "1 with no match after 7 days" in head
+        items[1]["late"] = False
+        html = c.get("/bills").text
+        head = html.split('id="transit"')[1].split("</summary>")[0]
+        assert 'id="transit" open' not in html and "$350.00" in head

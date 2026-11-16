@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.4:
+
+- Editing a transaction applies to just that one by default; choose "All from this merchant" to change every transaction from it.
+- Bills: In transit is a collapsible panel like the Inbox's Scheduled panel, with a count and the total being counted. It opens on its own when something has gone 7 days without a match.
+
 Version 2.2.3:
 
 - The Scheduled panel's "Next" line gets its own row across the panel and wraps instead of being cut off.
