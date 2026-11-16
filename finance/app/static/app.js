@@ -961,6 +961,7 @@ const pages = {
       count.classList.toggle("zero", !n);
       const badge = document.getElementById("tab-badge");
       if (badge) { badge.textContent = n; badge.hidden = !n; badge.setAttribute("aria-label", `${n} to review`); }
+      appBadge();
       count.classList.remove("done-pop"); void count.offsetWidth; count.classList.add("done-pop");
       if (!n) {
         const empty = document.getElementById("inbox-empty");
@@ -1230,6 +1231,39 @@ document.addEventListener("change", (ev) => {
   if (!box) return;
   const fields = box.closest("form").querySelector(".pslf-fields");
   if (fields) fields.disabled = !box.checked;
+});
+
+// App icon badge (a Home Screen or Dock web app): the Inbox count plus the Accounts issues. Browsers
+// show it only after notifications are allowed for the app, which the Accounts page asks for.
+function appBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  const n = ["tab-badge", "tab-badge-accounts"].reduce((sum, id) => {
+    const el = document.getElementById(id);
+    return sum + (el && !el.hidden ? Number(el.textContent) || 0 : 0);
+  }, 0);
+  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { /* not allowed yet */ });
+}
+document.addEventListener("DOMContentLoaded", () => {
+  appBadge();
+  const card = document.getElementById("app-badge-card");
+  if (!card || !("setAppBadge" in navigator) || typeof Notification === "undefined") return;
+  const text = document.getElementById("app-badge-text");
+  const button = document.getElementById("app-badge-enable");
+  const show = () => {
+    const state = Notification.permission;
+    card.hidden = state === "granted";
+    if (state === "denied") {
+      text.textContent = "Notifications are off for this app, so the icon can't show a badge. Turn them on in Settings › Notifications › Finance.";
+      button.hidden = true;
+    }
+  };
+  show();
+  button.addEventListener("click", async () => {
+    try { await Notification.requestPermission(); } catch { /* older Safari */ }
+    show();
+    appBadge();
+    if (Notification.permission === "granted") toast("Icon badge on");
+  });
 });
 
 // Money in transit: choose the other account, or say it isn't a transfer between my accounts.

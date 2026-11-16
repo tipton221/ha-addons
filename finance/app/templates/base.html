@@ -38,7 +38,7 @@
         <span>Search</span></a>
       <a href="/accounts" {% if nav == "accounts" %}aria-current="page"{% endif %}>{% if nav == "accounts" %}<span class="tab-pill" aria-hidden="true"></span>{% endif %}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h18L12 4 3 10z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18"/></svg>
-        <span>Accounts</span></a>
+        <span>Accounts</span>{% set issues = account_issues() %}<span class="tab-badge" id="tab-badge-accounts" aria-label="{{ issues }} to fix"{% if not issues %} hidden{% endif %}>{{ issues }}</span></a>
     </nav>
     {% endif %}
     {% block content %}{% endblock %}

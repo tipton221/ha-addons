@@ -175,6 +175,16 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM transactions WHERE source='plaid' AND reviewed=0").fetchone()[0]
     templates.env.globals["inbox_count"] = inbox_count  # the badge on the Inbox tab
+
+    def account_issues() -> int:
+        """Things to fix on the Accounts tab: a bank connection that needs signing in again or failed,
+        one waiting for investment access, and a failed YNAB sync."""
+        with db.connect() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM plaid_items WHERE status != 'ok' OR investments = 'consent'").fetchone()[0]
+        if ynab.configured and db.get_kv("ynab_error"):
+            n += 1
+        return n
+    templates.env.globals["account_issues"] = account_issues
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = CadenceLabels()

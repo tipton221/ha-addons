@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.1.2:
+
+- The Accounts tab shows a red badge with the number of things to fix: a bank connection that needs signing in again or failed, one waiting for investment access, or a failed YNAB sync.
+- App icon badge for the Home Screen (iPhone) or Dock (Mac) web app: the Inbox count plus the Accounts count. Turn it on from the Accounts page (it needs notifications allowed for the app). The icon updates whenever the app is open; it doesn't update in the background.
+
 Version 2.1.1:
 
 - The Inbox tab shows a red badge with the number of transactions to review, on every page, and it counts down as you review them.

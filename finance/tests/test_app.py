@@ -1789,3 +1789,7 @@ def test_inbox_tab_badge(tmp_path, monkeypatch):
         with db.connect() as conn:
             conn.execute("UPDATE transactions SET reviewed=1")
         assert 'aria-label="0 to review" hidden>0</span>' in c.get("/bills").text
+        assert 'id="tab-badge-accounts" aria-label="0 to fix" hidden>0</span>' in c.get("/bills").text
+        with db.connect() as conn:
+            conn.execute("UPDATE plaid_items SET status='login_required'")
+        assert 'id="tab-badge-accounts" aria-label="1 to fix">1</span>' in c.get("/bills").text
