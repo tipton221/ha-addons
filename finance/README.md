@@ -43,10 +43,15 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.0:
+
+- Notifications (Web Push) for the Home Screen (iPhone) or Dock (Mac) app, turned on per device in Accounts › Notifications. After each sync: new transactions to review (one shows its merchant, amount, and account; several are listed) and a bank connection that needs attention. Each transaction is announced once, and what was already waiting when notifications were turned on isn't. A test button sends one.
+- The app icon badge (the Inbox count plus the Accounts count) is set with every notification and whenever the app is open, so it stays current. Safari requires every push to show a notification, so there are no silent badge-only updates.
+- Built on the standard (RFC 8291 encryption, RFC 8292 VAPID) with the packages the app already uses; the signing key is made once and kept in the database.
+
 Version 2.1.2:
 
 - The Accounts tab shows a red badge with the number of things to fix: a bank connection that needs signing in again or failed, one waiting for investment access, or a failed YNAB sync.
-- App icon badge for the Home Screen (iPhone) or Dock (Mac) web app: the Inbox count plus the Accounts count. Turn it on from the Accounts page (it needs notifications allowed for the app). The icon updates whenever the app is open; it doesn't update in the background.
 
 Version 2.1.1:
 

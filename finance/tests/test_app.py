@@ -1793,3 +1793,56 @@ def test_inbox_tab_badge(tmp_path, monkeypatch):
         with db.connect() as conn:
             conn.execute("UPDATE plaid_items SET status='login_required'")
         assert 'id="tab-badge-accounts" aria-label="1 to fix">1</span>' in c.get("/bills").text
+
+
+def test_web_push_encryption_and_messages(tmp_path, monkeypatch):
+    import httpx as _httpx
+    import json as _json
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from app.push import after_sync_message, b64u, decrypt, encrypt, send, unb64u, vapid_keys
+    from app.ledger import list_transactions, resolve
+    # A browser's keys; what the app encrypts, the browser can read.
+    ua = ec.generate_private_key(ec.SECP256R1())
+    p256dh = b64u(ua.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+    auth = b64u(b"0123456789abcdef")
+    msg = encrypt(b'{"title":"Hi"}', p256dh, auth)
+    assert msg[20] == 65 and decrypt(msg, ua, auth) == b'{"title":"Hi"}'
+
+    rows = [("a", "card", "2026-11-15", "CORNER CAFE", "Corner Cafe", 6.5, 0, "FOOD_AND_DRINK", "X", 0)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        key = c.get("/api/push/key").json()["key"]
+        assert len(unb64u(key)) == 65 and key == vapid_keys(db)[1]  # stable across calls
+        assert c.get("/sw.js").headers["service-worker-allowed"] == "/"
+        sub = {"endpoint": "https://push.example.test/abc", "keys": {"p256dh": p256dh, "auth": auth}}
+        assert c.post("/api/push/subscribe", json={"subscription": sub}, headers=H).status_code == 200
+    # What was waiting when notifications were turned on isn't announced; a new charge is, once.
+    seed(db, [("b", "card", "2026-11-16", "BOOK BARN", "Book Barn", 24.0, 0, "GENERAL_MERCHANDISE", "X", 0)])
+    unreviewed = lambda: resolve(db, list_transactions(db, reviewed=False, limit=300))
+    m = after_sync_message(db, unreviewed(), [], 2)
+    assert m["title"] == "Book Barn" and m["body"].startswith("$24.00 · Card A") and m["badge"] == 2
+    assert after_sync_message(db, unreviewed(), [], 2) is None
+    # Several at once, and a connection that broke.
+    seed(db, [("c", "card", "2026-11-16", "SHOP ONE", "Shop One", 3.0, 0, "X", "X", 0),
+              ("d", "card", "2026-11-16", "SHOP TWO", "Shop Two", 4.0, 0, "X", "X", 0)])
+    m = after_sync_message(db, unreviewed(), [{"item_id": "i1", "institution": "Bank"}], 5)
+    assert m["title"] == "Connection needs attention" and "2 new transactions" in m["body"] and m["url"] == "/accounts"
+    assert after_sync_message(db, unreviewed(), [{"item_id": "i1", "institution": "Bank"}], 5) is None  # told once
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return _httpx.Response(201 if "abc" in str(request.url) else 410)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO push_subs (endpoint, p256dh, auth) VALUES ('https://push.example.test/gone', ?, ?)", (p256dh, auth))
+    client = _httpx.AsyncClient(transport=_httpx.MockTransport(handler))
+    assert asyncio.run(send(db, {"title": "T", "badge": 1}, "https://finance.example.test", client)) == 1
+    r = seen[0]
+    assert r.headers["content-encoding"] == "aes128gcm" and r.headers["authorization"].startswith("vapid t=")
+    assert _json.loads(decrypt(r.content, ua, auth)) == {"title": "T", "badge": 1}
+    with db.connect() as conn:  # the gone subscription is dropped
+        assert [x[0] for x in conn.execute("SELECT endpoint FROM push_subs")] == ["https://push.example.test/abc"]

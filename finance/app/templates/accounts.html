@@ -167,10 +167,12 @@
   </details>
 </section>
 
-<section class="card" id="app-badge-card" hidden>
-  <div class="card-head"><h2>App icon badge</h2></div>
-  <p class="muted small" id="app-badge-text">Show the number of transactions to review, plus anything to fix here, on the app's icon.</p>
-  <button type="button" class="wide-btn" id="app-badge-enable">Turn on the icon badge</button>
+<section class="card" id="push-card" hidden>
+  <div class="card-head"><h2>Notifications</h2></div>
+  <p class="muted small" id="push-text">Get a notification when new transactions arrive or a bank connection needs attention, and keep the count on the app's icon current. On this device only.</p>
+  <button type="button" class="wide-btn" id="push-enable">Turn on notifications</button>
+  <button type="button" class="wide-btn" id="push-test" hidden>Send a test</button>
+  <button type="button" class="wide-btn" id="push-disable" hidden>Turn off on this device</button>
 </section>
 
 <p class="muted small center">{{ total }} transactions stored · <a href="#" id="logout">Sign out</a></p>

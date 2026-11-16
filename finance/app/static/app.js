@@ -1243,26 +1243,63 @@ function appBadge() {
   }, 0);
   (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { /* not allowed yet */ });
 }
-document.addEventListener("DOMContentLoaded", () => {
+// Notifications: a service worker shows pushes from the Pi and keeps the icon badge current.
+const pushOK = () => "serviceWorker" in navigator && "PushManager" in window && typeof Notification !== "undefined";
+const urlKey = (k) => Uint8Array.from(atob(k.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - k.length % 4) % 4)), (c) => c.charCodeAt(0));
+
+document.addEventListener("DOMContentLoaded", async () => {
   appBadge();
-  const card = document.getElementById("app-badge-card");
-  if (!card || !("setAppBadge" in navigator) || typeof Notification === "undefined") return;
-  const text = document.getElementById("app-badge-text");
-  const button = document.getElementById("app-badge-enable");
-  const show = () => {
-    const state = Notification.permission;
-    card.hidden = state === "granted";
-    if (state === "denied") {
-      text.textContent = "Notifications are off for this app, so the icon can't show a badge. Turn them on in Settings › Notifications › Finance.";
-      button.hidden = true;
+  if (pushOK() && Notification.permission === "granted") {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }
+  const card = document.getElementById("push-card");
+  if (!card) return;
+  const text = document.getElementById("push-text");
+  const on = document.getElementById("push-enable");
+  const test = document.getElementById("push-test");
+  const off = document.getElementById("push-disable");
+  if (!pushOK()) {
+    // iPhone: only the app added to the Home Screen can get notifications.
+    if (/iPhone|iPad/.test(navigator.userAgent)) {
+      card.hidden = false; on.hidden = true;
+      text.textContent = "Notifications work in the app on your Home Screen. In Safari, tap Share, then Add to Home Screen, and open it from there.";
     }
+    return;
+  }
+  card.hidden = false;
+  const show = async () => {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    const denied = Notification.permission === "denied";
+    on.hidden = !!sub || denied; test.hidden = !sub; off.hidden = !sub;
+    text.textContent = denied
+      ? "Notifications are off for this app. Turn them on in Settings › Notifications › Finance, then come back here."
+      : sub ? "On for this device: new transactions and connection problems send a notification, and the icon shows the count."
+            : "Get a notification when new transactions arrive or a bank connection needs attention, and keep the count on the app's icon current. On this device only.";
   };
-  show();
-  button.addEventListener("click", async () => {
-    try { await Notification.requestPermission(); } catch { /* older Safari */ }
-    show();
-    appBadge();
-    if (Notification.permission === "granted") toast("Icon badge on");
+  await show();
+  on.addEventListener("click", async () => {
+    try {
+      if (await Notification.requestPermission() !== "granted") { await show(); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      const { key } = await fetch("/api/push/key", { credentials: "same-origin" }).then((r) => r.json());
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlKey(key) });
+      await api("/api/push/subscribe", { subscription: sub.toJSON() });
+      appBadge();
+      toast("Notifications on");
+    } catch (e) { toast(e.message || "Couldn't turn on notifications", true); }
+    await show();
+  });
+  test.addEventListener("click", async () => {
+    try { await api("/api/push/test"); toast("Sent"); } catch (e) { toast(e.message, true); }
+  });
+  off.addEventListener("click", async () => {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) { await api("/api/push/unsubscribe", { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+    toast("Notifications off on this device");
+    await show();
   });
 });
 
