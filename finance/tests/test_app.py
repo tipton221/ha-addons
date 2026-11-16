@@ -1741,3 +1741,37 @@ def test_loan_balance_rolls_forward_with_payments(tmp_path, monkeypatch):
     expected = round(after_payment + after_payment * 0.0365 / 365 * 2, 2)
     assert loan["balance"] == expected and loan["estimated"] and loan["paid_since"] == 1
     assert any(a["id"] == "manual:l" and a["value"] == -expected for a in net_worth(db, today)["accounts"])
+
+
+def test_every_n_years_and_payment_window(tmp_path, monkeypatch):
+    from app.bills import bill_status, coverage, make_cadence, cadence_text
+    from app.ledger import list_transactions, resolve
+    assert make_cadence("years", "2") == "years:2" and make_cadence("months", "12") == "yearly"
+    assert make_cadence("months", "3") == "quarterly" and make_cadence("months", "18") == "months:18"
+    assert cadence_text("years:2") == "Every 2 years" and cadence_text("months:18") == "Every 18 months"
+    # A license renewed every two years, paid in the months before it expires.
+    rows = [("r1", "card", "2025-01-20", "STATE LICENSING", "State Licensing", 120.0, 0, "GOVERNMENT_AND_NON_PROFIT", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        bad = c.post("/api/bills", json={"name": "License", "match": "state licensing", "amount": "120", "cadence": "years",
+                                         "every": "2", "date_varies": True, "window_months": "30"}, headers=H)
+        assert bad.status_code == 400  # window as long as the cycle, and no due date
+        ok = c.post("/api/bills", json={"name": "License", "match": "state licensing", "amount": "120", "cadence": "years",
+                                        "every": "2", "date_varies": True, "window_months": "3", "next_due": "2027-03-31"}, headers=H)
+        assert ok.status_code == 200
+    today = D(2026, 11, 16)
+    (b,) = bill_status(db, today)
+    assert b["cadence"] == "years:2" and b["next_due"] == D(2027, 3, 31) and b["window_opens"] == D(2026, 12, 31)
+    assert not b["stale"]  # last paid Jan 2025: a whole cycle plus the window hasn't passed
+    sched = {"kind": "semimonthly", "days": [1, 15]}
+    assert not coverage(db, sched, today)["due"]                       # window not open yet
+    assert [x["name"] for x in coverage(db, sched, D(2027, 1, 10))["due"]] == ["License"]  # open: set aside
+    # Paid early, on Feb 5: tagged, and the next due date stays on schedule (Mar 31, 2029).
+    seed(db, [("r2", "card", "2027-02-05", "STATE LICENSING", "State Licensing", 120.0, 0, "GOVERNMENT_AND_NON_PROFIT", "X", 1)])
+    later = D(2027, 2, 10)
+    (b,) = bill_status(db, later)
+    assert b["next_due"] == D(2029, 3, 31) and not coverage(db, sched, later)["due"]
+    tagged = {t["id"] for t in resolve(db, list_transactions(db, limit=0), later) if t["bill"]}
+    assert "r2" in tagged

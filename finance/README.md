@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.1.0:
+
+- Bills can repeat every N months or every N years (for example a license renewed every 2 years).
+- "Date varies" for bills paid any time in a window before a deadline (a registration or license renewal): set the due date and how many months early it can be paid. A payment anywhere from the window's opening to a month after the due date counts and is tagged; the next due date follows the schedule instead of the day it was paid; the bill doesn't look ended while the window is open; and coverage sets the amount aside from the day the window opens until it's paid.
+
 Version 2.0.6:
 
 - Net worth by month spans the card: month left, net worth centered, change right.

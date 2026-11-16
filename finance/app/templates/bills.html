@@ -80,7 +80,7 @@
       <div class="due-date"><span>{{ b.next_due.strftime("%b") }}</span><strong>{{ b.next_due.day }}</strong></div>
       <div class="grow">
         <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-        <span class="muted small">{{ cadence_label[b.cadence] }}{% if b.varies %} · {% if b.samples %}average of the last {{ b.samples }}{% else %}no charges found yet{% endif %}{% endif %}{% for a in accounts if a.account_id == b.account_id %} · {{ a.pill }}{% endfor %}</span>
+        <span class="muted small">{{ cadence_label[b.cadence] }}{% if b.window_opens %} · due by {{ b.next_due.isoformat() | shortdate }}{% endif %}{% if b.varies %} · {% if b.samples %}average of the last {{ b.samples }}{% else %}no charges found yet{% endif %}{% endif %}{% for a in accounts if a.account_id == b.account_id %} · {{ a.pill }}{% endfor %}</span>
       </div>
       <span class="amount">{% if b.varies %}≈ {% endif %}{{ b.amount | money }}</span>
     </li>
@@ -131,7 +131,7 @@
     <li class="edit-row {{ '' if (b.active or income) and not b.stale and not b.archived_on else 'inactive' }}" role="button" tabindex="0" data-editor="bill-{{ b.id }}">
       <div class="grow">
         <span><span class="pill tag bill-{{ b.id }}">↻ {{ b.name }}</span></span>
-        <span class="muted small">{{ cadence_label[b.cadence] }}{% if not b.archived_on %} · next {{ b.next_due.isoformat() | shortdate }}{% endif %}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · {{ "none found yet" if income else "no charge found" }}{% endif %}{% if not b.active and not income and not b.archived_on %} · not counted{% endif %}</span>
+        <span class="muted small">{{ cadence_label[b.cadence] }}{% if not b.archived_on %}{% if b.window_opens %} · due by {{ b.next_due.isoformat() | shortdate }} (pay from {{ b.window_opens.isoformat() | shortdate }}){% else %} · next {{ b.next_due.isoformat() | shortdate }}{% endif %}{% endif %}{% if b.last_date %} · last {{ b.last_date | shortdate }} {{ b.last_amount | money }}{% else %} · {{ "none found yet" if income else "no charge found" }}{% endif %}{% if not b.active and not income and not b.archived_on %} · not counted{% endif %}</span>
         {% for a in accounts if a.account_id == b.account_id %}<span class="muted small">{{ a.label }}</span>{% endfor %}
         {% if b.archived_on %}<span class="muted small">Archived {{ b.archived_on | shortdate }}</span>{% elif b.stale %}<span class="small warn-text">None since {{ b.last_date | shortdate }}. {{ "Archive it if it ended." if income else "Not counted; archive it if it ended." }}</span>{% endif %}
       </div>

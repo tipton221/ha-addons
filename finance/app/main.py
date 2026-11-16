@@ -30,7 +30,7 @@ from .plaid import Plaid, PlaidError
 from .transit import transit_options
 from .investments import PLANS, limits, returns
 from .loans import loans
-from .bills import CADENCES, bill_status, coverage, detect, new_candidates, normalize, save_detected
+from .bills import CADENCES, CadenceLabels, make_cadence, step_months, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
                        spending_rows)
@@ -173,9 +173,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     templates.env.filters["month_label"] = lambda m: date(int(m[:4]), int(m[5:7]), 1).strftime("%b %Y") if m else ""
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
-    templates.env.globals["cadence_label"] = {
-        "monthly": "Monthly", "biweekly": "Every 2 weeks", "quarterly": "Every 3 months",
-        "semiannual": "Every 6 months", "yearly": "Yearly"}
+    templates.env.globals["cadence_label"] = CadenceLabels()
+    # For the form: a stored schedule as (choice, N) — a named one, or every N months or years.
+    templates.env.globals["cadence_parts"] = lambda c: (
+        (c, "") if c in CADENCES or not c else
+        ("years", step_months(c) // 12) if step_months(c) % 12 == 0 else ("months", step_months(c)))
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -744,7 +746,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "name": str(body["name"]).strip()[:80],
                 "match": normalize(str(body.get("match") or body["name"])),
                 "amount": round(abs(num(body.get("amount"))), 2),
-                "cadence": body.get("cadence") if body.get("cadence") in CADENCES else "monthly",
+                "cadence": make_cadence(str(body.get("cadence") or ""), body.get("every")),
                 "due_day": int(body["due_day"]) if body.get("due_day") else None,
                 "next_due_override": str(date.fromisoformat(body["next_due"])) if body.get("next_due") else None,
                 "active": 1 if body.get("active", True) else 0,
@@ -753,6 +755,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 "account_id": str(body["account_id"]) if body.get("account_id") else None,
                 "kind": "income" if body.get("kind") == "income" else "bill",
                 "is_payday": 1 if body.get("is_payday") and body.get("kind") == "income" else 0,
+                "window_months": int(body["window_months"]) if body.get("date_varies") and str(body.get("window_months") or "").strip() else None,
             }
         except (KeyError, ValueError, TypeError):
             raise HTTPException(400, "Name and amount are required; dates use YYYY-MM-DD")
@@ -762,6 +765,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             raise HTTPException(400, "Unknown account")
         if not out["varies"] and out["amount"] <= 0:
             raise HTTPException(400, "Enter the amount, or mark it as varying")
+        if out["window_months"] is not None:
+            if out["cadence"] == "biweekly" or not 1 <= out["window_months"] < step_months(out["cadence"]):
+                raise HTTPException(400, "The payment window must be at least a month and shorter than the time between payments")
+            if not out["next_due_override"]:
+                raise HTTPException(400, "Enter the due date for a bill whose date varies")
         if out["kind"] == "income" and body.get("color") in (None, ""):
             out["color"] = "green"
         return out
@@ -774,12 +782,12 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             if body.get("id"):
                 bill_id = int(body["id"])
                 conn.execute("UPDATE bills SET name=?, match=?, amount=?, cadence=?, due_day=?, next_due_override=?, "
-                             "active=?, color=?, varies=?, account_id=?, kind=?, is_payday=? WHERE id=?",
+                             "active=?, color=?, varies=?, account_id=?, kind=?, is_payday=?, window_months=? WHERE id=?",
                              (*f.values(), bill_id))
             else:
                 bill_id = conn.execute(
                     "INSERT INTO bills (name, match, amount, cadence, due_day, next_due_override, active, color, "
-                    "varies, account_id, kind, is_payday) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "varies, account_id, kind, is_payday, window_months) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     tuple(f.values())).lastrowid
             if f["is_payday"]:  # only one paycheck sets paydays
                 conn.execute("UPDATE bills SET is_payday=0 WHERE id != ?", (bill_id,))
