@@ -937,9 +937,9 @@ a.tile:active { transform: scale(0.98); }
 
 /* Inbox tab: a red count of transactions to review, like an iOS badge */
 .tab-badge {
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff;
-  font-size: 0.68rem; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 2px var(--bg);
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--red); color: #fff;
+  font-size: 0.75rem; font-weight: 600; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
 }
 .tab-badge[hidden] { display: none; }
 @media (max-width: 640px) {

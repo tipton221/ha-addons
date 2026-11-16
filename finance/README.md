@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.7:
+
+- Tab badges look like iOS badges: no dark outline, slightly larger, with a lighter number.
+
 Version 2.2.6:
 
 - Search remembers the last search (text, filters, and sort) and where you were in the results while you move between tabs. Clear, reloading, or reopening the app starts over.
