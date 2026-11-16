@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.9:
+
+- The pinned day header sits a little lower on phones, clear of the blur under the iPhone status bar.
+
 Version 2.2.8:
 
 - Transactions listed by date (Inbox and Search) are grouped into a neutral panel per day, and the day's date stays pinned at the top of the screen while you scroll through it. A day split by Show more joins back into one panel.
