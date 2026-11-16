@@ -959,6 +959,9 @@ const pages = {
       const n = list.querySelectorAll(".txn-item:not(.leaving)").length;
       count.textContent = n;
       count.classList.toggle("zero", !n);
+      const badge = document.getElementById("tab-badge");
+      if (badge) { badge.textContent = n; badge.hidden = !n; badge.setAttribute("aria-label", `${n} to review`); }
+      appBadge();
       count.classList.remove("done-pop"); void count.offsetWidth; count.classList.add("done-pop");
       if (!n) {
         const empty = document.getElementById("inbox-empty");
@@ -1228,6 +1231,76 @@ document.addEventListener("change", (ev) => {
   if (!box) return;
   const fields = box.closest("form").querySelector(".pslf-fields");
   if (fields) fields.disabled = !box.checked;
+});
+
+// App icon badge (a Home Screen or Dock web app): the Inbox count plus the Accounts issues. Browsers
+// show it only after notifications are allowed for the app, which the Accounts page asks for.
+function appBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  const n = ["tab-badge", "tab-badge-accounts"].reduce((sum, id) => {
+    const el = document.getElementById(id);
+    return sum + (el && !el.hidden ? Number(el.textContent) || 0 : 0);
+  }, 0);
+  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { /* not allowed yet */ });
+}
+// Notifications: a service worker shows pushes from the Pi and keeps the icon badge current.
+const pushOK = () => "serviceWorker" in navigator && "PushManager" in window && typeof Notification !== "undefined";
+const urlKey = (k) => Uint8Array.from(atob(k.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - k.length % 4) % 4)), (c) => c.charCodeAt(0));
+
+document.addEventListener("DOMContentLoaded", async () => {
+  appBadge();
+  if (pushOK() && Notification.permission === "granted") {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }
+  const card = document.getElementById("push-card");
+  if (!card) return;
+  const text = document.getElementById("push-text");
+  const on = document.getElementById("push-enable");
+  const test = document.getElementById("push-test");
+  const off = document.getElementById("push-disable");
+  if (!pushOK()) {
+    // iPhone: only the app added to the Home Screen can get notifications.
+    if (/iPhone|iPad/.test(navigator.userAgent)) {
+      card.hidden = false; on.hidden = true;
+      text.textContent = "Notifications work in the app on your Home Screen. In Safari, tap Share, then Add to Home Screen, and open it from there.";
+    }
+    return;
+  }
+  card.hidden = false;
+  const show = async () => {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    const denied = Notification.permission === "denied";
+    on.hidden = !!sub || denied; test.hidden = !sub; off.hidden = !sub;
+    text.textContent = denied
+      ? "Notifications are off for this app. Turn them on in Settings › Notifications › Finance, then come back here."
+      : sub ? "On for this device: new transactions and connection problems send a notification, and the icon shows the count."
+            : "Get a notification when new transactions arrive or a bank connection needs attention, and keep the count on the app's icon current. On this device only.";
+  };
+  await show();
+  on.addEventListener("click", async () => {
+    try {
+      if (await Notification.requestPermission() !== "granted") { await show(); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      const { key } = await fetch("/api/push/key", { credentials: "same-origin" }).then((r) => r.json());
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlKey(key) });
+      await api("/api/push/subscribe", { subscription: sub.toJSON() });
+      appBadge();
+      toast("Notifications on");
+    } catch (e) { toast(e.message || "Couldn't turn on notifications", true); }
+    await show();
+  });
+  test.addEventListener("click", async () => {
+    try { await api("/api/push/test"); toast("Sent"); } catch (e) { toast(e.message, true); }
+  });
+  off.addEventListener("click", async () => {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) { await api("/api/push/unsubscribe", { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+    toast("Notifications off on this device");
+    await show();
+  });
 });
 
 // Money in transit: choose the other account, or say it isn't a transfer between my accounts.

@@ -30,6 +30,7 @@ from .plaid import Plaid, PlaidError
 from .transit import transit_options
 from .investments import PLANS, limits, returns
 from .loans import loans
+from .push import after_sync_message, send as push_send, vapid_keys
 from .bills import CADENCES, CadenceLabels, make_cadence, step_months, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
@@ -45,7 +46,7 @@ log = logging.getLogger("finance")
 
 HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
-PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
+PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/sw.js", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify"}
 
 def num(value) -> float:
@@ -116,7 +117,29 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                     results["ynab"] = {"error": type(e).__name__}
             if db.get_kv("ynab_names_applied") != "1" and ynab_names_ready():
                 results["ynab_names"] = apply_ynab_names(db)  # once; the Compare page can run it again
+        try:
+            results["push"] = await notify_after_sync()
+        except Exception:
+            log.exception("Push notification failed")
         return results
+
+    def push_subject() -> str:
+        """Who sends the pushes (required by push services): the app's own address."""
+        return settings.public_url if settings.public_url.startswith("https://") else "mailto:finance@localhost.invalid"
+
+    def broken_items() -> list[dict]:
+        with db.connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT item_id, institution FROM plaid_items WHERE status != 'ok'")]
+
+    async def notify_after_sync() -> int:
+        """A notification for new transactions to review or a connection that broke, with the badge."""
+        with db.connect() as conn:
+            if not conn.execute("SELECT 1 FROM push_subs LIMIT 1").fetchone():
+                return 0
+        rows = resolve(db, list_transactions(db, reviewed=False, limit=300))
+        message = after_sync_message(db, rows, broken_items(), inbox_count() + account_issues())
+        return await push_send(db, message, push_subject()) if message else 0
 
     def ynab_names_ready() -> bool:
         with db.connect() as conn:
@@ -171,6 +194,20 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     # Keep a short trailing part with the word before it: "403 (b)" never breaks before "(b)".
     templates.env.filters["keep"] = lambda text: re.sub(r" (\(?\w{1,3}\)?)$", "\u00a0\\1", str(text or ""))
     templates.env.filters["month_label"] = lambda m: date(int(m[:4]), int(m[5:7]), 1).strftime("%b %Y") if m else ""
+    def inbox_count() -> int:
+        with db.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM transactions WHERE source='plaid' AND reviewed=0").fetchone()[0]
+    templates.env.globals["inbox_count"] = inbox_count  # the badge on the Inbox tab
+
+    def account_issues() -> int:
+        """Things to fix on the Accounts tab: a bank connection that needs signing in again or failed,
+        one waiting for investment access, and a failed YNAB sync."""
+        with db.connect() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM plaid_items WHERE status != 'ok' OR investments = 'consent'").fetchone()[0]
+        if ynab.configured and db.get_kv("ynab_error"):
+            n += 1
+        return n
+    templates.env.globals["account_issues"] = account_issues
     templates.env.globals["category"] = category
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = CadenceLabels()
@@ -1381,6 +1418,49 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                  body.get("selected", "?"), added)
         asyncio.create_task(run_sync())
         return {"ok": True, "added": added}
+
+    @app.get("/sw.js")
+    async def service_worker():
+        """The service worker that shows notifications and sets the icon badge. Served from the root
+        so it covers the whole app."""
+        return Response((HERE / "static" / "sw.js").read_text(), media_type="text/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+    @app.get("/api/push/key")
+    async def push_key():
+        return {"key": vapid_keys(db)[1]}
+
+    @app.post("/api/push/subscribe")
+    async def push_subscribe(request: Request):
+        sub_ = (await request.json()).get("subscription") or {}
+        keys = sub_.get("keys") or {}
+        endpoint = str(sub_.get("endpoint") or "")
+        if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
+            raise HTTPException(400, "Not a push subscription")
+        with db.connect() as conn:
+            conn.execute("INSERT INTO push_subs (endpoint, p256dh, auth) VALUES (?, ?, ?) ON CONFLICT(endpoint) "
+                         "DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth", (endpoint, keys["p256dh"], keys["auth"]))
+            # What's already waiting isn't news: only transactions after this are announced.
+            conn.execute("INSERT OR IGNORE INTO push_told SELECT id FROM transactions WHERE source='plaid' AND reviewed=0")
+        db.set_kv("push_broken", json.dumps(sorted(i["item_id"] for i in broken_items())))
+        return {"ok": True}
+
+    @app.post("/api/push/unsubscribe")
+    async def push_unsubscribe(request: Request):
+        endpoint = str((await request.json()).get("endpoint") or "")
+        with db.connect() as conn:
+            conn.execute("DELETE FROM push_subs WHERE endpoint=?", (endpoint,))
+        return {"ok": True}
+
+    @app.post("/api/push/test")
+    async def push_test():
+        n = inbox_count() + account_issues()
+        sent = await push_send(db, {"title": "Notifications are on",
+                                    "body": f"{n} to review or fix. New transactions will show up here.",
+                                    "badge": n, "url": "/"}, push_subject())
+        if not sent:
+            raise HTTPException(400, "No device accepted the test. Turn notifications on from the installed app.")
+        return {"ok": True, "sent": sent}
 
     @app.post("/api/sync")
     async def sync_now():

@@ -191,6 +191,19 @@ CREATE TABLE IF NOT EXISTS loan_months (
     PRIMARY KEY (account_id, month)
 );
 
+-- Web Push subscriptions (one per device with the app installed and notifications allowed).
+CREATE TABLE IF NOT EXISTS push_subs (
+    endpoint        TEXT PRIMARY KEY,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Transactions already announced by a notification (each is told once).
+CREATE TABLE IF NOT EXISTS push_told (
+    id              TEXT PRIMARY KEY
+);
+
 -- Money in transit: the account chosen for the other side of a transfer ('' = not a transfer
 -- between my accounts). Without a row, the account is worked out from past transfers.
 CREATE TABLE IF NOT EXISTS transit_choices (
