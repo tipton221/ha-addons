@@ -16,6 +16,47 @@ const b64u = {
   },
 };
 
+// Search remembers itself while you move between tabs: the Search tab goes back to the last search
+// (filters and sort) at the place you left in the results. Clear, a reload, or reopening the app
+// starts over (start.js forgets it).
+const SEARCH_KEY = "finance-search";
+function savedSearch() {
+  try { return JSON.parse(sessionStorage.getItem(SEARCH_KEY) || "null"); } catch { return null; }
+}
+function saveSearch(state) {
+  try { sessionStorage.setItem(SEARCH_KEY, JSON.stringify(state)); } catch { /* storage blocked */ }
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const tab = document.querySelector('.tabbar a[href^="/search"]');
+  const saved = savedSearch();
+  if (tab && saved && saved.qs) tab.setAttribute("href", "/search" + saved.qs);
+  if (document.body.dataset.page !== "search") return;
+  const qs = location.search;
+  const y = saved && saved.qs === qs ? saved.y || 0 : 0;
+  const state = { qs, y };
+  saveSearch(state);
+  let pending = false;
+  const remember = () => { state.y = Math.round(window.scrollY); saveSearch(state); };
+  window.addEventListener("scroll", () => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; remember(); });
+  }, { passive: true });
+  window.addEventListener("pagehide", remember);
+  if (!y) return;
+  // Back where you were: load more of the list first if the spot was further down than the page.
+  (async () => {
+    for (let i = 0; i < 20 && document.documentElement.scrollHeight < y + innerHeight; i++) {
+      const more = document.querySelector(".load-more:not([disabled])");
+      if (!more) break;
+      more.click();
+      for (let t = 0; t < 100 && more.isConnected; t++) await new Promise((r) => setTimeout(r, 50));
+      if (more.isConnected) break;
+    }
+    window.scrollTo(0, y);
+  })();
+});
+
 // Reload the current page after a save. Marked first, so start.js doesn't send it to the Inbox
 // the way it does for a reload you start yourself.
 function reloadHere() {
