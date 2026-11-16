@@ -757,8 +757,10 @@ def test_scheduled_all_bills_reverse_order_and_filtered(tmp_path, monkeypatch):
     with TestClient(app) as c:
         c.cookies.set("finance_session", "tok")
         sched = c.get("/").text.split('id="scheduled"')[1].split("</details>")[0]
+        head, listed = sched.split("</summary>", 1)
+        assert "Next" in head and "Phone Co" in head  # the panel names the next bill
         # The yearly bill is ~65 days out (beyond 30) and listed first; the next one is last.
-        assert "Stream Box" in sched and sched.index("Stream Box") < sched.index("Phone Co")
+        assert "Stream Box" in listed and listed.index("Stream Box") < listed.index("Phone Co")
         sched = c.get("/?account=card").text.split('id="scheduled-wrap"')[1].split("</details>")[0]
         assert "Phone Co" in sched and "Stream Box" not in sched
 

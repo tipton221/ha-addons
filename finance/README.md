@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.2:
+
+- The Inbox's Scheduled list collapses into a tinted panel with a calendar icon, the count, the next bill and its date, and the totals, so it's hard to miss.
+
 Version 2.2.1:
 
 - Reaching zero (nothing to review or fix) on a device closes that device's Finance notifications and clears its icon badge.

@@ -945,3 +945,23 @@ a.tile:active { transform: scale(0.98); }
 @media (max-width: 640px) {
   .tab-badge { position: absolute; top: 2px; left: calc(50% + 4px); }
 }
+
+/* Inbox: the Scheduled list collapses into a panel that stands out */
+.sched-panel { border-bottom: 0; margin: 4px 0 14px; border-radius: 18px; background: color-mix(in srgb, var(--blue) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, transparent); }
+details.sched-panel > summary { padding: 12px 14px; gap: 12px; cursor: pointer; list-style: none; }
+.sched-panel > summary::-webkit-details-marker { display: none; }
+.sched-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px;
+  background: color-mix(in srgb, var(--blue) 22%, transparent); color: var(--blue); }
+.sched-icon svg { width: 20px; height: 20px; }
+.sched-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sched-text .muted { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sched-title { display: flex; align-items: center; gap: 8px; }
+.sched-count { --c: var(--blue); background: color-mix(in srgb, var(--blue) 22%, transparent); color: var(--blue); }
+.sched-panel .sched-total { margin-left: auto; text-align: right; font-weight: 600; color: var(--text); line-height: 1.35; }
+.sched-panel .sched-total .up { color: var(--green); }
+.sched-panel .chev-down { order: 5; }
+.sched-panel[open] > summary { border-bottom: 1px solid color-mix(in srgb, var(--blue) 20%, transparent); }
+.sched-panel .list { padding: 0 14px; }
+.sched-panel .chev-down { flex: none; width: 14px; text-align: center; margin-right: 2px; }
+.sched-panel { overflow: hidden; }
