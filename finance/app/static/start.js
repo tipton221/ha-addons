@@ -14,5 +14,9 @@
   } catch { /* ignore */ }
   const nav = performance.getEntriesByType("navigation")[0];
   const reload = nav ? nav.type === "reload" : false;
+  if (fresh || (reload && !keep)) {
+    // A fresh start forgets the last search (see the Search tab in app.js).
+    try { sessionStorage.removeItem("finance-search"); } catch { /* ignore */ }
+  }
   if ((fresh || (reload && !keep)) && location.pathname !== "/") location.replace("/");
 })();

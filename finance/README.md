@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.6:
+
+- Search remembers the last search (text, filters, and sort) and where you were in the results while you move between tabs. Clear, reloading, or reopening the app starts over.
+
 Version 2.2.5:
 
 - In transit items: the accounts use the full width (smaller on phones), the amount sits beside the date, and the status pill has its own line so it doesn't wrap. The panel header drops its explanation line and only shows a line when something has no match after 7 days.
