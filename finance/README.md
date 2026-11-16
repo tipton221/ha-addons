@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.10:
+
+- On phones the pinned day header extends up to the top edge while it is pinned, so transactions no longer show between it and the status bar.
+
 Version 2.2.9:
 
 - The pinned day header sits a little lower on phones, clear of the blur under the iPhone status bar.

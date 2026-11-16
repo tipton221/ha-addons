@@ -745,6 +745,26 @@ const sheet = {
   },
 };
 
+// The day header pinned at the top right now gets .stuck (phones draw it up to the top edge).
+(() => {
+  let pending = false;
+  const mark = () => {
+    pending = false;
+    const heads = document.querySelectorAll(".day-group > .day");
+    if (!heads.length) return;
+    const stick = parseFloat(getComputedStyle(heads[0]).top) || 0;
+    document.documentElement.style.setProperty("--stick", stick + "px");
+    heads.forEach((h) => {
+      const group = h.parentElement.getBoundingClientRect();
+      h.classList.toggle("stuck", group.top < stick - 0.5 && h.getBoundingClientRect().top <= stick + 0.5);
+    });
+  };
+  const queue = () => { if (!pending) { pending = true; requestAnimationFrame(mark); } };
+  window.addEventListener("scroll", queue, { passive: true });
+  window.addEventListener("resize", queue);
+  document.addEventListener("DOMContentLoaded", queue);
+})();
+
 // A day split across two pages of results becomes one panel again.
 function mergeDays(root) {
   root.querySelectorAll(".day-group + .day-group").forEach((g) => {
