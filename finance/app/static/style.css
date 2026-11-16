@@ -978,3 +978,7 @@ details.sched-panel > summary { display: grid; grid-template-columns: auto 1fr a
   .sched-panel .sched-total { grid-row: 1; }
   .sched-panel .sched-next { grid-column: 2 / 5; }
 }
+
+/* Bills: In transit uses the same collapsible panel as the Inbox's Scheduled list */
+.transit-panel { margin-top: 14px; }
+.transit-panel .transit-status { white-space: normal; text-overflow: clip; height: auto; min-height: 22px; padding-top: 2px; padding-bottom: 2px; border-radius: 11px; }
