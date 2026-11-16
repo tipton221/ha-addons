@@ -277,6 +277,19 @@ button svg { width: 18px; height: 18px; }
 
 .day { margin: 22px 4px 6px; color: var(--text-2); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .day:first-child { margin-top: 4px; }
+
+/* Transactions grouped by day: a neutral panel per day, its date pinned under the status bar while
+   that day scrolls past (and pushed away by the next day's). */
+.day-group { margin: 0 0 12px; border-radius: 18px; background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08); }
+.day-group:last-of-type { margin-bottom: 0; }
+.day-group > .day { position: sticky; top: env(safe-area-inset-top); z-index: 3; margin: 0;
+  padding: 10px 14px; border-radius: 17px 17px 0 0; background: #24252c;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07); color: var(--text); }
+.day-group > .list { padding: 0 14px; }
+/* Wide screens: the tab bar sticks at the top, so the date sticks just under it. */
+@media (min-width: 641px) { .day-group > .day { top: calc(env(safe-area-inset-top) + 18px + 52px + 8px); } }
+.day-group + .load-more { margin-top: 12px; }
 .empty { text-align: center; padding: 18px 0 8px; color: var(--text-2); }
 .empty .done-mark { display: block; font-size: 2.2rem; margin-bottom: 4px; }
 

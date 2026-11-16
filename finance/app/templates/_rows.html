@@ -1,8 +1,17 @@
 {% from "_txn.html" import txn_row %}
 {% for label, txns in groups %}
-{% if label %}<h3 class="day">{{ label }}</h3>{% endif %}
+{% if label %}
+{# One panel per day; its date stays at the top of the screen while you scroll through that day. #}
+<section class="day-group" data-day="{{ label }}">
+<h3 class="day">{{ label }}</h3>
+<ul class="list">
+  {% for t in txns %}{{ txn_row(t, dated=dated | default(false)) }}{% endfor %}
+</ul>
+</section>
+{% else %}
 <ul class="list{% if dated %} dated-rows{% endif %}">
   {% for t in txns %}{{ txn_row(t, dated=dated | default(false)) }}{% endfor %}
 </ul>
+{% endif %}
 {% endfor %}
 {% if more %}<button class="load-more" data-before="{{ more }}">Show more</button>{% endif %}

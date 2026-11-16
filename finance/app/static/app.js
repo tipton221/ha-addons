@@ -745,6 +745,16 @@ const sheet = {
   },
 };
 
+// A day split across two pages of results becomes one panel again.
+function mergeDays(root) {
+  root.querySelectorAll(".day-group + .day-group").forEach((g) => {
+    const prev = g.previousElementSibling;
+    if (prev.dataset.day !== g.dataset.day) return;
+    prev.querySelector(".list").append(...g.querySelector(".list").children);
+    g.remove();
+  });
+}
+
 function bindLoadMore(container) {
   container.addEventListener("click", async (ev) => {
     const btn = ev.target.closest(".load-more");
@@ -758,6 +768,7 @@ function bindLoadMore(container) {
       const tmp = document.createElement("div");
       tmp.innerHTML = html;
       btn.replaceWith(...tmp.childNodes);
+      mergeDays(container);
     } catch (e) { btn.disabled = false; btn.textContent = "Show more"; toast("Could not load more", true); }
   });
 }
