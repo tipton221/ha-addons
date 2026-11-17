@@ -288,11 +288,14 @@ button svg { width: 18px; height: 18px; }
   padding: 10px 14px; border-radius: 17px 17px 0 0; background: #24252c;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07); color: var(--text); }
 .day-group > .list { padding: 0 14px; }
-/* The pinned date grows up to the top edge (the script marks it .stuck), so nothing shows between it
-   and the status bar on phones, or around the tab bar (which stays in front) on wide screens. */
-.day-group > .day.stuck { border-radius: 0; }
-.day-group > .day.stuck::before { content: ""; position: absolute; left: -1px; right: -1px; bottom: 100%;
-  height: calc(var(--stick, 0px) + 1px); background: inherit; }
+/* The pinned date (the script marks it .stuck) becomes frosted glass reaching up to the top edge:
+   rows scrolling under it, and around the tab bar (which stays in front) on wide screens, are heavily
+   blurred and dimmed. One layer behind the text covers the header and the space above it, so the
+   blur is continuous. Tune with the blur radius and the tint's opacity. */
+.day-group > .day.stuck { border-radius: 0; background: transparent; }
+.day-group > .day.stuck::before { content: ""; position: absolute; z-index: -1; left: -1px; right: -1px; bottom: 0;
+  height: calc(100% + var(--stick, 0px) + 1px); background: rgba(30, 31, 38, 0.55);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6); }
 /* Wide screens: the tab bar sticks at the top, so the date sticks just under it. */
 @media (min-width: 641px) { .day-group > .day { top: calc(env(safe-area-inset-top) + 18px + 52px + 8px); } }
 .day-group + .load-more { margin-top: 12px; }

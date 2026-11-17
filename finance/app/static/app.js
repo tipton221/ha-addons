@@ -745,7 +745,7 @@ const sheet = {
   },
 };
 
-// The day header pinned at the top right now gets .stuck (phones draw it up to the top edge).
+// The day header pinned at the top right now gets .stuck (drawn as frosted glass up to the top edge).
 (() => {
   let pending = false;
   const mark = () => {
