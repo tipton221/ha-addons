@@ -1631,6 +1631,41 @@ def test_ira_contributions_from_ynab_before_plaid_activity(tmp_path, monkeypatch
     assert limits(db, D(2026, 11, 15))["years"][0]["ira"] == 2250.0
 
 
+def test_ira_contributions_from_a_recurring_bill(tmp_path, monkeypatch):
+    """Transfers tagged with the IRA's bill count, once each, alongside what YNAB or Plaid reports."""
+    import json as _json
+    from app.investments import limits
+    rows = [(f"c{m}", "sav", f"2026-{m:02d}-15", "TO ROTH IRA", "Roth Transfer", 250.0, 0, "TRANSFER_OUT", "X", 1)
+            for m in (9, 10, 11)]
+    rows.append(("cp", "sav", "2026-11-17", "TO ROTH IRA", "Roth Transfer", 250.0, 1, "TRANSFER_OUT", "X", 0))  # pending
+    db, app = client_with(tmp_path, monkeypatch, rows, [("sav", "Savings Co", "depository", 0, 0),
+                                                        ("roth", "Test Roth IRA", "investment", 0.0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE accounts SET subtype='roth' WHERE account_id='roth'")
+        conn.execute("INSERT INTO account_links VALUES ('roth', 'ynab:r')")
+        for m in (9, 10):  # YNAB already has September and October
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, raw, reviewed) "
+                         "VALUES ('ynab', ?, 'ynab:r', ?, 'Transfer : Savings', -250, ?, 1)",
+                         (f"y{m}", f"2026-{m:02d}-16", _json.dumps({"transfer_account_id": "x"})))
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, due_day) VALUES ('Roth transfer', 'roth transfer', 250, 'monthly', 15)")
+        bill = conn.execute("SELECT id FROM bills").fetchone()[0]
+    assert limits(db, D(2026, 11, 20))["years"][0]["ira"] == 500.0
+    H = {"X-Finance": "1"}
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/investments/contribution-bill", json={"account_id": "roth", "bill_id": "999"}, headers=H).status_code == 400
+        assert c.post("/api/investments/contribution-bill", json={"account_id": "roth", "bill_id": str(bill)}, headers=H).status_code == 200
+        y = limits(db, D(2026, 11, 20))["years"][0]
+        # Sep and Oct from YNAB (the tagged transfers a day earlier match them), Nov from the bill; pending waits.
+        assert y["ira"] == 750.0
+        assert sorted(c_["source"] for c_ in y["ira_items"]) == ["YNAB", "YNAB", "the recurring bill"]
+        assert c.post("/api/investments/tax-year", json={"id": "bill:c11", "year": 0}, headers=H).status_code == 200
+        assert limits(db, D(2026, 11, 20))["years"][0]["ira"] == 500.0
+        assert "contributions are the recurring bill" in c.get("/insights").text
+        assert c.post("/api/investments/contribution-bill", json={"account_id": "roth", "bill_id": ""}, headers=H).status_code == 200
+    assert limits(db, D(2026, 11, 20))["years"][0]["ira"] == 500.0
+
+
 def test_loans_pslf_count_and_projection(tmp_path, monkeypatch):
     from app.loans import loans, project
     # Monthly payments to a loan servicer, tagged with a bill.

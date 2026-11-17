@@ -1272,6 +1272,22 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                              "DO UPDATE SET amount=excluded.amount", (year, plan, amount))
         return {"ok": True}
 
+    @app.post("/api/investments/contribution-bill")
+    async def set_contribution_bill(request: Request):
+        """The recurring bill (a monthly transfer) whose tagged transactions are an IRA's contributions."""
+        body = await request.json()
+        aid = str(body.get("account_id") or "")
+        try:
+            bill = int(body.get("bill_id") or 0) or None
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Pick a recurring bill")
+        with db.connect() as conn:
+            if bill and not conn.execute("SELECT 1 FROM bills WHERE id=?", (bill,)).fetchone():
+                raise HTTPException(400, "Pick a recurring bill")
+            if not conn.execute("UPDATE accounts SET contribution_bill=? WHERE account_id=?", (bill, aid)).rowcount:
+                raise HTTPException(404, "Account not found")
+        return {"ok": True}
+
     @app.post("/api/investments/tax-year")
     async def set_contribution_year(request: Request):
         """Count an early-year IRA contribution for the year before (or back for its own year)."""
@@ -1280,6 +1296,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if cid.startswith("ynab:"):
                 row = conn.execute("SELECT date FROM transactions WHERE source='ynab' AND id=?", (cid[5:],)).fetchone()
+            elif cid.startswith("bill:"):
+                row = conn.execute("SELECT date FROM transactions WHERE source='plaid' AND id=?", (cid[5:],)).fetchone()
             else:
                 row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (cid,)).fetchone()
             if not row:

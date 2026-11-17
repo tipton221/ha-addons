@@ -1277,6 +1277,16 @@ document.addEventListener("click", async (ev) => {
   } catch (e) { toast(e.message, true); }
 });
 document.addEventListener("change", async (ev) => {
+  const sel = ev.target.closest(".contrib-bill");
+  if (!sel) return;
+  try {
+    await api("/api/investments/contribution-bill", { account_id: sel.dataset.account, bill_id: sel.value });
+    closeAllSheets();
+    toast("Saved");
+    setTimeout(() => reloadHere(), 600);
+  } catch (e) { toast(e.message, true); }
+});
+document.addEventListener("change", async (ev) => {
   const sel = ev.target.closest(".tax-year");
   if (!sel) return;
   try {
