@@ -46,6 +46,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 Version 2.2.11:
 
 - Wide screens get the same pinned day header treatment: it fills the space up to the top edge behind the tab bar, so rows no longer show around it.
+- Paydays twice a month take an optional first payday (for a new job): no payday is counted before it, so coverage runs to that date.
 
 Version 2.2.10:
 

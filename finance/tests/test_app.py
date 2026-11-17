@@ -437,6 +437,11 @@ def test_paydays():
     assert next_payday({"kind": "biweekly", "anchor": "2026-11-20"}, D(2026, 11, 21)) == D(2026, 12, 4)
     assert next_payday({"kind": "biweekly", "anchor": "2026-11-20"}, D(2026, 11, 13)) == D(2026, 11, 20)
     assert add_months(D(2026, 1, 31), 1) == D(2026, 2, 28)
+    # A new job: no payday before the first one.
+    new_job = dict(semi, start="2026-12-10")
+    assert next_payday(new_job, D(2026, 11, 16)) == D(2026, 12, 10)
+    assert next_payday(new_job, D(2026, 12, 10)) == D(2026, 12, 25)
+    assert next_payday(new_job, D(2027, 1, 1)) == D(2027, 1, 11)  # Jan 10, 2027 is a Sunday: the Monday after
 
 
 def test_coverage(tmp_path):
@@ -505,6 +510,12 @@ def test_bills_api_and_export(tmp_path, monkeypatch):
         c.post(f"/api/bills/{bill['id']}/delete", headers=H)
         assert c.post("/api/paydays", json={"kind": "biweekly", "anchor": "2026-11-20"}, headers=H).status_code == 200
         assert c.post("/api/paydays", json={"kind": "semimonthly", "days": [40]}, headers=H).status_code == 400
+        assert c.post("/api/paydays", json={"kind": "semimonthly", "days": [10, 25], "start": "nope"}, headers=H).status_code == 400
+        assert c.post("/api/paydays", json={"kind": "semimonthly", "days": [10, 25], "start": "2099-01-10"}, headers=H).status_code == 200
+        assert json.loads(db.get_kv("payday_schedule"))["start"] == "2099-01-10"
+        assert "starting Jan 10" in c.get("/bills").text
+        c.post("/api/paydays", json={"kind": "semimonthly", "days": [10, 25], "start": ""}, headers=H)
+        assert "start" not in json.loads(db.get_kv("payday_schedule"))
         r = c.get("/export.csv?q=amazon")
         assert r.headers["content-type"].startswith("text/csv")
         rows = list(_csv.reader(_io.StringIO(r.text)))

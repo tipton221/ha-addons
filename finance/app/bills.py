@@ -468,7 +468,8 @@ def _bill_series(db: Database, bills: list[dict]) -> dict[int, list[tuple[date, 
 # ---------------------------------------------------------------- paydays
 
 def next_payday(schedule: dict, today: date) -> date:
-    """schedule: {"kind": "semimonthly", "days": [10, 25]} or {"kind": "biweekly", "anchor": "2026-11-20"}."""
+    """schedule: {"kind": "semimonthly", "days": [10, 25], "start": "2026-12-10"} (start optional: no
+    payday before it, for a new job) or {"kind": "biweekly", "anchor": "2026-11-20"}."""
     if schedule.get("kind") == "biweekly" and schedule.get("anchor"):
         d = date.fromisoformat(schedule["anchor"])
         while d <= today:
@@ -477,6 +478,11 @@ def next_payday(schedule: dict, today: date) -> date:
             d -= timedelta(days=14)
         return d
     days = sorted(schedule.get("days") or [10, 25])
+    if schedule.get("start"):
+        try:
+            today = max(today, date.fromisoformat(schedule["start"]) - timedelta(days=1))
+        except ValueError:
+            pass
     for month_offset in range(0, 3):
         base = add_months(date(today.year, today.month, 1), month_offset)
         for day in days:

@@ -895,7 +895,7 @@ const forms = {
     const kind = f.kind.value;
     await api("/api/paydays", kind === "biweekly"
       ? { kind, anchor: f.anchor.value }
-      : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean) });
+      : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean), start: f.start.value });
   },
 };
 

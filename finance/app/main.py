@@ -764,7 +764,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             db, where=f"t.id IN ({','.join('?' * len(ids))})", params=tuple(ids), limit=0))} if ids else {}
         return templates.TemplateResponse(request, "bills.html", {
             "bills": bills, "income": income, "archived": archived, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
-            "cov": cov, "transit_accounts": transit_options(db), "transit_txns": transit_txns,
+            "cov": cov, "transit_accounts": transit_options(db), "transit_txns": transit_txns, "today_iso": today.isoformat(),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })
@@ -912,6 +912,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             if not days or any(not 1 <= d <= 31 for d in days):
                 raise HTTPException(400, "Paydays must be days of the month")
             sched = {"kind": "semimonthly", "days": days}
+            if body.get("start"):
+                try:
+                    sched["start"] = date.fromisoformat(body["start"]).isoformat()
+                except ValueError:
+                    raise HTTPException(400, "Pick a valid first payday")
         db.set_kv("payday_schedule", json.dumps(sched))
         return {"ok": True}
 
