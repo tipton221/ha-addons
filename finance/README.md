@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.12:
+
+- The pinned day header is frosted glass (a strong blur with a translucent tint) from the top edge down, instead of a solid fill, on phones and wide screens.
+
 Version 2.2.11:
 
 - Wide screens get the same pinned day header treatment: it fills the space up to the top edge behind the tab bar, so rows no longer show around it.
