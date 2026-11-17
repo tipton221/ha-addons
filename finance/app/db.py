@@ -281,6 +281,7 @@ class Database:
                 ("visibility", "TEXT NOT NULL DEFAULT 'everyday'"),  # everyday, less (used), archived
                 ("in_net_worth", "INTEGER NOT NULL DEFAULT 1"),  # 0: left out of Insights net worth
                 ("track_returns", "INTEGER"),  # 1/0: show (or hide) in Investments; NULL: by account type
+                ("contribution_bill", "INTEGER"),  # IRA: recurring bill whose tagged transfers are contributions
             ],
             "categories": [
                 ("kind", "TEXT"),            # spending, income, saving, debt, or transfer (see insights.py)

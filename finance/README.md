@@ -43,6 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.11:
+
+- Wide screens get the same pinned day header treatment: it fills the space up to the top edge behind the tab bar, so rows no longer show around it.
+- Paydays twice a month take an optional first payday (for a new job): no payday is counted before it, so coverage runs to that date.
+- An IRA can name a recurring bill (the monthly transfer from a cash account) in its contributions sheet: transfers tagged with it count toward the IRA limit, for providers that don't report contributions to Plaid. A contribution also reported by Plaid or YNAB (same amount within 5 days) counts once.
+
 Version 2.2.10:
 
 - On phones the pinned day header extends up to the top edge while it is pinned, so transactions no longer show between it and the status bar.

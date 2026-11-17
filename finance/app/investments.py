@@ -23,6 +23,7 @@ from datetime import date, timedelta
 
 from .db import Database
 from .insights import Series, account_series
+from .ledger import list_transactions, resolve
 
 PERIODS = (("3m", "3M"), ("6m", "6M"), ("ytd", "YTD"), ("1y", "1Y"), ("all", "All"))
 FLOW_SUBTYPES = {"contribution", "deposit", "withdrawal", "distribution", "transfer"}
@@ -248,15 +249,32 @@ def returns(db: Database, today: date) -> dict:
 
 # ---------------------------------------------------------------- contribution limits
 
+MATCH_DAYS = 5   # a bill-tagged transfer and the IRA's own record of it, this many days apart at most
+
+
+def _bill_transfers(db: Database, bill_id: int) -> list[dict]:
+    """Posted transactions (money out, from any account) tagged with a recurring bill, from the start
+    of last year (the only years a limit is shown for)."""
+    since = f"{date.today().year - 1}-01-01"
+    rows = resolve(db, list_transactions(db, where="t.amount > 0 AND t.date >= ?", params=(since,), limit=0))
+    return [t for t in rows if t["bill"] and t["bill"]["id"] == bill_id and not t["pending"]]
+
+
 def ira_contributions(db: Database) -> list[dict]:
     """Money into IRA accounts, with the year each counts for. From Plaid Investments activity, and
     before that activity starts (or when the provider doesn't report it), from YNAB transfers into
-    the IRA's linked YNAB account."""
+    the IRA's linked YNAB account. An IRA can also name a recurring bill (the monthly transfer from a
+    cash account): transactions tagged with it count too, unless the IRA's own record already has
+    the same amount within a few days."""
     ira_marks = ",".join("?" * len(IRA_SUBTYPES))
     with db.connect() as conn:
-        accts = {r["account_id"]: r["name"] for r in conn.execute(
-            f"SELECT account_id, COALESCE(display_name, name) AS name FROM accounts WHERE source='plaid' "
-            f"AND subtype IN ({ira_marks})", tuple(IRA_SUBTYPES))}
+        accts, bills = {}, {}
+        for r in conn.execute(
+                f"SELECT account_id, COALESCE(display_name, name) AS name, contribution_bill FROM accounts "
+                f"WHERE source='plaid' AND subtype IN ({ira_marks})", tuple(IRA_SUBTYPES)):
+            accts[r["account_id"]] = r["name"]
+            if r["contribution_bill"]:
+                bills[r["account_id"]] = r["contribution_bill"]
         choices = {r["id"]: r["year"] for r in conn.execute("SELECT id, year FROM contribution_years")}
         rows = [dict(r) for r in conn.execute(
             "SELECT t.id, t.account_id, t.date, t.name, t.amount, t.type, t.subtype, t.tax_year FROM investment_txns t "
@@ -284,6 +302,15 @@ def ira_contributions(db: Database) -> list[dict]:
                 if raw.get("transfer_account_id"):
                     rows.append({"id": "ynab:" + r["id"], "account_id": aid, "date": r["date"], "name": r["name"],
                                  "amount": r["amount"], "type": "ynab", "subtype": "transfer", "tax_year": None})
+    for aid, bill_id in bills.items():
+        known = [(date.fromisoformat(r["date"]), round(-r["amount"], 2)) for r in rows if r["account_id"] == aid]
+        for t in _bill_transfers(db, bill_id):
+            d, amount = date.fromisoformat(t["date"]), round(t["amount"], 2)
+            if any(a == amount and abs((k - d).days) <= MATCH_DAYS for k, a in known):
+                continue
+            known.append((d, amount))
+            rows.append({"id": f"bill:{t['id']}", "account_id": aid, "date": t["date"], "name": t["display_name"],
+                         "amount": -t["amount"], "type": "bill", "subtype": "transfer", "tax_year": None})
     for r in rows:
         d = date.fromisoformat(r["date"])
         r["amount"] = -r["amount"]
@@ -292,7 +319,7 @@ def ira_contributions(db: Database) -> list[dict]:
         chosen = choices.get(r["id"], r["tax_year"])
         r["year"] = d.year if chosen is None else chosen   # 0: not a contribution
         r["can_switch"] = (d.month, d.day) <= IRA_PRIOR_YEAR_UNTIL
-        r["source"] = "YNAB" if r["type"] == "ynab" else "Plaid"
+        r["source"] = {"ynab": "YNAB", "bill": "the recurring bill"}.get(r["type"], "Plaid")
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
 
@@ -320,4 +347,10 @@ def limits(db: Database, today: date) -> dict:
                  for p, label in PLANS.items() if p == "403b" or plan.get((y, p)) is not None]
         out.append({"year": y, "ira": round(sum(c["amount"] for c in ira), 2), "ira_limit": lim["ira"],
                     "ira_items": ira, "ira_ignored": ignored, "plans": plans, "known": y in LIMITS})
-    return {"years": out, "has_ira": bool(has_ira), "ira_needs_investments": bool(ira_without_activity)}
+    with db.connect() as conn:
+        ira_accounts = [dict(r) for r in conn.execute(
+            f"SELECT account_id AS id, COALESCE(display_name, name) AS name, contribution_bill AS bill FROM accounts "
+            f"WHERE source='plaid' AND subtype IN ({','.join('?' * len(IRA_SUBTYPES))}) ORDER BY name", tuple(IRA_SUBTYPES))]
+    linked = any(a["bill"] for a in ira_accounts)
+    return {"years": out, "has_ira": bool(has_ira), "ira_accounts": ira_accounts,
+            "ira_needs_investments": bool(ira_without_activity) and not linked}

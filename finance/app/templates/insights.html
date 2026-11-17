@@ -142,7 +142,7 @@
   {% for y in limits.years %}
   <p class="section-label">{{ y.year }}{% if not y.known %} (limits not yet published, using the latest){% endif %}</p>
   <ul class="list limit-list">
-    {% set ira_any = y.ira_items or y.ira_ignored %}
+    {% set ira_any = y.ira_items or y.ira_ignored or limits.ira_accounts %}
     <li class="limit-row{% if ira_any %} edit-row{% endif %}"{% if ira_any %} role="button" tabindex="0" data-editor="ira-{{ y.year }}"{% endif %}>
       <div class="grow">
         <strong>IRA</strong>
@@ -154,6 +154,15 @@
       <template id="ira-{{ y.year }}">
         <h3 class="sheet-title">IRA contributions for {{ y.year }}</h3>
         <p class="hint">Money that came into your IRAs, as the provider reports it. A contribution made January 1 to April 15 can count for the year before; anything that isn't a contribution (a rollover, a promotion) can be left out.</p>
+        {% for a in limits.ira_accounts %}
+        <label>{{ a.name }}: contributions are the recurring bill
+          <select class="contrib-bill" data-account="{{ a.id }}">
+            <option value="">None (only what the provider reports)</option>
+            {% for b in loan_bills %}<option value="{{ b.id }}" {% if a.bill == b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endfor %}
+        {% if limits.ira_accounts %}<p class="hint">Transfers tagged with that bill count as contributions; one the provider also reports (same amount within a few days) counts once.</p>{% endif %}
         {% macro ira_rows(items) %}
         <ul class="list ira-items">
           {% for c in items %}{% set d = c.own_year %}

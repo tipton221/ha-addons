@@ -764,7 +764,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             db, where=f"t.id IN ({','.join('?' * len(ids))})", params=tuple(ids), limit=0))} if ids else {}
         return templates.TemplateResponse(request, "bills.html", {
             "bills": bills, "income": income, "archived": archived, "colors": COLORS, "schedule": schedule(), "accounts": plaid_accounts(),
-            "cov": cov, "transit_accounts": transit_options(db), "transit_txns": transit_txns,
+            "cov": cov, "transit_accounts": transit_options(db), "transit_txns": transit_txns, "today_iso": today.isoformat(),
             "monthly_total": sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"]),
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })
@@ -912,6 +912,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             if not days or any(not 1 <= d <= 31 for d in days):
                 raise HTTPException(400, "Paydays must be days of the month")
             sched = {"kind": "semimonthly", "days": days}
+            if body.get("start"):
+                try:
+                    sched["start"] = date.fromisoformat(body["start"]).isoformat()
+                except ValueError:
+                    raise HTTPException(400, "Pick a valid first payday")
         db.set_kv("payday_schedule", json.dumps(sched))
         return {"ok": True}
 
@@ -1267,6 +1272,22 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                              "DO UPDATE SET amount=excluded.amount", (year, plan, amount))
         return {"ok": True}
 
+    @app.post("/api/investments/contribution-bill")
+    async def set_contribution_bill(request: Request):
+        """The recurring bill (a monthly transfer) whose tagged transactions are an IRA's contributions."""
+        body = await request.json()
+        aid = str(body.get("account_id") or "")
+        try:
+            bill = int(body.get("bill_id") or 0) or None
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Pick a recurring bill")
+        with db.connect() as conn:
+            if bill and not conn.execute("SELECT 1 FROM bills WHERE id=?", (bill,)).fetchone():
+                raise HTTPException(400, "Pick a recurring bill")
+            if not conn.execute("UPDATE accounts SET contribution_bill=? WHERE account_id=?", (bill, aid)).rowcount:
+                raise HTTPException(404, "Account not found")
+        return {"ok": True}
+
     @app.post("/api/investments/tax-year")
     async def set_contribution_year(request: Request):
         """Count an early-year IRA contribution for the year before (or back for its own year)."""
@@ -1275,6 +1296,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         with db.connect() as conn:
             if cid.startswith("ynab:"):
                 row = conn.execute("SELECT date FROM transactions WHERE source='ynab' AND id=?", (cid[5:],)).fetchone()
+            elif cid.startswith("bill:"):
+                row = conn.execute("SELECT date FROM transactions WHERE source='plaid' AND id=?", (cid[5:],)).fetchone()
             else:
                 row = conn.execute("SELECT date FROM investment_txns WHERE id=?", (cid,)).fetchone()
             if not row:

@@ -895,7 +895,7 @@ const forms = {
     const kind = f.kind.value;
     await api("/api/paydays", kind === "biweekly"
       ? { kind, anchor: f.anchor.value }
-      : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean) });
+      : { kind, days: f.days.value.split(/[^0-9]+/).filter(Boolean), start: f.start.value });
   },
 };
 
@@ -1273,6 +1273,16 @@ document.addEventListener("click", async (ev) => {
     await api(`/api/accounts/${encodeURIComponent(btn.dataset.account)}/track`, { track: !!btn.dataset.track });
     closeAllSheets();
     toast(btn.dataset.track ? "Now in Investments" : "Hidden from Investments");
+    setTimeout(() => reloadHere(), 600);
+  } catch (e) { toast(e.message, true); }
+});
+document.addEventListener("change", async (ev) => {
+  const sel = ev.target.closest(".contrib-bill");
+  if (!sel) return;
+  try {
+    await api("/api/investments/contribution-bill", { account_id: sel.dataset.account, bill_id: sel.value });
+    closeAllSheets();
+    toast("Saved");
     setTimeout(() => reloadHere(), 600);
   } catch (e) { toast(e.message, true); }
 });

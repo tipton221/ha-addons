@@ -113,7 +113,7 @@
   <div class="edit-row" role="button" tabindex="0" data-editor="paydays">
     <div class="grow">
       <strong>{% if schedule.kind == "biweekly" %}Every two weeks{% else %}Twice a month{% endif %}</strong>
-      <span class="muted small">{% if schedule.kind == "biweekly" %}Including {{ schedule.anchor | shortdate }}{% else %}On the {{ (schedule.days or [10, 25]) | join(" and ") }}{% endif %} · next {{ cov.payday.isoformat() | shortdate }}</span>
+      <span class="muted small">{% if schedule.kind == "biweekly" %}Including {{ schedule.anchor | shortdate }}{% else %}On the {{ (schedule.days or [10, 25]) | join(" and ") }}{% if schedule.start and schedule.start > today_iso %} · starting {{ schedule.start | shortdate }}{% endif %}{% endif %} · next {{ cov.payday.isoformat() | shortdate }}</span>
     </div>
     <span class="chev" aria-hidden="true">›</span>
   </div>
@@ -123,6 +123,8 @@
     <form id="payday-form" class="editor-form">
       <label class="inline"><input type="radio" name="kind" value="semimonthly" {% if schedule.kind != "biweekly" %}checked{% endif %}> Twice a month on these days</label>
       <input name="days" type="text" inputmode="numeric" value="{{ (schedule.days or [10, 25]) | join(', ') }}" aria-label="Days of the month">
+      <label class="payday-start">First payday (optional, for a new job)
+        <input name="start" type="{{ 'date' if schedule.start else 'text' }}" class="lazy-date" value="{{ schedule.start or '' }}" placeholder="Any"></label>
       <label class="inline"><input type="radio" name="kind" value="biweekly" {% if schedule.kind == "biweekly" %}checked{% endif %}> Every two weeks, including</label>
       <input name="anchor" type="date" value="{{ schedule.anchor or '' }}" aria-label="A recent payday">
       <div class="sheet-actions">
