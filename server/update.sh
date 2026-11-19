@@ -3,9 +3,15 @@
 # with "force"). A failed build, or a new container that doesn't start, keeps the previous one.
 set -uo pipefail
 
+# One run at a time: the timer's run and one started by hand (or by setup.sh) would otherwise
+# collide in git and Docker. A second run waits for the first to finish.
+exec 9>/run/finance-update.lock
+flock 9
+
 BASE=/opt/finance-server
 SRC="$BASE/src"
 cd "$SRC" || exit 1
+rm -f .git/index.lock  # left by a run that was stopped partway; safe while holding the lock above
 git fetch -q origin main || { echo "Could not reach GitHub; keeping the current version."; exit 0; }
 REV=$(git rev-parse origin/main)
 OLD=$(cat "$BASE/built" 2>/dev/null || true)
