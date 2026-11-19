@@ -38,7 +38,7 @@ rm -f "$DATA/finance.db-wal" "$DATA/finance.db-shm"
 install -m 600 "$FILE" "$DATA/finance.db"
 docker start finance >/dev/null
 for _ in $(seq 1 30); do
-  docker logs --since "$(docker inspect -f '{{.State.StartedAt}}' finance)" finance 2>&1 | grep -q "Application startup complete" && break
+  docker logs --since "$(docker inspect -f '{{.State.StartedAt}}' finance)" finance 2>&1 | grep "Application startup complete" >/dev/null && break
   sleep 2
 done
 echo

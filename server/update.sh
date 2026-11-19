@@ -46,10 +46,10 @@ start() {
 start "$REV"
 # The new version counts as started once the app logs that startup finished.
 for _ in $(seq 1 30); do
-  docker logs finance 2>&1 | grep -q "Application startup complete" && break
+  docker logs finance 2>&1 | grep "Application startup complete" >/dev/null && break
   sleep 2
 done
-if ! docker logs finance 2>&1 | grep -q "Application startup complete"; then
+if ! docker logs finance 2>&1 | grep "Application startup complete" >/dev/null; then
   echo "$REV" > "$BASE/failed"
   echo "Version $REV didn't start. Last log lines:"
   docker logs --tail 20 finance 2>&1
