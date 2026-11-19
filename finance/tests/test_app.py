@@ -68,6 +68,21 @@ def test_cloudflare_access_enforced(tmp_path, monkeypatch):
         assert c.get("/login", headers={"Cf-Access-Jwt-Assertion": "not-a-jwt"}).status_code == 403
 
 
+def test_apple_app_site_association_skips_access_and_login(tmp_path, monkeypatch):
+    """Apple's servers fetch this without a Cloudflare login or a session; nothing else is exempt."""
+    settings = make_settings(tmp_path, monkeypatch, cf_access_team_domain="team.cloudflareaccess.com",
+                             cf_access_aud="abc", apple_app_id="ABCDE12345.com.example.finance")
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        r = c.get("/.well-known/apple-app-site-association", follow_redirects=False)
+        assert r.status_code == 200 and r.headers["content-type"] == "application/json"
+        assert r.json() == {"webcredentials": {"apps": ["ABCDE12345.com.example.finance"]}}
+        assert c.get("/.well-known/other").status_code == 403
+        assert c.post("/.well-known/apple-app-site-association").status_code == 403
+    settings = make_settings(tmp_path, monkeypatch)  # no app ID set: nothing to serve
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        assert c.get("/.well-known/apple-app-site-association").status_code == 404
+
+
 def test_security_headers(client):
     r = client.get("/setup")
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
