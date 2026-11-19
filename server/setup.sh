@@ -29,8 +29,8 @@ if [ -d "$BASE/src/.git" ]; then
 else
   git clone -q "$REPO" "$BASE/src"
 fi
-cp "$BASE/src/server/update.sh" "$BASE/update.sh"
-chmod +x "$BASE/update.sh"
+cp "$BASE/src/server/update.sh" "$BASE/src/server/status.sh" "$BASE/"
+chmod +x "$BASE/update.sh" "$BASE/status.sh"
 
 OPTIONS="$BASE/data/options.json"
 ask() {  # ask NAME "Prompt" [secret]
@@ -72,6 +72,9 @@ os.chmod(path, 0o600)  # also when the file already existed
 PY
 fi
 
+echo "==> Building and starting (the first build takes a few minutes)"
+"$BASE/update.sh" force || echo "The build or start failed; see the messages above."
+
 echo "==> Automatic updates"
 cat > /etc/systemd/system/finance-update.service <<UNIT
 [Unit]
@@ -92,15 +95,10 @@ OnUnitActiveSec=15min
 WantedBy=timers.target
 UNIT
 systemctl daemon-reload
-systemctl enable -q --now finance-update.timer
+systemctl enable -q finance-update.timer
+systemctl start finance-update.timer
 
-echo "==> Building and starting (the first build takes a few minutes)"
-"$BASE/update.sh" force || echo "The build or start failed; see the messages above."
+
 
 echo
-echo "==== Status (safe to share: no secrets) ===="
-echo "Version: $(grep -m1 '^version:' "$BASE/src/finance/config.yaml" | cut -d'"' -f2) ($(cut -c1-7 "$BASE/built"))"
-echo "Container: $(docker inspect -f '{{.State.Status}}' finance 2>/dev/null || echo missing)"
-echo "Tunnel connections: $(docker logs finance 2>&1 | grep -c 'Registered tunnel connection' || true)"
-echo "App started: $(docker logs finance 2>&1 | grep -q 'Application startup complete' && echo yes || echo no)"
-echo "Update timer: $(systemctl is-active finance-update.timer)"
+"$BASE/status.sh"
