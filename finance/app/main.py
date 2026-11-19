@@ -9,9 +9,11 @@ from contextlib import asynccontextmanager
 import csv
 import io
 import json
+import os
 import re
 import secrets
 import sqlite3
+import tempfile
 from datetime import date, datetime, timedelta
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
@@ -322,6 +324,29 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         resp = JSONResponse({"ok": True})
         set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
         return resp
+
+    @app.post("/api/backup")
+    async def download_backup():
+        """A consistent copy of the whole database (SQLite's online backup, safe while the app is
+        running), for moving the app to another server. It holds the bank connections, so it is only
+        given to a signed-in session, and only to a same-origin request (POST with the app header)."""
+        def snapshot() -> bytes:
+            fd, tmp = tempfile.mkstemp(suffix=".db", dir=settings.data_dir)
+            os.close(fd)
+            try:
+                src = sqlite3.connect(db.path)
+                dst = sqlite3.connect(tmp)
+                with dst:
+                    src.backup(dst)
+                src.close()
+                dst.close()
+                return Path(tmp).read_bytes()
+            finally:
+                os.unlink(tmp)
+        data = await run_in_threadpool(snapshot)
+        name = f"finance-backup-{today().isoformat()}.db"
+        return Response(data, media_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.post("/api/logout")
     async def logout(request: Request):

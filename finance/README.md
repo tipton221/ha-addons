@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.13:
+
+- Accounts › Full backup downloads a consistent copy of the whole database (including bank connections), for moving the app to another server. Only a signed-in session can request it.
+
 Version 2.2.12:
 
 - The pinned day header is frosted glass (a strong blur with a translucent tint) from the top edge down, instead of a solid fill, on phones and wide screens.
