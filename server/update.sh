@@ -14,6 +14,16 @@ cd "$SRC" || exit 1
 rm -f .git/index.lock  # left by a run that was stopped partway; safe while holding the lock above
 git fetch -q origin main || { echo "Could not reach GitHub; keeping the current version."; exit 0; }
 REV=$(git rev-parse origin/main)
+
+# Keep this script and its helpers current too. Each is written to a temporary file and renamed
+# into place, so the copy of this script that is running now isn't changed under it.
+for f in update.sh status.sh restore.sh; do
+  if git show "origin/main:server/$f" > "$BASE/.$f.new" 2>/dev/null; then
+    chmod +x "$BASE/.$f.new" && mv -f "$BASE/.$f.new" "$BASE/$f"
+  else
+    rm -f "$BASE/.$f.new"
+  fi
+done
 OLD=$(cat "$BASE/built" 2>/dev/null || true)
 if [ "${1:-}" != force ]; then
   if [ "$REV" = "$OLD" ] && docker inspect finance >/dev/null 2>&1; then exit 0; fi

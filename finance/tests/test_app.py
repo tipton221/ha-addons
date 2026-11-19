@@ -1943,3 +1943,24 @@ def test_bills_transit_panel_counts_only_what_is_counted(tmp_path, monkeypatch):
         html = c.get("/bills").text
         head = html.split('id="transit"')[1].split("</summary>")[0]
         assert 'id="transit" open' not in html and "$350.00" in head
+
+
+def test_full_backup_download(tmp_path, monkeypatch):
+    """A signed-in, same-origin POST gets a working copy of the whole database; nothing else does."""
+    import sqlite3 as _sqlite3
+    db, app = client_with(tmp_path, monkeypatch, [
+        ("b1", "card", "2026-11-01", "CORNER GROCER", "Corner Grocer", 20.0, 0, "FOOD_AND_DRINK", "X", 1)],
+        [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        assert c.post("/api/backup", headers=H).status_code == 401  # not signed in
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/backup").status_code == 403             # no app header
+        assert c.get("/api/backup").status_code == 405
+        r = c.post("/api/backup", headers=H)
+    assert r.status_code == 200 and "finance-backup-" in r.headers["content-disposition"]
+    out = tmp_path / "copy.db"
+    out.write_bytes(r.content)
+    conn = _sqlite3.connect(out)
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("SELECT name FROM transactions WHERE id='b1'").fetchone()[0] == "CORNER GROCER"
+    assert not [f for f in tmp_path.iterdir() if f.name.startswith("tmp") and f.suffix == ".db"]  # temp file removed

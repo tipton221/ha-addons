@@ -1145,6 +1145,19 @@ const pages = {
     document.querySelectorAll(".add-investments").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item, false, true)));
     on("logout", async (ev) => { ev.preventDefault(); await api("/api/logout"); location.href = "/login"; });
+    on("backup-download", async () => {
+      // POST with the app header (not a plain link), so only this page can ask for the file.
+      try {
+        const r = await fetch("/api/backup", { method: "POST", headers: { "X-Finance": "1" }, credentials: "same-origin" });
+        if (!r.ok) throw new Error("Could not make the backup");
+        const name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "finance-backup.db";
+        const url = URL.createObjectURL(await r.blob());
+        const a = Object.assign(document.createElement("a"), { href: url, download: name });
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        toast("Backup downloaded");
+      } catch (e) { toast(e.message, true); }
+    });
     on("sync", syncNow);
     document.querySelectorAll(".reconnect").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item)));

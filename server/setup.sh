@@ -29,34 +29,48 @@ if [ -d "$BASE/src/.git" ]; then
 else
   git clone -q "$REPO" "$BASE/src"
 fi
-cp "$BASE/src/server/update.sh" "$BASE/src/server/status.sh" "$BASE/"
-chmod +x "$BASE/update.sh" "$BASE/status.sh"
+git -C "$BASE/src" checkout -q --detach origin/main
+cp "$BASE/src/server/update.sh" "$BASE/src/server/status.sh" "$BASE/src/server/restore.sh" "$BASE/"
+chmod +x "$BASE/update.sh" "$BASE/status.sh" "$BASE/restore.sh"
 
 OPTIONS="$BASE/data/options.json"
-ask() {  # ask NAME "Prompt" [secret]
-  local v
-  if [ "${3:-}" = secret ]; then read -rsp "$2: " v; echo; else read -rp "$2: " v; fi
+# Current values, so each question can keep what's already saved (press Enter).
+current() { python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except FileNotFoundError: print("")' "$OPTIONS" "$1"; }
+ask() {  # ask VAR option_key "Prompt" [secret]
+  local cur v shown
+  cur=$(current "$2")
+  if [ "${4:-}" = secret ]; then
+    shown=$([ -n "$cur" ] && echo " [saved; Enter keeps it]" || true)
+    read -rsp "$3$shown: " v; echo
+  else
+    shown=$([ -n "$cur" ] && echo " [$cur]" || true)
+    read -rp "$3$shown: " v
+  fi
+  [ -z "$v" ] && v="$cur"
+  [ "$v" = "-" ] && v=""  # a single dash clears a saved value
   printf -v "$1" '%s' "$v"
 }
 write_options=yes
 if [ -f "$OPTIONS" ]; then
-  read -rp "Options already saved. Replace them? [y/N] " a
+  read -rp "Options already saved. Change any of them? [y/N] " a
   [ "${a,,}" = y ] || write_options=no
 fi
 if [ "$write_options" = yes ]; then
-  echo "==> App options (press Enter to leave an optional one empty)"
-  ask PUBLIC_URL "Web address, e.g. https://finance.example.com"
-  ask TUNNEL "Cloudflare Tunnel token" secret
-  ask TEAM "Cloudflare Access team domain (optional)"
-  ask AUD "Cloudflare Access application audience tag (optional)"
+  echo "==> App options (Enter keeps what is saved; a single dash clears it)"
+  ask PUBLIC_URL public_url "Web address, e.g. https://finance.example.com"
+  ask TUNNEL cloudflare_tunnel_token "Cloudflare Tunnel token" secret
+  ask TEAM cf_access_team_domain "Cloudflare Access team domain (optional)"
+  ask AUD cf_access_aud "Cloudflare Access application audience tag (optional)"
   while :; do
-    ask SETUP "Setup code for adding the first passkey (at least 12 characters)" secret
+    ask SETUP setup_code "Setup code for adding the first passkey (at least 12 characters)" secret
     [ ${#SETUP} -ge 12 ] && break
     echo "That's ${#SETUP} characters; the app needs at least 12."
   done
-  ask PLAID_ID "Plaid client ID (optional)"
-  ask PLAID_SECRET "Plaid secret (optional)" secret
-  ask YNAB "YNAB token (optional)" secret
+  ask PLAID_ID plaid_client_id "Plaid client ID (optional)"
+  ask PLAID_SECRET plaid_secret "Plaid secret (optional)" secret
+  ask YNAB ynab_token "YNAB token (optional)" secret
   PUBLIC_URL="$PUBLIC_URL" TUNNEL="$TUNNEL" TEAM="$TEAM" AUD="$AUD" SETUP="$SETUP" \
   PLAID_ID="$PLAID_ID" PLAID_SECRET="$PLAID_SECRET" YNAB="$YNAB" OPTIONS="$OPTIONS" python3 - <<'PY'
 import json, os
