@@ -48,6 +48,7 @@ log = logging.getLogger("finance")
 
 HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
+AASA_PATH = "/.well-known/apple-app-site-association"
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/sw.js", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify"}
 
@@ -224,6 +225,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     @app.middleware("http")
     async def guard(request: Request, call_next):
         request.state.nonce = secrets.token_urlsafe(16)
+        # Apple fetches this file from its own servers, without a Cloudflare login, to confirm the
+        # native app may use passkeys for this site. It holds only the app's ID, so it is served
+        # before the login checks (Cloudflare Access needs a matching bypass for this one path).
+        if request.url.path == AASA_PATH and request.method in ("GET", "HEAD"):
+            if not settings.apple_app_id:
+                return Response("Not found", status_code=404)
+            return JSONResponse({"webcredentials": {"apps": [settings.apple_app_id]}},
+                                headers={"Cache-Control": "max-age=3600"})
         # Layer 1: Cloudflare Access.
         token = request.headers.get("cf-access-jwt-assertion") or request.cookies.get("CF_Authorization")
         if not await run_in_threadpool(cf_access.verify, token):

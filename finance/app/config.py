@@ -22,6 +22,7 @@ class Settings:
     ynab_token: str
     sync_interval_hours: int
     session_hours: int
+    apple_app_id: str = ""  # Team ID and bundle ID of the native app ("TEAMID.com.example.app"), for passkeys there
 
     @property
     def rp_id(self) -> str:
@@ -75,4 +76,5 @@ def load_settings() -> Settings:
         ynab_token=s("ynab_token"),
         sync_interval_hours=int(opts.get("sync_interval_hours") or 4),
         session_hours=int(opts.get("session_hours") or 24),
+        apple_app_id=s("apple_app_id"),
     )

@@ -1,5 +1,5 @@
 name: Finance
-version: "2.2.13"
+version: "2.2.14"
 slug: finance
 description: Personal finance tracker (Plaid and YNAB), served at its own address through a Cloudflare Tunnel
 arch:
@@ -21,6 +21,7 @@ options:
   ynab_token: ""
   sync_interval_hours: 4
   session_hours: 24
+  apple_app_id: ""
 schema:
   public_url: url
   cloudflare_tunnel_token: password?
@@ -33,3 +34,4 @@ schema:
   ynab_token: password?
   sync_interval_hours: int(1,24)
   session_hours: int(1,720)
+  apple_app_id: str?

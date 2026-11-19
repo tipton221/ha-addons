@@ -71,18 +71,25 @@ if [ "$write_options" = yes ]; then
   ask PLAID_ID plaid_client_id "Plaid client ID (optional)"
   ask PLAID_SECRET plaid_secret "Plaid secret (optional)" secret
   ask YNAB ynab_token "YNAB token (optional)" secret
+  ask APPLE apple_app_id "Native app ID for passkeys, Team ID then bundle ID, e.g. ABCDE12345.com.example.app (optional)"
   PUBLIC_URL="$PUBLIC_URL" TUNNEL="$TUNNEL" TEAM="$TEAM" AUD="$AUD" SETUP="$SETUP" \
-  PLAID_ID="$PLAID_ID" PLAID_SECRET="$PLAID_SECRET" YNAB="$YNAB" OPTIONS="$OPTIONS" python3 - <<'PY'
+  PLAID_ID="$PLAID_ID" PLAID_SECRET="$PLAID_SECRET" YNAB="$YNAB" APPLE="$APPLE" OPTIONS="$OPTIONS" python3 - <<'PY'
 import json, os
 e = os.environ
-opts = {
+path = e["OPTIONS"]
+try:
+    opts = json.load(open(path))  # keep anything saved that isn't asked about here
+except FileNotFoundError:
+    opts = {}
+opts |= {
     "public_url": e["PUBLIC_URL"].strip(), "cloudflare_tunnel_token": e["TUNNEL"].strip(),
     "cf_access_team_domain": e["TEAM"].strip(), "cf_access_aud": e["AUD"].strip(),
     "setup_code": e["SETUP"].strip(), "plaid_env": "production", "plaid_client_id": e["PLAID_ID"].strip(),
     "plaid_secret": e["PLAID_SECRET"].strip(), "ynab_token": e["YNAB"].strip(),
-    "sync_interval_hours": 1, "session_hours": 24,
+    "apple_app_id": e["APPLE"].strip(),
 }
-path = e["OPTIONS"]
+opts.setdefault("sync_interval_hours", 1)
+opts.setdefault("session_hours", 24)
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w") as f:
     json.dump(opts, f, indent=2)

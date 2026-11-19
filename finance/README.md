@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.14:
+
+- Serves `/.well-known/apple-app-site-association` (before the login checks) when the new `apple_app_id` option is set, so a native app with that ID can use the site's passkeys. Cloudflare Access needs a bypass for that one path.
+
 Version 2.2.13:
 
 - Accounts › Full backup downloads a consistent copy of the whole database (including bank connections), for moving the app to another server. Only a signed-in session can request it.
