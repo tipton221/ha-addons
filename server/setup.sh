@@ -49,7 +49,11 @@ if [ "$write_options" = yes ]; then
   ask TUNNEL "Cloudflare Tunnel token" secret
   ask TEAM "Cloudflare Access team domain (optional)"
   ask AUD "Cloudflare Access application audience tag (optional)"
-  ask SETUP "Setup code for adding the first passkey" secret
+  while :; do
+    ask SETUP "Setup code for adding the first passkey (at least 12 characters)" secret
+    [ ${#SETUP} -ge 12 ] && break
+    echo "That's ${#SETUP} characters; the app needs at least 12."
+  done
   ask PLAID_ID "Plaid client ID (optional)"
   ask PLAID_SECRET "Plaid secret (optional)" secret
   ask YNAB "YNAB token (optional)" secret
