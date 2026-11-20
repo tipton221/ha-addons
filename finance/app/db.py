@@ -191,6 +191,14 @@ CREATE TABLE IF NOT EXISTS loan_months (
     PRIMARY KEY (account_id, month)
 );
 
+-- The native app's devices, for Apple push notifications (env: sandbox for Xcode builds,
+-- production for TestFlight and App Store builds).
+CREATE TABLE IF NOT EXISTS apns_devices (
+    token           TEXT PRIMARY KEY,
+    env             TEXT NOT NULL DEFAULT 'production',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Web Push subscriptions (one per device with the app installed and notifications allowed).
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint        TEXT PRIMARY KEY,

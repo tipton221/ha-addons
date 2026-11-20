@@ -393,7 +393,7 @@ def test_links_table_migrates_from_single_link(tmp_path):
 
 # ---------------------------------------------------------------- 0.3.0: inbox, bills, search
 
-from datetime import date as D  # noqa: E402
+from datetime import date as D, timedelta  # noqa: E402
 
 from app.bills import add_months, bill_status, coverage, detect, next_payday, save_detected  # noqa: E402
 
@@ -727,18 +727,24 @@ def test_bill_amount_required_unless_varies(tmp_path, monkeypatch):
 def test_posted_charge_keeps_edits_and_records_tip(tmp_path):
     db = Database(tmp_path / "f.db")
     seed_item(db)
-    pend = dict(txn("p1", 18.94, pending=True), merchant_name="Taco Spot",
+    # Recent dates: anything over a week old arrives as already-reviewed history.
+    recent = (D.today() - timedelta(days=1)).isoformat()
+
+    def rtxn(*a, **kw):
+        return dict(txn(*a, **kw), date=recent)
+
+    pend = dict(rtxn("p1", 18.94, pending=True), merchant_name="Taco Spot",
                 personal_finance_category={"primary": "FOOD_AND_DRINK", "detailed": "FOOD_AND_DRINK_RESTAURANT"})
     plaid = FakePlaid([page(added=[pend], cursor="c1")])
     asyncio.run(sync_all(db, plaid))
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET reviewed=1, note='Dinner with friends', category_id=7 WHERE id='p1'")
-    posted = dict(txn("t1", 21.78, pending_id="p1"), merchant_name="Taco Spot",
+    posted = dict(rtxn("t1", 21.78, pending_id="p1"), merchant_name="Taco Spot",
                   personal_finance_category=pend["personal_finance_category"])
-    big = dict(txn("p2", 10.0, pending=True))
+    big = dict(rtxn("p2", 10.0, pending=True))
     plaid.pages = [page(added=[posted, big], removed=["p1"], cursor="c2")]
     asyncio.run(sync_all(db, plaid))
-    plaid.pages = [page(added=[txn("t2", 40.0, pending_id="p2")], removed=["p2"], cursor="c3")]
+    plaid.pages = [page(added=[rtxn("t2", 40.0, pending_id="p2")], removed=["p2"], cursor="c3")]
     with db.connect() as conn:
         conn.execute("UPDATE transactions SET reviewed=1 WHERE id='p2'")
     asyncio.run(sync_all(db, plaid))
@@ -1979,3 +1985,89 @@ def test_full_backup_download(tmp_path, monkeypatch):
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("SELECT name FROM transactions WHERE id='b1'").fetchone()[0] == "CORNER GROCER"
     assert not [f for f in tmp_path.iterdir() if f.name.startswith("tmp") and f.suffix == ".db"]  # temp file removed
+
+
+def test_apns_payload_token_and_send(tmp_path):
+    """Apple push: the message format, a reused signing token, sandbox routing, skip, and dropping
+    devices Apple says are gone."""
+    import httpx as _httpx
+    import jwt as _jwt
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from app.apns import APNs
+    key = ec.generate_private_key(ec.SECP256R1())
+    p8 = tmp_path / "apns.p8"
+    p8.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                     serialization.NoEncryption()))
+    apns = APNs(p8, "KEY1234567", "TEAM123456.com.example.finance")
+    assert apns.configured and apns.bundle_id == "com.example.finance"
+    assert not APNs(tmp_path / "missing.p8", "KEY1234567", "TEAM123456.com.example.finance").configured
+    t1 = apns.auth_token(now=1000)
+    assert apns.auth_token(now=1000 + 60) == t1                   # reused, not made per push
+    assert apns.auth_token(now=1000 + 41 * 60) != t1               # refreshed before Apple's hour runs out
+    assert _jwt.get_unverified_header(t1)["kid"] == "KEY1234567"
+    claims = _jwt.decode(t1, key.public_key(), algorithms=["ES256"])
+    assert claims["iss"] == "TEAM123456"
+
+    loud = APNs.payload({"title": "Corner Grocer", "body": "$20.00", "badge": 3, "url": "/"})
+    assert loud["aps"]["badge"] == 3 and loud["aps"]["sound"] == "default" and loud["url"] == "/"
+    quiet = APNs.payload({"title": "All caught up", "body": "", "badge": 0, "quiet": True})
+    assert "sound" not in quiet["aps"] and quiet["aps"]["interruption-level"] == "passive"
+
+    db = Database(tmp_path / "f.db")
+    with db.connect() as conn:
+        conn.executemany("INSERT INTO apns_devices (token, env) VALUES (?, ?)",
+                         [("aa" * 32, "production"), ("bb" * 32, "sandbox"), ("cc" * 32, "production"), ("dd" * 32, "production")])
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.host, request.url.path.rsplit("/", 1)[1], request.headers["apns-topic"],
+                     request.headers["apns-collapse-id"]))
+        token = request.url.path.rsplit("/", 1)[1]
+        if token == "cc" * 32:
+            return _httpx.Response(410, json={"reason": "Unregistered"})
+        return _httpx.Response(200)
+
+    client = _httpx.AsyncClient(transport=_httpx.MockTransport(handler))
+    sent = asyncio.run(apns.send(db, {"title": "x", "body": "y", "badge": 1}, skip="dd" * 32, client=client))
+    assert sent == 2
+    hosts = {tok: host for host, tok, _, _ in seen}
+    assert hosts["aa" * 32] == "api.push.apple.com" and hosts["bb" * 32] == "api.sandbox.push.apple.com"
+    assert "dd" * 32 not in hosts                                  # skipped
+    assert {topic for _, _, topic, _ in seen} == {"com.example.finance"} and {c for *_, c in seen} == {"finance"}
+    with db.connect() as conn:
+        left = {r[0] for r in conn.execute("SELECT token FROM apns_devices")}
+    assert "cc" * 32 not in left and "aa" * 32 in left              # gone device dropped
+
+
+def test_apns_register_and_combined_test_push(tmp_path, monkeypatch):
+    import app.main as main_mod
+    from app.apns import APNs
+    db, app = client_with(tmp_path, monkeypatch, [
+        ("w1", "card", D.today().isoformat(), "CORNER GROCER", "Corner Grocer", 20.0, 0, "FOOD_AND_DRINK", "X", 0)],
+        [("card", "Card A", "credit", 0, None)])
+    calls = []
+
+    async def fake_web(db_, message, subject, client=None, skip=""):
+        calls.append(("web", message["title"], skip))
+        return 0
+
+    async def fake_apns(self, db_, message, skip="", client=None):
+        calls.append(("apns", message["title"], skip))
+        return 1
+    monkeypatch.setattr(main_mod, "push_send", fake_web)
+    monkeypatch.setattr(APNs, "send", fake_apns)
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/apns/register", json={"token": "not hex!"}, headers=H).status_code == 400
+        r = c.post("/api/apns/register", json={"token": "AB" * 32, "env": "sandbox"}, headers=H)
+        assert r.status_code == 200 and r.json()["ready"] is False   # no key on the server yet
+        with db.connect() as conn:
+            assert conn.execute("SELECT env FROM apns_devices WHERE token=?", ("ab" * 32,)).fetchone()[0] == "sandbox"
+            assert conn.execute("SELECT 1 FROM push_told WHERE id='w1'").fetchone()  # waiting isn't news
+        r = c.post("/api/push/test", headers=H)
+        assert r.status_code == 200 and r.json()["sent"] == 1          # counted from the app device
+        assert ("web", "Notifications are on", "") in calls and ("apns", "Notifications are on", "") in calls
+        assert c.post("/api/apns/unregister", json={"token": "ab" * 32}, headers=H).status_code == 200
+    with db.connect() as conn:
+        assert not conn.execute("SELECT 1 FROM apns_devices").fetchone()

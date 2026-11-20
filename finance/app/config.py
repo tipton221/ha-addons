@@ -23,6 +23,7 @@ class Settings:
     sync_interval_hours: int
     session_hours: int
     apple_app_id: str = ""  # Team ID and bundle ID of the native app ("TEAMID.com.example.app"), for passkeys there
+    apns_key_id: str = ""   # Key ID of the APNs key; the key itself is apns.p8 in the data folder
 
     @property
     def rp_id(self) -> str:
@@ -77,4 +78,5 @@ def load_settings() -> Settings:
         sync_interval_hours=int(opts.get("sync_interval_hours") or 4),
         session_hours=int(opts.get("session_hours") or 24),
         apple_app_id=s("apple_app_id"),
+        apns_key_id=s("apns_key_id"),
     )

@@ -1333,14 +1333,32 @@ document.addEventListener("change", (ev) => {
 
 // App icon badge (a Home Screen or Dock web app): the Inbox count plus the Accounts issues. Browsers
 // show it only after notifications are allowed for the app, which the Accounts page asks for.
+// Inside the native Finance app (iPhone, iPad, Mac), the page talks to the app through this handler:
+// the app sets its own icon badge and handles notifications itself.
+const nativeApp = () => !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.finance);
+
 function appBadge() {
-  if (!("setAppBadge" in navigator)) return;
   const n = ["tab-badge", "tab-badge-accounts"].reduce((sum, id) => {
     const el = document.getElementById(id);
     return sum + (el && !el.hidden ? Number(el.textContent) || 0 : 0);
   }, 0);
+  if (nativeApp()) {
+    window.webkit.messageHandlers.finance.postMessage({ badge: n });
+    if (!n) nativeAllClear();
+    return;
+  }
+  if (!("setAppBadge" in navigator)) return;
   (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { /* not allowed yet */ });
   if (!n) allClear();
+}
+
+// The native app clears its own notifications at zero; this asks the server to clear the other
+// devices (with that setting on), leaving out this device's token. Once per page.
+let nativeClearSent = false;
+function nativeAllClear() {
+  if (nativeClearSent) return;
+  nativeClearSent = true;
+  api("/api/push/all-clear", { device: window.financeDeviceToken || "" }).catch(() => {});
 }
 
 // Caught up: close this device's Finance notifications, and (if that setting is on) have the server
@@ -1372,6 +1390,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   const on = document.getElementById("push-enable");
   const test = document.getElementById("push-test");
   const off = document.getElementById("push-disable");
+  if (nativeApp()) {
+    // The native app gets notifications from the server through Apple; nothing to turn on here.
+    card.hidden = false; on.hidden = true; off.hidden = true; test.hidden = false;
+    document.getElementById("push-clear-row").hidden = false;
+    text.textContent = "This app gets a notification when new transactions arrive or a bank connection needs attention, and its icon shows the count. Turn them off in Settings › Notifications › Finance.";
+    document.getElementById("push-clear-others").addEventListener("change", async (ev) => {
+      try { await api("/api/push/settings", { clear_others: ev.target.checked }); toast("Saved"); }
+      catch (e) { toast(e.message, true); }
+    });
+    test.addEventListener("click", async () => {
+      try { await api("/api/push/test"); toast("Sent"); } catch (e) { toast(e.message, true); }
+    });
+    return;
+  }
   if (!pushOK()) {
     // iPhone: only the app added to the Home Screen can get notifications.
     if (/iPhone|iPad/.test(navigator.userAgent)) {

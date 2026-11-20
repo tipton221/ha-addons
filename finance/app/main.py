@@ -32,6 +32,7 @@ from .plaid import Plaid, PlaidError
 from .transit import transit_options
 from .investments import PLANS, limits, returns
 from .loans import loans
+from .apns import APNs
 from .push import after_sync_message, send as push_send, vapid_keys
 from .bills import CADENCES, CadenceLabels, make_cadence, step_months, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
@@ -126,6 +127,14 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             log.exception("Push notification failed")
         return results
 
+    apns = APNs(settings.data_dir / "apns.p8", settings.apns_key_id, settings.apple_app_id)
+
+    async def notify(message: dict, skip: str = "") -> int:
+        """Send a notification to every device: Web Push subscriptions and the native app's devices.
+        skip is one device to leave out (a Web Push endpoint or an app device token)."""
+        return (await push_send(db, message, push_subject(), skip=skip)
+                + await apns.send(db, message, skip=skip))
+
     def push_subject() -> str:
         """Who sends the pushes (required by push services): the app's own address."""
         return settings.public_url if settings.public_url.startswith("https://") else "mailto:finance@localhost.invalid"
@@ -138,14 +147,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def notify_after_sync() -> int:
         """A notification for new transactions to review or a connection that broke, with the badge."""
         with db.connect() as conn:
-            if not conn.execute("SELECT 1 FROM push_subs LIMIT 1").fetchone():
+            if not (conn.execute("SELECT 1 FROM push_subs LIMIT 1").fetchone()
+                    or conn.execute("SELECT 1 FROM apns_devices LIMIT 1").fetchone()):
                 return 0
         rows = resolve(db, list_transactions(db, reviewed=False, limit=300))
         message = after_sync_message(db, rows, broken_items(), inbox_count() + account_issues())
         if not message:
             return 0
         db.set_kv("push_last_badge", str(message["badge"]))
-        return await push_send(db, message, push_subject())
+        return await notify(message)
 
     def ynab_names_ready() -> bool:
         with db.connect() as conn:
@@ -1506,6 +1516,31 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         db.set_kv("push_broken", json.dumps(sorted(i["item_id"] for i in broken_items())))
         return {"ok": True}
 
+    @app.post("/api/apns/register")
+    async def apns_register(request: Request):
+        """The native app's device token (sent by the app through this signed-in page)."""
+        body = await request.json()
+        token = str(body.get("token") or "").strip().lower()
+        env = "sandbox" if body.get("env") == "sandbox" else "production"
+        if not re.fullmatch(r"[0-9a-f]{32,200}", token):
+            raise HTTPException(400, "Not a device token")
+        with db.connect() as conn:
+            new = not conn.execute("SELECT 1 FROM apns_devices WHERE token=?", (token,)).fetchone()
+            conn.execute("INSERT INTO apns_devices (token, env) VALUES (?, ?) ON CONFLICT(token) DO UPDATE SET env=excluded.env",
+                         (token, env))
+            if new:  # what's already waiting isn't news to a new device
+                conn.execute("INSERT OR IGNORE INTO push_told SELECT id FROM transactions WHERE source='plaid' AND reviewed=0")
+        if new:
+            db.set_kv("push_broken", json.dumps(sorted(i["item_id"] for i in broken_items())))
+        return {"ok": True, "ready": apns.configured}
+
+    @app.post("/api/apns/unregister")
+    async def apns_unregister(request: Request):
+        token = str((await request.json()).get("token") or "").strip().lower()
+        with db.connect() as conn:
+            conn.execute("DELETE FROM apns_devices WHERE token=?", (token,))
+        return {"ok": True}
+
     @app.post("/api/push/unsubscribe")
     async def push_unsubscribe(request: Request):
         endpoint = str((await request.json()).get("endpoint") or "")
@@ -1522,23 +1557,24 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def push_all_clear(request: Request):
         """Sent by a device that just reached zero: if the others were last told about something,
         replace that notification on them with a quiet "All caught up" (only with the setting on)."""
-        endpoint = str((await request.json()).get("endpoint") or "")
+        body = await request.json()
+        endpoint = str(body.get("endpoint") or body.get("device") or "")
         if db.get_kv("push_clear_others") != "1" or (db.get_kv("push_last_badge") or "0") == "0":
             return {"sent": 0}
         if inbox_count() + account_issues():
             return {"sent": 0}
         db.set_kv("push_last_badge", "0")
-        sent = await push_send(db, {"title": "All caught up", "body": "Nothing to review or fix.", "badge": 0,
-                                    "url": "/", "quiet": True}, push_subject(), skip=endpoint)
+        sent = await notify({"title": "All caught up", "body": "Nothing to review or fix.", "badge": 0,
+                             "url": "/", "quiet": True}, skip=endpoint)
         return {"sent": sent}
 
     @app.post("/api/push/test")
     async def push_test():
         n = inbox_count() + account_issues()
         db.set_kv("push_last_badge", str(n))
-        sent = await push_send(db, {"title": "Notifications are on",
-                                    "body": f"{n} to review or fix. New transactions will show up here.",
-                                    "badge": n, "url": "/"}, push_subject())
+        sent = await notify({"title": "Notifications are on",
+                             "body": f"{n} to review or fix. New transactions will show up here.",
+                             "badge": n, "url": "/"})
         if not sent:
             raise HTTPException(400, "No device accepted the test. Turn notifications on from the installed app.")
         return {"ok": True, "sent": sent}
