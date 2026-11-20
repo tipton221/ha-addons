@@ -1,14 +1,15 @@
-# Weekly checks for newer pinned versions. Each update arrives as a pull request;
-# after it is merged, the bump-version workflow raises the add-on version so
-# Home Assistant offers the update.
+# Daily checks for newer pinned versions, taking a release once it's 3 days old (a release
+# with a problem is usually pulled or fixed by then). Each update arrives as a pull request,
+# which dependabot-merge.yml merges once the tests pass; the version is then raised and the
+# droplet installs it.
 version: 2
 updates:
   - package-ecosystem: docker
     directory: /finance
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
-      default-days: 7
+      default-days: 3
     ignore:
       # Python 3.13 to 3.14 and similar jumps get a deliberate, tested update instead.
       - dependency-name: python
@@ -17,9 +18,9 @@ updates:
   - package-ecosystem: pip
     directory: /finance
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
-      default-days: 7
+      default-days: 3
     groups:
       python-packages:
         patterns: ["*"]
@@ -27,4 +28,4 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
