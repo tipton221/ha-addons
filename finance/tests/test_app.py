@@ -1960,6 +1960,10 @@ def test_bills_transit_panel_counts_only_what_is_counted(tmp_path, monkeypatch):
         assert html.count('id="transit" open') == 1
         assert "$300.00" in head and "$350.00" not in head
         assert "1 with no match after 7 days" in head
+        d = c.get("/api/bills").json()["transit"]  # the native app's version agrees
+        assert d["total"] == "$300.00" and d["late"] == "1 with no match after 7 days"
+        assert [t["status"] for t in d["items"]] == ["Waiting on Card A", "No match after 7 days · not counted"]
+        assert d["items"][0]["title"] == "Savings Co to Card A" and [o["id"] for o in d["items"][0]["options"]] == ["card"]
         items[1]["late"] = False
         html = c.get("/bills").text
         head = html.split('id="transit"')[1].split("</summary>")[0]
@@ -2200,3 +2204,39 @@ def test_inbox_json_matches_the_page(tmp_path, monkeypatch):
         nxt = c.get(f"/api/inbox?before={today.isoformat()}:999999").json()
         assert set(nxt) == {"groups", "next"}
         assert c.get("/api/inbox?before=nope").status_code == 400
+
+
+def test_bills_json_for_the_native_app(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    app = signed_in_client(tmp_path, monkeypatch)
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance) "
+                     "VALUES ('k1','plaid','i1','Acme Card','credit',40)")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance) "
+                     "VALUES ('c1','plaid','i1','Acme Checking','depository',900)")
+        conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, reviewed) "
+                     "VALUES ('plaid','s1','k1',?, 'Stream Box', 15.99, 1)", ((today - timedelta(days=20)).isoformat(),))
+    with TestClient(app) as c:
+        assert c.get("/api/bills").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/bills", json={"name": "Stream Box", "amount": "15.99", "cadence": "monthly",
+                                          "account_id": "k1"}, headers=H).status_code == 200
+        assert c.post("/api/bills", json={"name": "Payroll", "amount": "2,000.00", "cadence": "biweekly",
+                                          "kind": "income", "is_payday": True}, headers=H).status_code == 200
+        d = c.get("/api/bills").json()
+        assert d["coverage"]["title"].startswith("Coverage through ") and len(d["coverage"]["rows"]) == 4
+        assert [b["name"] for b in d["bills"]] == ["Stream Box"]
+        bill = d["bills"][0]
+        assert bill["amount"] == "$15.99" and bill["subtitle"].startswith("Monthly") and bill["account"] == "Acme Card"
+        assert bill["form"]["cadence"] == "monthly" and bill["form"]["account_id"] == "k1" and bill["color"].startswith("#")
+        assert d["income"][0]["amount"] == "+$2,000.00" and d["income_monthly"].startswith("≈ +")
+        assert d["paydays"]["paycheck"]["name"] == "Payroll"
+        assert {a["id"] for a in d["accounts"]} == {"k1", "c1"} and len(d["colors"]) == 10
+        assert d["archived"] == [] and d["transit"] is None
+        assert c.post(f"/api/bills/{bill['id']}/archive", json={}, headers=H).status_code == 200
+        d = c.get("/api/bills").json()
+        assert d["bills"] == [] and d["archived"][0]["note"].startswith("Archived ") and d["archived"][0]["archived"]
+        assert "items" in c.post("/api/bills/detect", json={}, headers=H).json()
