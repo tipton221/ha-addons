@@ -10,3 +10,4 @@ echo "Container: $(docker inspect -f '{{.State.Status}}' finance 2>/dev/null || 
 echo "Tunnel connections since start: $(logs | grep -c 'Registered tunnel connection')"
 echo "App started: $(logs | grep 'Application startup complete' >/dev/null && echo yes || echo no)"
 echo "Update timer: $(systemctl is-active finance-update.timer)"
+echo "Apple push key file: $([ -s "$BASE/data/apns.p8" ] && echo present || echo missing)"

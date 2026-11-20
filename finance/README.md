@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.15:
+
+- Push notifications for the native app through Apple (APNs): the app registers its device, and every notification (new transactions, broken connections, the test, "All caught up") goes to both Web Push and app devices. The key file is `apns.p8` in the data folder; option `apns_key_id`.
+- Inside the native app, the page hands the badge count to the app, and the Notifications card explains that the app handles notifications.
+
 Version 2.2.14:
 
 - Serves `/.well-known/apple-app-site-association` (before the login checks) when the new `apple_app_id` option is set, so a native app with that ID can use the site's passkeys. Cloudflare Access needs a bypass for that one path.

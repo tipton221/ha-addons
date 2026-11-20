@@ -29,6 +29,10 @@ A systemd timer (`finance-update.timer`) runs `update.sh` every 15 minutes. When
 5. Run `bash setup.sh` again to set the web address and the Plaid and YNAB keys, keeping the rest.
 6. Point the web address at this server's tunnel. Passkeys belong to the web address, so they keep working when the address stays the same.
 
+## Push notifications for the native app
+
+The app's push notifications go through Apple, signed with an APNs key (`.p8`) from the Apple Developer account. Copy the key file to the server as `/opt/finance-server/data/apns.p8` (for example with `scp`, then `chmod 600`), and enter its Key ID when `setup.sh` asks. The Team ID and bundle ID come from the native app ID option.
+
 ## Useful commands
 
 ```sh

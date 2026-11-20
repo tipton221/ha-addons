@@ -72,8 +72,9 @@ if [ "$write_options" = yes ]; then
   ask PLAID_SECRET plaid_secret "Plaid secret (optional)" secret
   ask YNAB ynab_token "YNAB token (optional)" secret
   ask APPLE apple_app_id "Native app ID for passkeys, Team ID then bundle ID, e.g. ABCDE12345.com.example.app (optional)"
+  ask APNS_KEY apns_key_id "Apple push Key ID (optional; the key file goes in $BASE/data/apns.p8)"
   PUBLIC_URL="$PUBLIC_URL" TUNNEL="$TUNNEL" TEAM="$TEAM" AUD="$AUD" SETUP="$SETUP" \
-  PLAID_ID="$PLAID_ID" PLAID_SECRET="$PLAID_SECRET" YNAB="$YNAB" APPLE="$APPLE" OPTIONS="$OPTIONS" python3 - <<'PY'
+  PLAID_ID="$PLAID_ID" PLAID_SECRET="$PLAID_SECRET" YNAB="$YNAB" APPLE="$APPLE" APNS_KEY="$APNS_KEY" OPTIONS="$OPTIONS" python3 - <<'PY'
 import json, os
 e = os.environ
 path = e["OPTIONS"]
@@ -86,7 +87,7 @@ opts |= {
     "cf_access_team_domain": e["TEAM"].strip(), "cf_access_aud": e["AUD"].strip(),
     "setup_code": e["SETUP"].strip(), "plaid_env": "production", "plaid_client_id": e["PLAID_ID"].strip(),
     "plaid_secret": e["PLAID_SECRET"].strip(), "ynab_token": e["YNAB"].strip(),
-    "apple_app_id": e["APPLE"].strip(),
+    "apple_app_id": e["APPLE"].strip(), "apns_key_id": e["APNS_KEY"].strip(),
 }
 opts.setdefault("sync_interval_hours", 1)
 opts.setdefault("session_hours", 24)
