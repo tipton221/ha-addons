@@ -1416,8 +1416,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     SORTS = {"date": "Newest first", "oldest": "Oldest first", "name": "Merchant, A to Z",
              "largest": "Largest amount", "smallest": "Smallest amount"}
 
-    @app.get("/search", response_class=HTMLResponse)
-    async def search_page(request: Request):
+    def search_context(request: Request) -> dict:
+        """Search results and filters, for the page and for the app's JSON (/api/search)."""
         q = search_query(request)
         sort = q.pop("sort", "date")
         sort = sort if sort in SORTS else "date"
@@ -1434,7 +1434,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         counted = rows if q.get("category") or q.get("transfers") else [t for t in rows if not is_transfer(t)]
         out = sum(t["amount"] for t in counted if t["amount"] > 0)
         inflow = -sum(t["amount"] for t in counted if t["amount"] < 0)
-        return templates.TemplateResponse(request, "search.html", {
+        return {
             "q": q, "count": len(rows), "truncated": more, "sort": sort, "sorts": SORTS,
             # By date the list is grouped by day; any other order is one list with dates on the rows.
             "groups": group_by_date(rows[:1000], today()) if sort in ("date", "oldest") else [("", rows[:1000])],
@@ -1442,7 +1442,33 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "accounts": plaid_accounts(), "categories": categories(db), "searched": bool(q),
             "total_out": out, "total_in": inflow, "export_query": urlencode(q, doseq=True),
             "excluded": len(rows) - len(counted), "quick": quick_ranges(today(), q),
-        })
+        }
+
+    @app.get("/search", response_class=HTMLResponse)
+    async def search_page(request: Request):
+        return templates.TemplateResponse(request, "search.html", search_context(request))
+
+    @app.get("/api/search")
+    async def search_json(request: Request):
+        """Search for the native app: the same filters as the page (in the address), the results by
+        day (or one dated list for other orders), the totals line, and the filter choices."""
+        c = search_context(request)
+        excluded = c["excluded"]
+        return {
+            "searched": c["searched"],
+            "title": (f"{c['count']} result{'' if c['count'] == 1 else 's'}" if c["searched"] else "Latest transactions"),
+            "sums": (f"out {money(c['total_out'])} · in {money(c['total_in'])}"
+                     + (f" · not counting {excluded} transfer{'' if excluded == 1 else 's'}" if excluded else ""))
+                    if c["searched"] else None,
+            "truncated": c["truncated"], "sort": c["sort"],
+            "sorts": [{"id": k, "label": v} for k, v in SORTS.items()],
+            "groups": [{"label": label, "items": [txn_json(t, dated=c["dated"]) for t in items]} for label, items in c["groups"]],
+            "accounts": [{"id": a["account_id"], "name": a["pill"], "label": a["label"], "visibility": a["visibility"]}
+                         for a in c["accounts"] if a["visibility"] != "archived"],
+            "categories": [{"id": cat["id"], "name": cat["name"], "color": hex_color(cat.get("color"))} for cat in c["categories"]],
+            "years": [y["n"] for y in c["quick"]["years"]],
+            "export_query": c["export_query"],
+        }
 
     @app.get("/export.csv")
     async def export_csv(request: Request):

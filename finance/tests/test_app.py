@@ -2267,3 +2267,27 @@ def test_accounts_json_for_the_native_app(tmp_path, monkeypatch):
         assert d["rules"] == [] and d["push_clear_others"] is False and len(d["colors"]) == 10
         page = c.get("/link?link=connect").text  # Plaid alone, for the native sheet: no tab bar
         assert "Bank connection" in page and 'class="tabbar"' not in page
+
+
+def test_search_json_for_the_native_app(tmp_path, monkeypatch):
+    app = signed_in_client(tmp_path, monkeypatch)
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type) VALUES ('k1','plaid','i1','Acme Card','credit')")
+        for tid, d, name, amount in [("a", "2026-10-02", "Corner Bakery", 12.0), ("b", "2026-10-05", "Fuel Stop", 40.0),
+                                     ("c", "2026-10-07", "Corner Bakery", 8.5)]:
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, reviewed) "
+                         "VALUES ('plaid', ?, 'k1', ?, ?, ?, 1)", (tid, d, name, amount))
+    with TestClient(app) as c:
+        assert c.get("/api/search?q=bakery").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/search?q=bakery").json()
+        assert d["searched"] and d["title"] == "2 results" and d["sums"].startswith("out $20.50")
+        assert [t["id"] for g in d["groups"] for t in g["items"]] == ["c", "a"] and d["groups"][0]["label"]
+        d = c.get("/api/search?q=bakery&sort=largest").json()
+        assert [g["label"] for g in d["groups"]] == [""] and d["groups"][0]["items"][0]["date_label"]
+        assert [t["id"] for t in d["groups"][0]["items"]] == ["a", "c"]
+        d = c.get("/api/search").json()
+        assert not d["searched"] and d["title"] == "Latest transactions" and d["sums"] is None
+        assert d["accounts"][0]["id"] == "k1" and d["categories"] and len(d["years"]) == 5
+        assert d["sorts"][0] == {"id": "date", "label": "Newest first"}

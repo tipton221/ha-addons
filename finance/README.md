@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.28:
+
+- `GET /api/search` for the native app's Search: the same filters as the page (in the address), the results by day (or one dated list for other orders), the totals line, and the account, category, sort, and year choices.
+
 Version 2.2.27:
 
 - In the native app, the `/link` page is see-through, so Plaid's box shows straight over the app's own screen; an error closes it after a moment to read.
