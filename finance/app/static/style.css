@@ -139,6 +139,14 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 html.native-tabs .tabbar { display: none; }
 /* The Mac app's sidebar has its own sync button, so the Inbox's is hidden there. */
 html.native-sidebar #sync { display: none; }
+/* The native app shows Plaid Link straight over its own screen: the /link page is see-through, with
+   only a small "Opening Plaid" note (or an error) until Plaid's own box and backdrop appear. */
+html.native-tabs:has(body[data-page="link"]) { background: transparent; }
+html.native-tabs body[data-page="link"] { background: transparent; }
+html.native-tabs body[data-page="link"]::before, html.native-tabs body[data-page="link"]::after { display: none; }
+html.native-tabs body[data-page="link"] .wrap { display: grid; place-items: center; min-height: 100vh; }
+html.native-tabs body[data-page="link"] .card { width: auto; max-width: 320px; margin: 0; padding: 14px 18px; }
+html.native-tabs body[data-page="link"] h1 { display: none; }
 
 @media (max-width: 640px) {
   .tabbar {

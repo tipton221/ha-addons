@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.27:
+
+- In the native app, the `/link` page is see-through, so Plaid's box shows straight over the app's own screen; an error closes it after a moment to read.
+
 Version 2.2.26:
 
 - `/link?link=…` runs Plaid Link on its own page (no Accounts page behind it) for the native app's sheet, and tells the app when Plaid finishes or closes, so the sheet closes itself.
