@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.21:
+
+- The tab bar puts Accounts before Search, so Search is last.
+- The Mac app marks the page `native-sidebar`, which hides the Inbox's sync button (the sidebar has one).
+
 Version 2.2.20:
 
 - `GET /api/sidebar` for the Mac app's sidebar: the Inbox summary (left through the next payday), the last sync time, and the everyday accounts with their balances.
