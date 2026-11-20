@@ -1184,20 +1184,6 @@ const pages = {
   accounts() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
-    // The native app opens this page in a sheet to start Plaid Link: ?link=connect|invest|reconnect|
-    // accounts|investments (with &item= for an existing connection). Plaid's sign-in only runs in a page.
-    const params = new URLSearchParams(location.search);
-    const link = params.get("link");
-    if (link) {
-      const item = params.get("item") || null;
-      history.replaceState(null, "", location.pathname);
-      const start = () => ({
-        connect: () => openLink(null), invest: () => openLink(null, false, true),
-        reconnect: () => openLink(item), accounts: () => openLink(item, true),
-        investments: () => openLink(item, false, true),
-      }[link] || (() => {}))();
-      if (window.Plaid) start(); else window.addEventListener("load", start);
-    }
     on("connect-invest", (ev) => { ev.preventDefault(); openLink(null, false, true); });
     document.querySelectorAll(".add-investments").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item, false, true)));
@@ -1317,17 +1303,6 @@ const pages = {
   },
 
   bills() {
-    // /bills?from_source=plaid&from_id=… (the native app's "Make it a bill"): open a new bill form
-    // filled in from that transaction, then drop the parameters so a reload doesn't open it again.
-    const params = new URLSearchParams(location.search);
-    if (params.get("from_id")) {
-      const q = new URLSearchParams({ source: params.get("from_source") || "plaid", id: params.get("from_id") });
-      history.replaceState(null, "", location.pathname);
-      fetch(`/api/bills/form?${q}`, { credentials: "same-origin" })
-        .then((r) => { if (!r.ok) throw new Error("Could not open the bill form"); return r.text(); })
-        .then((html) => editor.openHTML(html))
-        .catch((e) => toast(e.message, true));
-    }
     const detect = document.getElementById("detect");
     if (detect) detect.addEventListener("click", async () => {
       detect.classList.add("spin");

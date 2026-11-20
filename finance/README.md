@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.30:
+
+- Removed what only the native app used before its screens went native: Accounts starting Plaid from `?link=` (the app uses `/link`) and Bills opening a filled-in form from `?from_source=&from_id=` (the app's Bills does that itself).
+
 Version 2.2.29:
 
 - `GET /api/insights` for the native app's Insights: highlight tiles, net worth by month with today's accounts, investments with each period's gains, contribution limits, loans, the last 12 months of spending and cash flow by category, and the lines the page shows. `GET /api/insights/spending?m=&format=json` gives a month's spending as transaction rows.
