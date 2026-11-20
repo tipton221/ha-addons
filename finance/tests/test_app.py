@@ -2191,6 +2191,7 @@ def test_inbox_json_matches_the_page(tmp_path, monkeypatch):
         assert t3["amount"] == "$200.00" and t3["inflow"] is True
         assert d["to_review"][0]["amount"] == "-$12.50" and d["to_review"][0]["date_label"]
         assert d["summary"]["label"].startswith("Left through ") and d["pending_count"] == 1
+        assert d["badges"] == {"inbox": 1, "accounts": 0}
         assert {a["id"] for a in d["accounts"]} == {"c1", "k1"}
         assert d["groups"][0]["items"][0]["category"]["color"].startswith("#")
         # Filters and the next-page form.

@@ -522,6 +522,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                             if waiting else None),
             },
             "attention": c["attention"],
+            "badges": {"inbox": inbox_count(), "accounts": account_issues()},  # the tab badges
             "synced_at": datetime.fromisoformat(synced).timestamp() if synced else None,
             "to_review": [txn_json(t, dated=True) for t in c["inbox"]],
             "scheduled": {
