@@ -199,7 +199,13 @@ async function openLink(itemId, chooseAccounts, investments) {
     localStorage.setItem(LINK_KEY, JSON.stringify({ token: link_token, itemId: itemId || null,
                                                     chooseAccounts: !!chooseAccounts, investments: !!investments }));
     plaidHandler(link_token).open();
-  } catch (e) { say(e.message, true); }
+  } catch (e) {
+    say(e.message, true);
+    // The native app's see-through Plaid page: let the app close it once the error has been read.
+    if (nativeApp() && document.body.dataset.page === "link") {
+      setTimeout(() => window.webkit.messageHandlers.finance.postMessage({ link: "closed" }), 4000);
+    }
+  }
 }
 
 // ---------- shared UI ----------
