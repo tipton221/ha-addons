@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.20:
+
+- `GET /api/sidebar` for the Mac app's sidebar: the Inbox summary (left through the next payday), the last sync time, and the everyday accounts with their balances.
+
 Version 2.2.19:
 
 - Sign in another device with a one-time code: Accounts shows a code (eight characters, five minutes, one use; five wrong tries cancel it), and the sign-in page takes it under "Use a sign-in code". For devices without the passkey, such as the iPhone simulator.
