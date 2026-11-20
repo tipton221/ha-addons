@@ -35,7 +35,7 @@ from .investments import PLANS, limits, returns
 from .loans import loans
 from .apns import APNs
 from .push import after_sync_message, send as push_send, vapid_keys
-from .bills import CADENCES, CadenceLabels, make_cadence, step_months, bill_status, coverage, detect, new_candidates, normalize, save_detected
+from .bills import CADENCES, CadenceLabels, cadence_text, make_cadence, step_months, bill_status, coverage, detect, new_candidates, normalize, save_detected
 from .compare import compare_all
 from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KINDS, monthly, net_worth, observations,
                        spending_rows)
@@ -230,9 +230,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     templates.env.filters["shortdate"] = shortdate
     templates.env.globals["cadence_label"] = CadenceLabels()
     # For the form: a stored schedule as (choice, N) — a named one, or every N months or years.
-    templates.env.globals["cadence_parts"] = lambda c: (
-        (c, "") if c in CADENCES or not c else
-        ("years", step_months(c) // 12) if step_months(c) % 12 == 0 else ("months", step_months(c)))
+    def cadence_parts(c):
+        return ((c, "") if c in CADENCES or not c else
+                ("years", step_months(c) // 12) if step_months(c) % 12 == 0 else ("months", step_months(c)))
+    templates.env.globals["cadence_parts"] = cadence_parts
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -936,6 +937,156 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "monthly_income": sum(b["monthly_equivalent"] for b in income if not b["stale"]),
         })
 
+    # ---------- Bills JSON for the native app ----------
+
+    def bill_json(b: dict, labels: dict[str, dict]) -> dict:
+        """One bill or income, with the line the page shows under its name and the form's values."""
+        income = b["kind"] == "income"
+        cadence = cadence_text(b["cadence"])
+        parts = [cadence]
+        if not b["archived_on"]:
+            if b.get("window_opens"):
+                parts.append(f"due by {shortdate(b['next_due'].isoformat())} (pay from {shortdate(b['window_opens'].isoformat())})")
+            elif b.get("next_due"):
+                parts.append(f"next {shortdate(b['next_due'].isoformat())}")
+        if b.get("last_date"):
+            parts.append(f"last {shortdate(b['last_date'])} {money(b['last_amount'])}")
+        else:
+            parts.append("none found yet" if income else "no charge found")
+        if not b["active"] and not income and not b["archived_on"]:
+            parts.append("not counted")
+        note = None
+        if b["archived_on"]:
+            note = f"Archived {shortdate(b['archived_on'])}"
+        warn = None
+        if not b["archived_on"] and b.get("stale"):
+            warn = f"None since {shortdate(b['last_date'])}. " + ("Archive it if it ended." if income else "Not counted; archive it if it ended.")
+        account = labels.get(b.get("account_id") or "")
+        choice, every = cadence_parts(b["cadence"])
+        return {
+            "id": b["id"], "name": b["name"], "kind": b["kind"], "color": hex_color(b.get("color"), "green" if income else "purple"),
+            "color_name": valid_color(b.get("color"), "green" if income else "purple"),
+            "amount": f"{'≈ ' if b.get('varies') else ''}{'+' if income else ''}{money(b['amount'])}",
+            "subtitle": " · ".join(parts), "account": account["label"] if account else None, "note": note, "warn": warn,
+            "inactive": not ((b["active"] or income) and not b.get("stale") and not b["archived_on"]),
+            "archived": bool(b["archived_on"]),
+            "form": {  # what the editor starts with
+                "kind": b["kind"], "name": b["name"], "amount": round(b["amount"] or 0, 2), "cadence": choice,
+                "every": every or None, "due_day": b.get("due_day"), "match": b.get("match") or "",
+                "next_due": b.get("next_due_override"), "account_id": b.get("account_choice") or "",
+                "auto_account": (labels.get(b.get("auto_account_id") or "") or {}).get("label"),
+                "varies": bool(b.get("varies")), "window_months": b.get("window_months"),
+                "is_payday": bool(b.get("is_payday")), "active": bool(b["active"]),
+            },
+        }
+
+    @app.get("/api/bills")
+    async def bills_json():
+        """The Bills page for the native app: coverage, payments in transit, what's due before payday,
+        paydays, bills, income, and archived ones, with each one's editor values."""
+        today_ = today()
+        everything = bill_status(db, today_)
+        archived = [b for b in everything if b["archived_on"]]
+        everything = [b for b in everything if not b["archived_on"]]
+        bills = [b for b in everything if b["kind"] != "income"]
+        income = [b for b in everything if b["kind"] == "income"]
+        cov = coverage(db, schedule(), today_)
+        accts = plaid_accounts()
+        labels = {a["account_id"]: a for a in accts}
+        ids = [i["id"] for i in cov["transit"]]
+        txns = {t["id"]: t for t in resolve(db, list_transactions(
+            db, where=f"t.id IN ({','.join('?' * len(ids))})", params=tuple(ids), limit=0))} if ids else {}
+        options = transit_options(db)
+        transit = []
+        for t in cov["transit"]:
+            tx = txns.get(t["id"])
+            status = ("No match after 7 days · not counted" if t["late"] else
+                      f"Pending in {t['other_name']}" if t["other_pending"] else f"Waiting on {t['other_name']}")
+            transit.append({
+                "id": t["id"], "amount": money(t["amount"]), "late": t["late"], "status": status,
+                "title": f"{t['account_name']} to {t['other_name']}" if t["out"] else f"{t['other_name']} to {t['account_name']}",
+                "subtitle": shortdate(t["date"]) + (f" · {tx['display_name']}" if tx else ""),
+                "sheet_title": f"{money(t['amount'])} {'to' if t['out'] else 'from'} {t['other_name']}",
+                "hint": (f"{t['account_name']} shows this payment or transfer on {shortdate(t['date'])}"
+                         f"{' (pending)' if t['pending'] else ''}. Until the matching {'charge' if t['out'] else 'deposit'} "
+                         "shows up in the other account, balances count it as if it had, for up to 7 days."
+                         + ("" if t["chosen"] else " The other account is worked out from where past transfers like this one went.")),
+                "other": t["other"], "options": [o for o in options if o["id"] != t["account"]],
+                "txn": txn_json(tx, dated=True) if tx else None,
+            })
+        sched = schedule()
+        if cov["paycheck"]:
+            p = cov["paycheck"]
+            paydays = {"paycheck": {"id": p["id"], "name": p["name"], "color": hex_color(p.get("color"), "green"),
+                                    "text": f"{cadence_text(p['cadence'])} · next {shortdate(cov['payday'].isoformat())}"}}
+        else:
+            days = sched.get("days") or [10, 25]
+            if sched.get("kind") == "biweekly":
+                title, text = "Every two weeks", f"Including {shortdate(sched.get('anchor'))}"
+            else:
+                title = "Twice a month"
+                text = "On the " + " and ".join(str(d) for d in days)
+                if sched.get("start") and sched["start"] > today_.isoformat():
+                    text += f" · starting {shortdate(sched['start'])}"
+            paydays = {"title": title, "text": f"{text} · next {shortdate(cov['payday'].isoformat())}",
+                       "schedule": {"kind": sched.get("kind") or "semimonthly", "days": days,
+                                    "start": sched.get("start"), "anchor": sched.get("anchor")}}
+        def due_line(b):
+            parts = [cadence_text(b["cadence"])]
+            if b.get("window_opens"):
+                parts.append(f"due by {shortdate(b['next_due'].isoformat())}")
+            if b.get("varies"):
+                parts.append(f"average of the last {b['samples']}" if b.get("samples") else "no charges found yet")
+            if b.get("account_id") in labels:
+                parts.append(labels[b["account_id"]]["pill"])
+            return " · ".join(parts)
+        late = [t for t in cov["transit"] if t["late"]]
+        counted = [t for t in cov["transit"] if not t["late"]]
+        monthly_total = sum(b["monthly_equivalent"] for b in bills if b["active"] and not b["stale"])
+        monthly_income = sum(b["monthly_equivalent"] for b in income if not b["stale"])
+        return {
+            "coverage": {
+                "title": f"Coverage through {shortdate(cov['payday'].isoformat())}",
+                "rows": [
+                    {"label": "Cash", "note": f"incl. {money(cov['transit_cash'])} in transit" if cov.get("transit_cash") else None,
+                     "value": money(cov["cash"])},
+                    {"label": "Card balances", "note": f"incl. {money(cov['transit_cards'])} in transit" if cov.get("transit_cards") else None,
+                     "value": f"-{money(cov['cards'])}"},
+                    {"label": "Pending card charges", "note": None, "value": f"-{money(cov['pending'])}"},
+                    {"label": "Bills due before payday", "note": None, "value": f"-{money(cov['due_total'])}"},
+                ],
+                "left": money(cov["left"]), "ok": bool(cov["ok"]),
+                "footer": f"Non-monthly bills average {money(cov['annual_reserve'])} a month. "
+                          f"All bills together average {money(monthly_total)} a month.",
+            },
+            "transit": {"items": transit, "late": f"{len(late)} with no match after 7 days" if late else None,
+                        "total": money(sum(t["amount"] for t in counted)) if counted else None} if transit else None,
+            "due": {"summary": f"{len(cov['due'])} bill{'' if len(cov['due']) == 1 else 's'} · {money(cov['due_total'])}",
+                    "items": [{"id": b["id"], "name": b["name"], "color": hex_color(b.get("color"), "purple"),
+                               "month": b["next_due"].strftime("%b"), "day": b["next_due"].day,
+                               "subtitle": due_line(b),
+                               "amount": f"{'≈ ' if b.get('varies') else ''}{money(b['amount'])}"} for b in cov["due"]]}
+                   if cov["due"] else None,
+            "paydays": paydays,
+            "bills": [bill_json(b, labels) for b in bills],
+            "income": [bill_json(b, labels) for b in income],
+            "income_monthly": f"≈ +{money(monthly_income)} a month" if income else None,
+            "archived": [bill_json(b, labels) for b in archived],
+            "accounts": [{"id": a["account_id"], "label": a["label"], "visibility": a["visibility"]}
+                         for a in accts if a.get("type") in ("credit", "depository")],
+            "colors": [{"name": c, "hex": HEX_COLORS[c]} for c in COLORS],
+        }
+
+    @app.get("/api/bills/prefill")
+    async def bill_prefill(source: str, id: str):
+        """A new bill's (or income's) starting values from a transaction, for the native editor."""
+        t = find_txn(source, id)
+        d = date.fromisoformat(t["date"])
+        return {"kind": "income" if t["amount"] < 0 else "bill", "name": t["display_name"], "amount": round(abs(t["amount"]), 2),
+                "cadence": "monthly", "every": None, "due_day": d.day, "match": t["merchant_key"], "next_due": None,
+                "account_id": t["account_id"], "auto_account": None, "varies": False, "window_months": None,
+                "is_payday": False, "active": True, "from_txn": t["id"]}
+
     @app.get("/api/bills/form", response_class=HTMLResponse)
     async def bill_form_from_transaction(request: Request, source: str, id: str):
         """A new bill (or income) form filled in from a transaction."""
@@ -1046,7 +1197,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         """Recurring charges not on the list yet, shown for confirmation. Nothing is added here."""
         found = new_candidates(db, detect(db, datetime.now(PACIFIC).date()))
         html = templates.env.get_template("_bill_candidates.html").render(found=found)
-        return {"count": len(found), "html": html}
+        items = [{"match": c.match, "name": c.name, "amount": f"{'≈ ' if c.varies else ''}{money(c.amount)}",
+                  "subtitle": f"{cadence_text(c.cadence)} · {c.count} charges · last {shortdate(c.last_seen.isoformat())}"}
+                 for c in found]
+        return {"count": len(found), "html": html, "items": items}
 
     @app.post("/api/bills/add-detected")
     async def add_detected(request: Request):
