@@ -1268,6 +1268,17 @@ const pages = {
   },
 
   bills() {
+    // /bills?from_source=plaid&from_id=… (the native app's "Make it a bill"): open a new bill form
+    // filled in from that transaction, then drop the parameters so a reload doesn't open it again.
+    const params = new URLSearchParams(location.search);
+    if (params.get("from_id")) {
+      const q = new URLSearchParams({ source: params.get("from_source") || "plaid", id: params.get("from_id") });
+      history.replaceState(null, "", location.pathname);
+      fetch(`/api/bills/form?${q}`, { credentials: "same-origin" })
+        .then((r) => { if (!r.ok) throw new Error("Could not open the bill form"); return r.text(); })
+        .then((html) => editor.openHTML(html))
+        .catch((e) => toast(e.message, true));
+    }
     const detect = document.getElementById("detect");
     if (detect) detect.addEventListener("click", async () => {
       detect.classList.add("spin");
