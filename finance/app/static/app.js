@@ -128,6 +128,18 @@ async function usePasskey() {
 
 const LINK_KEY = "finance_plaid_link";
 
+// After Plaid finishes: in the native app's sheet, tell the app (it closes the sheet and reloads);
+// otherwise go back to Accounts. The delay leaves the message on screen for a moment.
+function finishLink(delay) {
+  setTimeout(() => {
+    if (nativeApp() && ["link", "oauth"].includes(document.body.dataset.page)) {
+      window.webkit.messageHandlers.finance.postMessage({ link: "done" });
+    } else {
+      location.href = "/accounts";
+    }
+  }, delay);
+}
+
 function plaidHandler(token, extra) {
   return Plaid.create({
     token,
@@ -142,18 +154,18 @@ function plaidHandler(token, extra) {
                                 investments: !!state.investments });
           if (state.investments) {
             say("Investments added. Holdings and activity load with the next sync, in a minute or two.");
-            setTimeout(() => { location.href = "/accounts"; }, 2500);
+            finishLink(2500);
             return;
           }
           if (state.chooseAccounts && !r.added) {
             say("Plaid did not share any new accounts. For banks that sign in on their own site, like Chase, " +
                 "the bank decides what is shared: allow the account in the bank's linked apps settings, then try again.", true);
-            setTimeout(() => { location.href = "/accounts"; }, 9000);
+            finishLink(9000);
             return;
           }
           say(r.added ? `Added ${r.added} account${r.added > 1 ? "s" : ""}. Transactions follow in a few minutes.`
                       : "Updated.");
-          setTimeout(() => { location.href = "/accounts"; }, 1800);
+          finishLink(1800);
           return;
         } else {
           await api("/api/plaid/exchange", { public_token: publicToken, institution: metadata.institution,
@@ -161,11 +173,16 @@ function plaidHandler(token, extra) {
         }
         say(state.itemId ? "Updated. New accounts are listed now; their transactions follow in a few minutes."
                          : "Connected. Accounts are listed now; the first transactions can take a few minutes.");
-        setTimeout(() => { location.href = "/accounts"; }, 1500);
+        finishLink(1500);
       } catch (e) { say(e.message, true); }
     },
     onExit: (err) => {
       if (err) say(err.display_message || err.error_message || "Bank connection was not completed.", true);
+      // The native app's sheet closes on its own (after a moment to read an error).
+      if (nativeApp() && ["link", "oauth"].includes(document.body.dataset.page)) {
+        setTimeout(() => window.webkit.messageHandlers.finance.postMessage({ link: "closed" }), err ? 4000 : 0);
+        return;
+      }
       if (document.body.dataset.page === "oauth") setTimeout(() => { location.href = "/"; }, 2500);
     },
   });
@@ -1023,6 +1040,18 @@ const pages = {
       try { await api("/api/signin-code/use", { code: form.code.value }); location.href = "/"; }
       catch (e) { msg.textContent = e.message; }
     });
+  },
+
+  // Plaid Link alone, for the native app's sheet (/link?link=…&item=…).
+  link() {
+    const params = new URLSearchParams(location.search);
+    const item = params.get("item") || null;
+    const start = () => ({
+      connect: () => openLink(null), invest: () => openLink(null, false, true),
+      reconnect: () => openLink(item), accounts: () => openLink(item, true),
+      investments: () => openLink(item, false, true),
+    }[params.get("link")] || (() => say("Unknown bank action.", true)))();
+    if (window.Plaid) start(); else window.addEventListener("load", start);
   },
 
   oauth() {

@@ -2265,3 +2265,5 @@ def test_accounts_json_for_the_native_app(tmp_path, monkeypatch):
         assert d["ynab"].startswith("YNAB: ") and d["total"] == "0 transactions stored"
         assert d["categories"] and d["categories"][0]["color"].startswith("#") and d["kinds"][0]["id"] == "spending"
         assert d["rules"] == [] and d["push_clear_others"] is False and len(d["colors"]) == 10
+        page = c.get("/link?link=connect").text  # Plaid alone, for the native sheet: no tab bar
+        assert "Bank connection" in page and 'class="tabbar"' not in page

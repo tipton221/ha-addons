@@ -1771,6 +1771,11 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 conn.executemany("INSERT INTO account_links VALUES (?, ?)", [(pid, y) for y in keep])
         return {"ok": True}
 
+    @app.get("/link", response_class=HTMLResponse)
+    async def link_page(request: Request):
+        """Plaid Link alone (no page behind it), for the native app's bank connection sheet."""
+        return templates.TemplateResponse(request, "link.html", {"plaid_ready": plaid is not None})
+
     @app.get("/oauth-return", response_class=HTMLResponse)
     async def oauth_return(request: Request):
         return templates.TemplateResponse(request, "oauth_return.html", {})
