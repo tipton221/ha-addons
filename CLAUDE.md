@@ -11,7 +11,7 @@ Public repository of Mike's personal Home Assistant add-ons. Home Assistant inst
 - Bump an add-on's `version` in `config.yaml` with every change, or Home Assistant will not offer the update. The exception is a Dependabot update: after it merges, `.github/workflows/bump-version.yml` raises the patch version automatically when a push changes `finance/Dockerfile` or `finance/requirements.txt` without changing `config.yaml`.
 - Dependabot (`.github/dependabot.yml`) checks the Docker images, Python packages, and GitHub Actions on a schedule, waiting 7 days after a release before proposing it. Python minor and major upgrades are ignored and done by hand. `.github/workflows/test.yml` runs the tests and an image build on every pull request.
 - Pin dependency and base image versions.
-- Changes go through a `claude/*` branch and a pull request. Do not merge unless Mike asks.
+- Changes go through a `claude/*` branch and a pull request. Merge it yourself once the `test` and `scan` checks pass (Mike asked for this on 2026-11-19); fix any failure first, and never merge with a failing or missing check.
 
 ## Dates and times
 
