@@ -56,3 +56,15 @@ jobs:
       - name: Raise the version
         if: steps.files.outputs.ok == 'true'
         run: gh workflow run bump-version.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      # Anything left open (a failed or slow check, a GitHub Actions update, a failed merge) is
+      # assigned to the repository owner, which sends a GitHub notification.
+      - name: Ask for a merge by hand
+        if: failure() || steps.files.outputs.ok == 'false'
+        env:
+          OK: ${{ steps.files.outputs.ok }}
+        run: |
+          if [ "$OK" = false ]; then why="it changes more than the app image or packages"
+          else why="a check failed, the checks took too long, or the merge failed"; fi
+          gh pr edit "$PR" --add-assignee "$GITHUB_REPOSITORY_OWNER"
+          gh pr comment "$PR" --body "Not merged automatically: $why. Merge it by hand, or ask Claude to look at it."
