@@ -45,7 +45,7 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 Version 2.2.24:
 
-- `GET /api/bills` for the native app's Bills: coverage, payments in transit, due before payday, paydays, bills, income, and archived ones, each with the line the page shows and the editor's values, plus the accounts and colors the editor offers. "Find new bills" also returns its candidates as data.
+- `GET /api/bills` for the native app's Bills: coverage, payments in transit, due before payday, paydays, bills, income, and archived ones, each with the line the page shows and the editor's values, plus the accounts and colors the editor offers. "Find new bills" also returns its candidates as data, and `GET /api/bills/prefill` gives a new bill's starting values from a transaction.
 
 Version 2.2.23:
 

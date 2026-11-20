@@ -2240,3 +2240,6 @@ def test_bills_json_for_the_native_app(tmp_path, monkeypatch):
         d = c.get("/api/bills").json()
         assert d["bills"] == [] and d["archived"][0]["note"].startswith("Archived ") and d["archived"][0]["archived"]
         assert "items" in c.post("/api/bills/detect", json={}, headers=H).json()
+        pre = c.get("/api/bills/prefill?source=plaid&id=s1").json()
+        assert pre["name"] == "Stream Box" and pre["amount"] == 15.99 and pre["kind"] == "bill" and pre["from_txn"] == "s1"
+        assert pre["account_id"] == "k1" and pre["match"]

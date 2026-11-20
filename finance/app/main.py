@@ -1077,6 +1077,16 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "colors": [{"name": c, "hex": HEX_COLORS[c]} for c in COLORS],
         }
 
+    @app.get("/api/bills/prefill")
+    async def bill_prefill(source: str, id: str):
+        """A new bill's (or income's) starting values from a transaction, for the native editor."""
+        t = find_txn(source, id)
+        d = date.fromisoformat(t["date"])
+        return {"kind": "income" if t["amount"] < 0 else "bill", "name": t["display_name"], "amount": round(abs(t["amount"]), 2),
+                "cadence": "monthly", "every": None, "due_day": d.day, "match": t["merchant_key"], "next_due": None,
+                "account_id": t["account_id"], "auto_account": None, "varies": False, "window_months": None,
+                "is_payday": False, "active": True, "from_txn": t["id"]}
+
     @app.get("/api/bills/form", response_class=HTMLResponse)
     async def bill_form_from_transaction(request: Request, source: str, id: str):
         """A new bill (or income) form filled in from a transaction."""
