@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.19:
+
+- Sign in another device with a one-time code: Accounts shows a code (eight characters, five minutes, one use; five wrong tries cancel it), and the sign-in page takes it under "Use a sign-in code". For devices without the passkey, such as the iPhone simulator.
+
 Version 2.2.18:
 
 - The native apps hide the site's own tab bar: they mark the page `native-tabs`, since the page's content security policy blocks a style added from outside.

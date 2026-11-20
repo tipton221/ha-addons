@@ -1015,6 +1015,14 @@ const pages = {
       say("");
       try { await usePasskey(); location.href = "/"; } catch (e) { say(e.message, true); }
     });
+    const form = document.getElementById("code-form");
+    form?.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const msg = document.getElementById("code-msg");
+      msg.textContent = "";
+      try { await api("/api/signin-code/use", { code: form.code.value }); location.href = "/"; }
+      catch (e) { msg.textContent = e.message; }
+    });
   },
 
   oauth() {
@@ -1145,6 +1153,25 @@ const pages = {
     document.querySelectorAll(".add-investments").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item, false, true)));
     on("logout", async (ev) => { ev.preventDefault(); await api("/api/logout"); location.href = "/login"; });
+    let codeTimer;
+    on("signin-code-new", async () => {
+      try {
+        const { code, expires_in } = await api("/api/signin-code");
+        const until = Date.now() + expires_in * 1000;
+        document.getElementById("signin-code-value").textContent = code;
+        document.getElementById("signin-code-show").hidden = false;
+        document.getElementById("signin-code-new").textContent = "Show a new code";
+        const left = document.getElementById("signin-code-left");
+        clearInterval(codeTimer);
+        const tick = () => {
+          const s = Math.max(0, Math.round((until - Date.now()) / 1000));
+          left.textContent = s ? `Expires in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "Expired";
+          if (!s) clearInterval(codeTimer);
+        };
+        tick();
+        codeTimer = setInterval(tick, 1000);
+      } catch (e) { toast(e.message, true); }
+    });
     on("backup-download", async () => {
       // POST with the app header (not a plain link), so only this page can ask for the file.
       try {

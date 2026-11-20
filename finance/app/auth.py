@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,10 @@ from .db import Database
 SESSION_COOKIE = "finance_session"
 CHALLENGE_COOKIE = "finance_challenge"
 CHALLENGE_TTL = 300
+SIGNIN_CODE_TTL = 300
+SIGNIN_CODE_TRIES = 5
+# No 0/O, 1/I/L: easy to read off one screen and type on another.
+SIGNIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
 def _hash(token: str) -> str:
@@ -122,6 +127,38 @@ class Challenges:
         if not item or item[1] < time.time():
             return None
         return item[0]
+
+
+class SignInCodes:
+    """One-time codes for signing in another device (one without the passkey) from a signed-in one.
+    Kept in memory: one code at a time, good for five minutes and one use, and five wrong tries
+    cancel it. Cloudflare Access still guards the page, so a guess also needs that login."""
+
+    def __init__(self):
+        self._code: str | None = None
+        self._expires = 0.0
+        self._misses = 0
+
+    def issue(self, now: float | None = None) -> str:
+        now = time.time() if now is None else now
+        self._code = "".join(secrets.choice(SIGNIN_CODE_ALPHABET) for _ in range(8))
+        self._expires = now + SIGNIN_CODE_TTL
+        self._misses = 0
+        return f"{self._code[:4]}-{self._code[4:]}"
+
+    def redeem(self, code: str, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        if not self._code or now > self._expires:
+            self._code = None
+            return False
+        typed = re.sub(r"[^A-Z0-9]", "", str(code).upper())
+        if hmac.compare_digest(typed.encode(), self._code.encode()):
+            self._code = None
+            return True
+        self._misses += 1
+        if self._misses >= SIGNIN_CODE_TRIES:
+            self._code = None
+        return False
 
 
 class Passkeys:

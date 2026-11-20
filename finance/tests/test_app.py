@@ -2089,3 +2089,53 @@ def test_server_update_line(tmp_path, monkeypatch):
             "state": "current", "version": "2.2.17", "rev": "bbbbbbb", "at": "2026-11-20T03:05:00+00:00"}))
         assert c.get("/api/server-update").json()["state"] == "current"
         assert "Version 2.2.17 (bbbbbbb), installed" in c.get("/accounts").text
+
+
+def signed_in_client(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    app = create_app(settings, background_sync=False)
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO sessions VALUES (?, '2099-01-01T00:00:00+00:00')",
+                     (__import__("hashlib").sha256(b"tok").hexdigest(),))
+    return app
+
+
+def test_signin_code_signs_in_another_device_once(tmp_path, monkeypatch):
+    app = signed_in_client(tmp_path, monkeypatch)
+    with TestClient(app) as phone, TestClient(app) as other:
+        assert phone.post("/api/signin-code", headers=H).status_code == 401  # needs a session
+        phone.cookies.set("finance_session", "tok")
+        code = phone.post("/api/signin-code", headers=H).json()["code"]
+        assert len(code) == 9 and code[4] == "-"
+        assert other.post("/api/sync", headers=H).status_code == 401
+        r = other.post("/api/signin-code/use", json={"code": code.lower().replace("-", " ")}, headers=H)
+        assert r.status_code == 200 and "finance_session" in r.cookies
+        assert other.get("/accounts").status_code == 200
+        assert "Sign in another device" in other.get("/accounts").text
+        # Works once.
+        other.cookies.clear()
+        assert other.post("/api/signin-code/use", json={"code": code}, headers=H).status_code == 401
+
+
+def test_signin_code_rules():
+    from app.auth import SignInCodes
+
+    codes = SignInCodes()
+    code = codes.issue(now=1000)
+    assert not codes.redeem(code, now=1000 + 301)  # expired after five minutes
+    code = codes.issue(now=2000)
+    for _ in range(5):
+        assert not codes.redeem("AAAA-AAAA" if code != "AAAA-AAAA" else "BBBB-BBBB", now=2001)
+    assert not codes.redeem(code, now=2002)  # five wrong tries cancel it
+    codes.issue(now=3000)
+    second = codes.issue(now=3001)  # a new code replaces the last
+    assert codes.redeem(second, now=3002)
+
+
+def test_signin_code_on_login_page_and_needs_app_header(tmp_path, monkeypatch):
+    app = signed_in_client(tmp_path, monkeypatch)
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO passkeys (credential_id, public_key, sign_count, label) VALUES (x'01', x'02', 0, 'Phone')")
+    with TestClient(app) as c:
+        assert "Use a sign-in code" in c.get("/login").text
+        assert c.post("/api/signin-code/use", json={"code": "ABCD-EFGH"}).status_code == 403

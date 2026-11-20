@@ -435,6 +435,14 @@ form .row-actions button { margin: 0; }
 /* An empty status line takes no room, so every page's first card starts at the same height. */
 .top ~ .msg:empty { min-height: 0; margin: 0; }
 .msg.error { color: var(--red); }
+/* Sign-in code: entered on the sign-in page, shown on Accounts. */
+.code-signin { margin-top: 18px; text-align: left; }
+.code-signin summary { cursor: pointer; color: var(--text-2); text-align: center; }
+.code-signin form { display: flex; gap: 8px; margin-top: 8px; }
+.code-signin input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: 0.12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.signin-code { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 4px 0 10px; }
+.signin-code strong { font-size: 1.6rem; letter-spacing: 0.12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.signin-code[hidden] { display: none; }
 code { font-size: 0.88em; }
 a { color: var(--blue); }
 
