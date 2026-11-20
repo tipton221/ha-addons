@@ -25,7 +25,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .auth import CHALLENGE_COOKIE, SESSION_COOKIE, Challenges, CloudflareAccess, Passkeys, Sessions
+from .auth import (CHALLENGE_COOKIE, SESSION_COOKIE, SIGNIN_CODE_TTL, Challenges, CloudflareAccess, Passkeys, Sessions,
+                   SignInCodes)
 from .config import Settings, load_settings
 from .db import Database
 from .plaid import Plaid, PlaidError
@@ -51,7 +52,7 @@ HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
 AASA_PATH = "/.well-known/apple-app-site-association"
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/sw.js", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
-                "/api/register/options", "/api/register/verify"}
+                "/api/register/options", "/api/register/verify", "/api/signin-code/use"}
 
 def num(value) -> float:
     """A number typed in a field, which may have a $ and thousands commas (1,234.50)."""
@@ -88,6 +89,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     sessions = Sessions(db, settings)
     passkeys = Passkeys(db, settings)
     challenges = Challenges()
+    signin_codes = SignInCodes()
     cf_access = CloudflareAccess(settings)
     plaid = plaid or (Plaid(settings) if settings.plaid_configured else None)
     ynab = ynab or YNAB(settings)
@@ -340,6 +342,24 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             ok = False
         if not ok:
             raise HTTPException(401, "Passkey not recognized")
+        resp = JSONResponse({"ok": True})
+        set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
+        return resp
+
+    @app.post("/api/signin-code")
+    async def signin_code_new():
+        """A one-time code (signed-in only) that signs in another device: Accounts shows it, and the
+        sign-in page on the other device takes it. For a device without the passkey, such as the
+        iPhone simulator. A new code replaces the last one."""
+        return {"code": signin_codes.issue(), "expires_in": SIGNIN_CODE_TTL}
+
+    @app.post("/api/signin-code/use")
+    async def signin_code_use(request: Request):
+        body = await request.json()
+        if not signin_codes.redeem(str(body.get("code", ""))):
+            log.warning("Sign-in code rejected")
+            raise HTTPException(401, "That code didn't work. Codes last five minutes and work once; make a new one on a signed-in device.")
+        log.info("Signed in with a one-time code")
         resp = JSONResponse({"ok": True})
         set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
         return resp

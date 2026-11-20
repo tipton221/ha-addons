@@ -6,5 +6,15 @@
   <h1>Finance</h1>
   <button id="signin" class="primary big">Sign in with passkey</button>
   <p id="msg" class="msg" role="status"></p>
+  <details class="code-signin">
+    <summary>Use a sign-in code</summary>
+    <p class="muted small">On a device that's signed in, open Accounts and choose "Sign in another device". Enter the code it shows.</p>
+    <form id="code-form" autocomplete="off">
+      <input id="signin-code" name="code" type="text" required placeholder="ABCD-EFGH" maxlength="12"
+             autocapitalize="characters" autocorrect="off" spellcheck="false" aria-label="Sign-in code">
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+    <p id="code-msg" class="msg error" role="status"></p>
+  </details>
 </section>
 {% endblock %}
