@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.18:
+
+- The native apps hide the site's own tab bar: they mark the page `native-tabs`, since the page's content security policy blocks a style added from outside.
+
 Version 2.2.17:
 
 - Standalone server: checks for updates every minute, and the bottom of Accounts shows the running version, an update being installed (the page reloads when it's done), or one that didn't install.
