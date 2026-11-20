@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.22:
+
+- `GET /api/inbox` for the native app's Inbox: the summary, To review, the Scheduled summary, account filters, and All transactions by day with the same cursor paging as the page (`before=`). It is built from the same data as the page, and rows mirror `_txn.html` with amounts formatted and colors as hex.
+
 Version 2.2.21:
 
 - The tab bar puts Accounts before Search, so Search is last.

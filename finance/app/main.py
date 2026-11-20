@@ -433,8 +433,8 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     def page_after(rows: list[dict]) -> str | None:
         return f"{rows[-1]['date']}:{rows[-1]['rid']}" if len(rows) == PAGE else None
 
-    @app.get("/", response_class=HTMLResponse)
-    async def home(request: Request, account: str = "", pending: int = 0):
+    def inbox_context(account: str = "", pending: int = 0) -> dict:
+        """Everything the Inbox shows, for the page and for the app's JSON (/api/inbox), so the two agree."""
         inbox = resolve(db, list_transactions(db, reviewed=False, limit=300))
         selected = account_filter(account)
         pending_only = bool(pending)
@@ -449,7 +449,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         upcoming = sorted((b for b in bill_status(db, today()) if b["active"] and not b["stale"] and not b["archived_on"]
                            and (not selected or b["account_id"] == selected)),
                           key=lambda b: b["next_due"], reverse=True)
-        return templates.TemplateResponse(request, "home.html", {
+        return {
             "upcoming": upcoming, "colors": COLORS,
             "upcoming_out": sum(b["amount"] for b in upcoming if b["kind"] != "income"),
             "upcoming_in": sum(b["amount"] for b in upcoming if b["kind"] == "income"),
@@ -458,7 +458,82 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "groups": group_by_date(rest, today()), "more": page_after(rest),
             "accounts": plaid_accounts(), "selected": selected, "pending_only": pending_only,
             "pending_count": pending_count,
-        })
+        }
+
+    @app.get("/", response_class=HTMLResponse)
+    async def home(request: Request, account: str = "", pending: int = 0):
+        return templates.TemplateResponse(request, "home.html", inbox_context(account, pending))
+
+    # ---------- JSON for the native app ----------
+
+    HEX_COLORS = {"blue": "#0a84ff", "green": "#30d158", "orange": "#ff9f0a", "red": "#ff453a", "purple": "#bf5af2",
+                  "pink": "#ff375f", "teal": "#40c8e0", "yellow": "#ffd60a", "indigo": "#5e5ce6", "gray": "#8e8e93"}
+
+    def hex_color(value: str | None, default: str = "gray") -> str:
+        """A category or bill color as #rrggbb (the page uses CSS variables for the named ones)."""
+        v = valid_color(value, default)
+        return HEX_COLORS.get(v, v)
+
+    def txn_json(t: dict, dated: bool = False) -> dict:
+        """One transaction row as the app draws it, mirroring _txn.html. Amounts come formatted the way
+        the page shows them (money out without a sign, money in with a minus, as YNAB does)."""
+        tip, cat, bill = t["tip_info"], t["category_info"], t["bill"]
+        return {
+            "source": t["source"], "id": t["id"], "peer": t.get("transfer_peer"),
+            "name": t["display_name"], "pending": bool(t["pending"]),
+            "in_transit": t["in_transit"]["other_name"] if t.get("in_transit") else None,
+            "category": {"id": cat["id"], "name": cat["name"], "color": hex_color(cat.get("color"))} if cat else None,
+            "tip": (f"Tip +{money(tip['amount'])}" + (f" · {tip['pct']}%" if tip.get("pct") is not None else "")) if tip else None,
+            "change": None if tip or not t["change"] else f"{'+' if t['change'] > 0 else ''}{money(t['change'])} since pending",
+            "transfer": f"{'To' if t['transfer']['out'] else 'From'} {t['transfer']['account']}" if t["transfer"] else None,
+            "bill": {"id": bill["id"], "name": bill["name"], "color": hex_color(bill.get("color"), "purple")} if bill else None,
+            "account": t["account_label"], "date": t["date"],
+            "date_label": shortdate(t["date"]) if dated else None,
+            "note": t["note"] or None,
+            "amount": money(0 - t["amount"]), "inflow": t["amount"] < 0,
+        }
+
+    def groups_json(groups: list) -> list[dict]:
+        return [{"label": label, "items": [txn_json(t) for t in items]} for label, items in groups]
+
+    @app.get("/api/inbox")
+    async def inbox_json(account: str = "", pending: int = 0, before: str = ""):
+        """The Inbox for the native app. With before (the next cursor from a previous answer), just the
+        next page of All transactions; the app joins a day split across two pages."""
+        if before:
+            try:
+                d, rid = before.split(":")
+                date.fromisoformat(d)
+                int(rid)
+            except ValueError:
+                raise HTTPException(400, "Bad cursor")
+            rows = resolve(db, all_list(account_filter(account), before=(d, rid), pending=bool(pending)))
+            return {"groups": groups_json(group_by_date(rows, today())), "next": page_after(rows)}
+        c = inbox_context(account, pending)
+        cov, up = c["cov"], c["upcoming"]
+        waiting = [t for t in cov["transit"] if not t["late"]]
+        synced = c["last_sync"]
+        return {
+            "summary": {
+                "label": f"Left through {shortdate(cov['payday'].isoformat())}", "amount": money(cov["left"]),
+                "ok": bool(cov["ok"]), "cash": money(cov["cash"]), "cards": money(cov["cards"] + cov["pending"]),
+                "bills_due": money(cov["due_total"]),
+                "transit": (f"Counts {len(waiting)} payment{'' if len(waiting) == 1 else 's'} in transit as posted"
+                            if waiting else None),
+            },
+            "attention": c["attention"],
+            "badges": {"inbox": inbox_count(), "accounts": account_issues()},  # the tab badges
+            "synced_at": datetime.fromisoformat(synced).timestamp() if synced else None,
+            "to_review": [txn_json(t, dated=True) for t in c["inbox"]],
+            "scheduled": {
+                "count": len(up), "next": f"Next {shortdate(up[-1]['next_due'].isoformat())} · {up[-1]['name']}",
+                "out": f"-{money(c['upcoming_out'])}", "in": f"+{money(c['upcoming_in'])}" if c["upcoming_in"] else None,
+            } if up else None,
+            "accounts": [{"id": a["account_id"], "name": a["pill"], "label": a["label"], "visibility": a["visibility"]}
+                         for a in c["accounts"] if a["visibility"] != "archived" or a["account_id"] == c["selected"]],
+            "account": c["selected"], "pending_only": c["pending_only"], "pending_count": c["pending_count"],
+            "groups": groups_json(c["groups"]), "next": c["more"],
+        }
 
     @app.get("/api/sidebar")
     async def sidebar():
