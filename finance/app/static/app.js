@@ -1149,6 +1149,20 @@ const pages = {
   accounts() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
     on("connect", () => openLink(null));
+    // The native app opens this page in a sheet to start Plaid Link: ?link=connect|invest|reconnect|
+    // accounts|investments (with &item= for an existing connection). Plaid's sign-in only runs in a page.
+    const params = new URLSearchParams(location.search);
+    const link = params.get("link");
+    if (link) {
+      const item = params.get("item") || null;
+      history.replaceState(null, "", location.pathname);
+      const start = () => ({
+        connect: () => openLink(null), invest: () => openLink(null, false, true),
+        reconnect: () => openLink(item), accounts: () => openLink(item, true),
+        investments: () => openLink(item, false, true),
+      }[link] || (() => {}))();
+      if (window.Plaid) start(); else window.addEventListener("load", start);
+    }
     on("connect-invest", (ev) => { ev.preventDefault(); openLink(null, false, true); });
     document.querySelectorAll(".add-investments").forEach((b) =>
       b.addEventListener("click", () => openLink(b.dataset.item, false, true)));

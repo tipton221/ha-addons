@@ -825,6 +825,92 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS, "server_update": server_update(),
         })
 
+    @app.get("/api/accounts")
+    async def accounts_json():
+        """The Accounts page for the native app: accounts, bank connections, categories, renamed
+        merchants, settings, and the server's version, with the lines the page shows."""
+        with db.connect() as conn:
+            items = [dict(r) for r in conn.execute(
+                "SELECT item_id, institution, status, error_code, update_status, last_sync_at, products, investments, "
+                "(SELECT COUNT(*) FROM accounts a WHERE a.item_id = plaid_items.item_id AND a.type='investment') AS invest_accounts "
+                "FROM plaid_items ORDER BY institution")]
+            total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='plaid'").fetchone()["n"]
+            ynab_total = conn.execute("SELECT COUNT(*) AS n FROM transactions WHERE source='ynab'").fetchone()["n"]
+        local = templates.env.filters["local"]
+        accounts = []
+        for a in plaid_accounts():
+            parts = [a.get("institution") or "", (a.get("subtype") or a.get("type") or "").capitalize()]
+            if a.get("short_name"):
+                parts.append(f"pill: {a['short_name']}")
+            if a.get("display_name"):
+                parts.append(f"bank name: {a['name']}")
+            accounts.append({
+                "id": a["account_id"], "label": a["label"], "name": a["name"], "title": a.get("display_name") or "",
+                "short": a.get("short_name") or "", "visibility": a["visibility"],
+                "subtitle": " · ".join(p for p in parts if p), "balance": money(a.get("current_balance")),
+                "warn": "Archived but the balance is not zero, so it still counts in coverage."
+                        if a["visibility"] == "archived" and abs(a.get("current_balance") or 0) >= 0.005 else None,
+            })
+        connections = []
+        for i in items:
+            parts = [f"Synced {local(i['last_sync_at'])}" if i["last_sync_at"] else "Not synced yet"]
+            if i["update_status"] and i["update_status"] != "HISTORICAL_UPDATE_COMPLETE":
+                parts.append("history loading")
+            if i["products"] == "investments":
+                parts.append("investments only")
+            elif i["investments"] == "on":
+                parts.append("with investments")
+            elif i["investments"] == "unsupported":
+                parts.append("investments not available here")
+            ok = i["status"] == "ok"
+            connections.append({
+                "id": i["item_id"], "name": i["institution"] or "Unnamed connection", "ok": ok,
+                "subtitle": " · ".join(parts),
+                "add_investments": ("Allow investments" if i["investments"] == "consent" else "Add investments")
+                    if ok and i["invest_accounts"] and i["investments"] not in ("on", "unsupported") and i["products"] != "investments" else None,
+            })
+        if not ynab.configured:
+            ynab_line = "YNAB: not set up"
+        elif db.get_kv("ynab_error"):
+            ynab_line = f"YNAB: last sync failed ({db.get_kv('ynab_error')})"
+        elif db.get_kv("ynab_last_sync_at"):
+            ynab_line = f"YNAB: {ynab_total} transactions imported, synced {local(db.get_kv('ynab_last_sync_at'))}"
+        else:
+            ynab_line = "YNAB: waiting for the first sync"
+        u = server_update()
+        version = None
+        if u:
+            if u["state"] == "updating":
+                version = (f"Version {u.get('version')} · installing {u.get('target_version')} ({u.get('target_rev')}), "
+                           f"started {local(u.get('at'))}")
+            elif u["state"] == "failed":
+                version = (f"Version {u.get('version')} ({u.get('rev')}) · {u.get('target_version')} "
+                           f"({u.get('target_rev')}) didn't install, so this version keeps running.")
+            else:
+                version = f"Version {u.get('version')} ({u.get('rev')}), installed {local(u.get('at'))}"
+        banners = []
+        if not settings.cf_access_enabled:
+            banners.append("The Cloudflare Access check inside the app is off. Set cf_access_team_domain and cf_access_aud in the options.")
+        if plaid is None:
+            banners.append("Plaid is not set up. Add the client ID and secret in the options.")
+        return {
+            "banners": banners, "plaid_ready": plaid is not None,
+            "accounts": accounts, "connections": connections, "ynab": ynab_line,
+            "categories": [{"id": c["id"], "name": c["name"], "color": hex_color(c.get("color")),
+                            "color_name": valid_color(c.get("color")),
+                            "kind": c.get("kind") if c.get("kind") in KIND_PILLS else "spending",
+                            "kind_pill": KIND_PILLS.get(c.get("kind") or "spending", "Spending")} for c in categories(db)],
+            "kinds": [{"id": k, "label": v} for k, v in KIND_LABELS.items()],
+            "rules": [{"key": r["merchant_key"], "name": r["display_name"] or r["bank"], "bank": r["bank"],
+                       "count": r["count"],
+                       "category": {"id": r["category"]["id"], "name": r["category"]["name"],
+                                    "color": hex_color(r["category"].get("color"))} if r["category"] else None}
+                      for r in merchant_rule_list()],
+            "push_clear_others": db.get_kv("push_clear_others") == "1",
+            "total": f"{total} transactions stored", "version": version, "updating": bool(u and u["state"] == "updating"),
+            "colors": [{"name": c, "hex": HEX_COLORS[c]} for c in COLORS],
+        }
+
     def server_update() -> dict | None:
         """On the standalone server: the running version and any update in progress, as the updater
         last wrote them (data/update.json). None under Home Assistant."""

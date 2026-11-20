@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.25:
+
+- `GET /api/accounts` for the native app's Accounts: accounts, bank connections (with their actions), categories, renamed merchants, settings, and the server's version, with the lines the page shows.
+- Accounts starts Plaid Link from `?link=connect|invest|reconnect|accounts|investments` (`&item=` for a connection), so the native app can open it in a sheet.
+
 Version 2.2.24:
 
 - `GET /api/bills` for the native app's Bills: coverage, payments in transit, due before payday, paydays, bills, income, and archived ones, each with the line the page shows and the editor's values, plus the accounts and colors the editor offers. "Find new bills" also returns its candidates as data, and `GET /api/bills/prefill` gives a new bill's starting values from a transaction.

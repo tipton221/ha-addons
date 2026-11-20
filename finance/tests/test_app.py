@@ -2243,3 +2243,25 @@ def test_bills_json_for_the_native_app(tmp_path, monkeypatch):
         pre = c.get("/api/bills/prefill?source=plaid&id=s1").json()
         assert pre["name"] == "Stream Box" and pre["amount"] == 15.99 and pre["kind"] == "bill" and pre["from_txn"] == "s1"
         assert pre["account_id"] == "k1" and pre["match"]
+
+
+def test_accounts_json_for_the_native_app(tmp_path, monkeypatch):
+    app = signed_in_client(tmp_path, monkeypatch)
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution, status) VALUES ('i1','t','Acme','ok')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, subtype, current_balance) "
+                     "VALUES ('k1','plaid','i1','Acme Card','credit','credit card',40)")
+    with TestClient(app) as c:
+        assert c.get("/api/accounts").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/accounts/k1/rename", json={"name": "Travel Card", "short_name": "Travel",
+                                                       "visibility": "everyday"}, headers=H).status_code == 200
+        d = c.get("/api/accounts").json()
+        a = d["accounts"][0]
+        assert a["label"] == "Travel Card" and a["short"] == "Travel" and a["balance"] == "$40.00"
+        assert a["subtitle"] == "Acme · Credit card · pill: Travel · bank name: Acme Card" and a["warn"] is None
+        conn_ = d["connections"][0]
+        assert conn_["name"] == "Acme" and conn_["ok"] and conn_["subtitle"] == "Not synced yet"
+        assert d["ynab"].startswith("YNAB: ") and d["total"] == "0 transactions stored"
+        assert d["categories"] and d["categories"][0]["color"].startswith("#") and d["kinds"][0]["id"] == "spending"
+        assert d["rules"] == [] and d["push_clear_others"] is False and len(d["colors"]) == 10
