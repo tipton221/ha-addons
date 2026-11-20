@@ -1,6 +1,7 @@
 # Home Assistant only offers an add-on update when its version changes. When a
 # merge to main changes the Dockerfile or Python requirements without changing
-# config.yaml (Dependabot updates), raise the patch version and commit it.
+# config.yaml (Dependabot updates), raise the patch version and commit it. Run by hand (or by
+# dependabot-merge.yml), it always raises the version.
 name: Bump add-on version
 
 on:
@@ -9,6 +10,8 @@ on:
     paths:
       - finance/Dockerfile
       - finance/requirements.txt
+  # Started by dependabot-merge.yml after it merges an update (its merge doesn't start this).
+  workflow_dispatch:
 
 permissions:
   contents: write

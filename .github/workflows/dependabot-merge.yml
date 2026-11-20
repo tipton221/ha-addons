@@ -1,0 +1,58 @@
+# Merges Dependabot's pull requests by itself once the test and privacy checks pass, then
+# raises the add-on version (a merge made with this workflow's token doesn't start other
+# workflows, so the version bump is started here). The droplet installs the result within
+# a few minutes. Python minor and major upgrades never arrive here (see dependabot.yml).
+name: Merge Dependabot updates
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.html_url }}
+    steps:
+      # Only updates to the app's image and packages. GitHub Actions updates change workflow files,
+      # which this workflow's token isn't allowed to merge, so they wait for a merge by hand.
+      - name: Check what it changes
+        id: files
+        run: |
+          files=$(gh pr diff "$PR" --name-only)
+          echo "$files"
+          if echo "$files" | grep -qv '^finance/\(Dockerfile\|requirements.txt\)$'; then
+            echo "Changes more than the app's Dockerfile or requirements; leaving it for a merge by hand."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for the test and scan checks
+        if: steps.files.outputs.ok == 'true'
+        run: |
+          for i in $(seq 1 80); do   # up to 20 minutes
+            sleep 15
+            states=$(gh pr checks "$PR" --json name,bucket --jq '[.[] | select(.name == "test" or .name == "scan")]')
+            if echo "$states" | jq -e 'any(.bucket == "fail" or .bucket == "cancel")' >/dev/null; then
+              echo "A check failed; leaving the pull request open."; exit 1
+            fi
+            if echo "$states" | jq -e 'length == 2 and all(.bucket == "pass")' >/dev/null; then
+              echo "test and scan passed."; exit 0
+            fi
+          done
+          echo "The checks didn't finish in time; leaving the pull request open."; exit 1
+
+      - name: Merge
+        if: steps.files.outputs.ok == 'true'
+        run: gh pr merge "$PR" --merge
+
+      - name: Raise the version
+        if: steps.files.outputs.ok == 'true'
+        run: gh workflow run bump-version.yml --repo "$GITHUB_REPOSITORY" --ref main
