@@ -2291,3 +2291,57 @@ def test_search_json_for_the_native_app(tmp_path, monkeypatch):
         assert not d["searched"] and d["title"] == "Latest transactions" and d["sums"] is None
         assert d["accounts"][0]["id"] == "k1" and d["categories"] and len(d["years"]) == 5
         assert d["sorts"][0] == {"id": "date", "label": "Newest first"}
+
+
+def test_insights_json_for_the_native_app(tmp_path, monkeypatch):
+    rows = [("a", "card", "2026-09-03", "BOOK BARN", "Book Barn", 40.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("b", "card", "2026-10-04", "TOY TOWN", "Toy Town", 90.0, 0, "GENERAL_MERCHANDISE", "X", 1),
+            ("r", "card", "2026-10-06", "TOY TOWN", "Toy Town", -15.0, 0, "GENERAL_MERCHANDISE", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 100.0, None),
+                                                       ("chk", "Checking", "depository", 900.0, 900.0),
+                                                       ("old", "Old Savings", "depository", 5.0, 5.0)])
+    with TestClient(app) as c:
+        assert c.get("/api/insights").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        assert c.post("/api/accounts/old/net-worth", json={"include": False}, headers=H).status_code == 200
+        ret = c.post("/api/manual-accounts", json={"name": "Test Pension Plan", "kind": "retirement",
+                                                   "balance": "1,000", "day": "2026-06-01"}, headers=H).json()["id"]
+        assert c.post("/api/accounts/" + ret + "/track", json={"track": True}, headers=H).status_code == 200
+        assert c.post("/api/balances", json={"account_id": ret, "balance": "1200", "flow": "100"}, headers=H).status_code == 200
+        bare = c.post("/api/loans", json={"name": "Test Car Loan", "balance": "5000"}, headers=H).json()["id"]
+        c.post("/api/loans", json={"name": "Test Study Loan", "balance": "20000", "rate": "4", "payment": "200",
+                                   "pslf": True, "pslf_count": "100", "pslf_as_of": "2026-06-01"}, headers=H)
+        d = c.get("/api/insights").json()
+        nw = d["networth"]
+        assert nw["points"] and {"m", "net", "assets", "debts"} <= set(nw["points"][-1])
+        assert [a["name"] for a in nw["excluded"]] == ["Old Savings"] and set(nw["excluded"][0]) == {"id", "name"}
+        pension = next(a for a in nw["accounts"] if a["id"] == ret)
+        assert pension["subtitle"].startswith("Retirement · entered by hand") and pension["tracked"] and pension["editable"]
+        assert pension["history"][0]["flow"] == "$100.00 in" and pension["history"][-1]["balance"] == "$1,000.00"
+        card = next(a for a in nw["accounts"] if a["id"] == "card")
+        assert card["subtitle"] == "Plaid" and card["debt"] and not card["editable"] and card["history"] == []
+        inv = d["investments"]
+        assert [p["id"] for p in inv["periods"]] == ["3m", "6m", "ytd", "1y", "all"] and inv["chart"]
+        acct = inv["accounts"][0]
+        assert acct["name"] == "Test Pension Plan" and acct["value"] == "$1,200.00" and acct["holdings"] == []
+        assert all({"period", "gain", "up", "note"} <= set(p) for p in acct["periods"])
+        # The balance was entered once, months ago: a period starting long after it can't be measured.
+        assert any(p["note"].startswith("Needs a balance near") and p["gain"] is None for p in acct["periods"])
+        loans_ = {l["name"]: l for l in d["loans"]}
+        car = loans_["Test Car Loan"]
+        assert car["meta"][0] == "Add the rate and payment" and car["progress"] is None and car["stats"] == []
+        assert car["form"]["rate"] is None and car["form"]["pslf_as_of"] is None and car["id"] == bare
+        study = loans_["Test Study Loan"]
+        assert study["progress"]["pslf"] and study["progress"]["right"] == "of 120" and study["form"]["pslf_count"] == 100
+        assert [s["label"] for s in study["stats"]] == ["Payments left", "Last payment", "Forgiven"]
+        y = d["limits"]["years"][0]
+        assert y["ira_line"].endswith("left") and y["plans"][0]["amount"] is None and y["plans"][0]["pct"] is None
+        assert y["plans"][0]["line"].startswith("Not entered · limit ") and d["limits"]["footer"].startswith("IRS limits")
+        months = {m["m"]: m for m in d["months"]}
+        oct_ = months["2026-10"]
+        assert oct_["spending"] == 75.0 and oct_["label"] == "Oct 2026"
+        assert oct_["categories"][0]["search"].startswith("/search?start=2026-10-01&end=2026-10-31")
+        assert all(set(t) >= {"tone", "badge", "label", "value", "detail", "color", "search"} for t in d["tiles"])
+        assert {"id": "loan", "label": "Loan (debt)"} in d["manual_kinds"]
+        items = c.get("/api/insights/spending?m=2026-10&format=json").json()["items"]
+        assert [t["name"] for t in items] == ["Toy Town", "Toy Town"] and items[0]["date_label"] == "Oct 4"

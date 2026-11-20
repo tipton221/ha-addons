@@ -1491,35 +1491,288 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
     # ---------- insights ----------
 
-    @app.get("/insights", response_class=HTMLResponse)
-    async def insights_page(request: Request):
-        now = today()
+    async def insights_data(now: date) -> dict:
+        """Everything Insights shows, for the page and the app."""
         nw = await run_in_threadpool(net_worth, db, now)
         rows = resolve(db, list_transactions(db, limit=0))
         flow = monthly(db, rows, now)["months"]
         cats = {c["id"]: c for c in categories(db)}
+        inv = await run_in_threadpool(returns, db, now)
+        with db.connect() as conn:
+            balances = {}
+            for r in conn.execute("SELECT account_id, day, balance, flow FROM manual_balances ORDER BY day DESC"):
+                balances.setdefault(r["account_id"], []).append(dict(r))
+        return {"nw": nw, "flow": flow, "cats": cats, "inv": inv, "balances": balances, "limits": limits(db, now),
+                "loans": loans(db, now),
+                "loan_bills": [b for b in bill_status(db, now) if b.get("kind") != "income" and not b.get("archived_on")]}
+
+    @app.get("/insights", response_class=HTMLResponse)
+    async def insights_page(request: Request):
+        now = today()
+        d = await insights_data(now)
+        nw, flow, cats, inv = d["nw"], d["flow"], d["cats"], d["inv"]
         data = {
             "networth": nw["points"],
             "months": flow,
             "categories": {str(i): {"name": c["name"], "color": c["color"]} for i, c in cats.items()},
             "today": now.isoformat(),
+            "investments": {"points": inv["chart"], "starts": inv["starts"]},
         }
-        inv = await run_in_threadpool(returns, db, now)
-        data["investments"] = {"points": inv["chart"], "starts": inv["starts"]}
-        with db.connect() as conn:
-            balances = {}
-            for r in conn.execute("SELECT account_id, day, balance, flow FROM manual_balances ORDER BY day DESC"):
-                balances.setdefault(r["account_id"], []).append(dict(r))
         return templates.TemplateResponse(request, "insights.html", {
             "nw": nw, "flow": flow, "notes": observations(flow, cats, now), "data": data,
-            "loans": loans(db, now), "loan_bills": [b for b in bill_status(db, now) if b.get("kind") != "income" and not b.get("archived_on")],
-            "inv": inv, "limits": limits(db, now), "plans": PLANS, "tracked_ids": {a["id"] for a in inv["accounts"]},
-            "manual_kinds": MANUAL_KINDS, "manual_debts": MANUAL_DEBTS, "balances": balances,
+            "loans": d["loans"], "loan_bills": d["loan_bills"],
+            "inv": inv, "limits": d["limits"], "plans": PLANS, "tracked_ids": {a["id"] for a in inv["accounts"]},
+            "manual_kinds": MANUAL_KINDS, "manual_debts": MANUAL_DEBTS, "balances": d["balances"],
             "today": now.isoformat(), "kind_labels": KIND_LABELS,
         })
 
+    def signed_money(v: float) -> str:
+        return f"{'+' if v >= 0 else ''}{money(v)}"
+
+    def pct_text(p) -> str:
+        return f"{'+' if p >= 0 else ''}{p}%"
+
+    def month_short(m: str) -> str:
+        return date(int(m[:4]), int(m[5:7]), 1).strftime("%b %Y")
+
+    def search_path(m: str, cid) -> str:
+        last = calendar.monthrange(int(m[:4]), int(m[5:7]))[1]
+        path = f"/search?start={m}-01&end={m}-{last:02d}"
+        return path + (f"&category={cid}" if cid not in (None, "None") else "")
+
+    def investments_json(inv: dict, today_s: str, balances: dict) -> dict | None:
+        if not inv["accounts"]:
+            return None
+        periods = [{"id": k, "label": label} for k, label in inv["periods"]]
+        labels = dict(inv["periods"])
+        totals = []
+        for k, _ in inv["periods"]:
+            t = inv["totals"].get(k)
+            if t:
+                line = signed_money(t["gain"]) + (f" · {pct_text(t['pct'])}" if t["pct"] is not None else "")
+                totals.append({"period": k, "line": line, "up": t["gain"] >= 0, "partial": t["partial"]})
+        accounts = []
+        for a in inv["accounts"]:
+            new = a["first"] >= today_s
+            lines, table = [], []
+            for k, _ in inv["periods"]:
+                p = a["periods"].get(k)
+                if not p:
+                    continue
+                if p["gain"] is None:
+                    gain = None
+                    note = f"Needs a balance near {shortdate(p['needs'])}"
+                    table.append({"period": labels[k], "needs": note})
+                else:
+                    gain = signed_money(p["gain"]) + (f" · {pct_text(p['pct'])}" if p["pct"] is not None else "")
+                    note = f"{money(p['put_in'])} put in" if p["put_in"] else "Nothing put in"
+                    table.append({"period": labels[k], "put_in": money(p["put_in"]), "gain": signed_money(p["gain"]),
+                                  "up": p["gain"] >= 0, "pct": pct_text(p["pct"]) if p["pct"] is not None else "—"})
+                if p.get("since"):
+                    note += f" · since {shortdate(p['since'])}"
+                lines.append({"period": k, "gain": None if new else gain, "up": (p["gain"] or 0) >= 0, "note": note})
+            hint = ("Gain is the change in balance minus money put in or taken out. Return weights each deposit by how "
+                    f"long it was invested. History starts {shortdate(a['first'])}.")
+            if a["id"] in balances:
+                hint += (" Gains use the balances you entered (with the money put in), not other history. A period needs "
+                         "a balance within about a month before it starts; your record keeper can show the balance on a past date.")
+            holdings = []
+            for h in a["holdings"]:
+                cash = h.get("kind") == "cash" or (h.get("ticker") or "").startswith("CUR:")
+                vs = None
+                if h.get("cost_basis"):
+                    g = (h.get("value") or 0) - h["cost_basis"]
+                    vs = {"text": f"{signed_money(g)} vs cost", "up": g >= 0}
+                holdings.append({"name": "Cash" if cash else (h.get("ticker") or h.get("name") or "Holding"),
+                                 "detail": h.get("name") if h.get("ticker") and h.get("name") and not cash else None,
+                                 "value": money(h.get("value") or 0), "vs_cost": vs})
+            activity = []
+            for t in a["activity"]:
+                kind = t.get("type") or ""
+                if t.get("subtype") and t["subtype"] != kind:
+                    kind += f" / {t['subtype']}"
+                activity.append({"name": t.get("name") or (t.get("subtype") or t.get("type") or "").capitalize(),
+                                 "detail": f"{shortdate(t['date'])} · {kind}", "amount": money(0 - t["amount"]),
+                                 "inflow": t["amount"] < 0})
+            accounts.append({"id": a["id"], "name": a["name"], "value": money(a["value"]),
+                             "note": "History starts today; gains show from tomorrow" if new else None,
+                             "periods": lines, "table": table, "hint": hint, "holdings": holdings, "activity": activity})
+        return {"value": money(inv["value"]), "periods": periods, "totals": totals,
+                "chart": inv["chart"], "starts": [{"period": k, "day": v} for k, v in inv["starts"].items()],
+                "accounts": accounts}
+
+    def limits_json(lim: dict, loan_bills: list) -> dict:
+        def item(c):
+            d = c["own_year"]
+            years = [{"year": d, "label": f"Counts for {d}"}]
+            if c["can_switch"]:
+                years.append({"year": d - 1, "label": f"Counts for {d - 1}"})
+            years.append({"year": 0, "label": "Not a contribution"})
+            return {"id": c["id"], "amount": money(c["amount"]), "year": c["year"], "years": years,
+                    "detail": f"{shortdate(c['date'])} · {c['name'] or (c['subtype'] or '').capitalize()} · "
+                              f"{c['account']} · from {c['source']}"}
+        years = []
+        for y in lim["years"]:
+            left = money(y["ira_limit"] - y["ira"]) if y["ira"] < y["ira_limit"] else "$0.00"
+            plans = []
+            for p in y["plans"]:
+                entered = p["amount"] is not None
+                plans.append({"plan": p["plan"], "label": p["label"], "amount": p["amount"],
+                              "pct": min(100.0, round(100 * p["amount"] / p["limit"], 1)) if entered else None,
+                              "line": (f"{money(p['amount'])} of {money(p['limit'])} · your own contributions, all employers"
+                                       if entered else f"Not entered · limit {money(p['limit'])}")})
+            years.append({"year": y["year"],
+                          "title": f"{y['year']}" + ("" if y["known"] else " (limits not yet published, using the latest)"),
+                          "ira_pct": min(100.0, round(100 * y["ira"] / y["ira_limit"], 1)),
+                          "ira_line": f"{money(y['ira'])} of {money(y['ira_limit'])} · {left} left",
+                          "ira_editable": bool(y["ira_items"] or y["ira_ignored"] or lim["ira_accounts"]),
+                          "ira_items": [item(c) for c in y["ira_items"]],
+                          "ira_ignored": [item(c) for c in y["ira_ignored"]], "plans": plans})
+        footer = "IRS limits for anyone under 50."
+        if lim["ira_needs_investments"]:
+            footer += (" IRA contributions are counted from Plaid Investments activity: add investments to that "
+                       "connection in Accounts › Connections.")
+        elif not lim["has_ira"]:
+            footer += " No IRA is connected."
+        return {"years": years, "footer": footer,
+                "ira_accounts": [{"id": a["id"], "name": a["name"], "bill": a["bill"]} for a in lim["ira_accounts"]]}
+
+    def loans_json(items: list) -> list:
+        month_label = templates.env.filters["month_label"]
+        out = []
+        for l in items:
+            p = l.get("pslf_info")
+            meta = [f"{l['rate']}%", f"{money(l['payment'] or 0)}/mo"] if l["has_details"] else ["Add the rate and payment"]
+            if l["estimated"]:
+                meta.append(f"Estimated: {l['paid_since']} payment{'' if l['paid_since'] == 1 else 's'} since {shortdate(l['as_of'])}")
+            elif l["as_of"]:
+                meta.append(f"Balance as of {shortdate(l['as_of'])}")
+            progress = None   # PSLF count, or how much is paid off
+            stats, summary, note, hint = [], [], None, None
+            if p:
+                progress = {"pslf": True, "left": f"{p['count']}", "right": "of 120", "pct": p["pct"]}
+                if p["left"] and p.get("last_month"):
+                    stats = [{"label": "Payments left", "value": str(p["left"])},
+                             {"label": "Last payment", "value": month_label(p["last_month"])},
+                             {"label": "Forgiven", "value": f"≈ ${p['forgiven']:,.0f}", "up": True}]
+                    summary = [{"label": "Payments left", "value": str(p["left"])},
+                               {"label": "120th payment", "value": month_label(p["last_month"])},
+                               {"label": "Still to pay", "value": money(p["to_pay"])},
+                               {"label": "Forgiven", "value": f"≈ {money(p['forgiven'])}", "up": True}]
+                    hint = (f"{p['base']} as of {shortdate(p['as_of'])}" + (f", plus {p['added']} since" if p["added"] else "")
+                            + f". Assumes {money(l['payment'] or 0)} every month at {l['rate']}%; the forgiven amount is the "
+                            "balance left after the 120th payment. Recalculate when your payment changes at recertification.")
+                elif not p["left"]:
+                    note = {"text": "All 120 done: apply for forgiveness", "up": True}
+            elif l.get("payoff") or "paid_pct" in l:
+                if "paid_pct" in l:
+                    progress = {"pslf": False, "left": f"{round(l['paid_pct'])}%", "right": "paid off",
+                                "detail": f"${l['paid']:,.0f} of ${l['original']:,.0f}", "pct": l["paid_pct"]}
+                po = l.get("payoff")
+                if po:
+                    if po["months"] is not None:
+                        stats = [{"label": "Payments left", "value": str(po["months"])},
+                                 {"label": "Paid off", "value": month_label(po["month"])},
+                                 {"label": "Total to pay", "value": f"${l['balance'] + po['interest']:,.0f}",
+                                  "detail": f"${po['interest']:,.0f} interest"}]
+                        hint = (f"At {money(l['payment'] or 0)} a month it's paid off about {month_label(po['month'])}, "
+                                f"with about {money(po['interest'])} more interest.")
+                    else:
+                        stats = [{"label": "Paid off", "value": "Never at this payment"}]
+                elif not l["has_details"]:
+                    note = {"text": "Add the rate and payment for a payoff date", "up": False}
+            recert = None
+            if l.get("recert"):
+                days = l["recert_days"]
+                recert = {"text": f"Recertify by {shortdate(l['recert'])}" + (f" · {days} days" if days >= 0 else ""),
+                          "soon": days < 60}
+            out.append({
+                "id": l["id"], "name": l["name"], "balance": money(l["balance"]), "meta": meta,
+                "progress": progress, "stats": stats, "note": note, "recert": recert, "summary": summary, "hint": hint,
+                "form": {"plaid": l["source"] == "plaid", "balance": l["balance"], "rate": l["rate"],
+                         "payment": l["payment"], "original": l["original"], "bill_id": l["bill_id"],
+                         "pslf": l["pslf"], "pslf_count": p["base"] if p else None,
+                         "pslf_as_of": p["as_of"] if p else None, "recert": l.get("recert")},
+                "months": [{"month": m["month"], "label": m["label"], "counts": m["counts"],
+                            "detail": f"{money(m['amount'])} · " + ", ".join(shortdate(d) for d in m["days"])}
+                           for m in (p["months"] if p else [])],
+            })
+        return out
+
+    def networth_accounts_json(nw: dict, balances: dict, tracked: set) -> list:
+        out = []
+        for a in nw["accounts"]:
+            hist = balances.get(a["id"])
+            if a["manual"]:
+                sub = f"{a['kind']} · entered by hand" + (f" {shortdate(hist[0]['day'])}" if hist else "")
+            elif a["source"] == "manual":
+                sub = f"From YNAB · entered by hand {shortdate(hist[0]['day'])}"
+            elif a["source"] == "ynab":
+                sub = "From YNAB"
+            elif a["source"] == "estimate":
+                sub = "Worked out from transactions"
+            else:
+                sub = "Plaid"
+            if a["transit"]:
+                sub += f" · incl. {'+' if a['transit'] > 0 else ''}{money(a['transit'])} in transit"
+            if a["editable"]:
+                hint = ("Enter the balance whenever you check it. Net worth uses the latest one up to each month."
+                        if a["manual"] else "This account comes from YNAB with no Plaid connection. A balance entered "
+                        "here is used from its date on, in place of YNAB's.")
+            else:
+                hint = (("Plaid hasn't saved a balance for this account yet, so today's value is worked out from its "
+                         "transactions." if a["source"] == "estimate" else "Plaid updates this balance on every sync.")
+                        + " Leave it out if it shouldn't count in net worth, for example an account you closed or don't own.")
+            out.append({"id": a["id"], "name": a["name"], "value": money(a["value"]), "debt": a["debt"], "subtitle": sub,
+                        "editable": a["editable"], "manual": a["manual"], "kind": a["subtype"],
+                        "tracked": a["id"] in tracked, "hint": hint,
+                        "history": [{"day": h["day"], "label": shortdate(h["day"]), "balance": money(h["balance"]),
+                                     "flow": f"{money(h['flow'])} in" if h["flow"] else None} for h in (hist or [])[:24]]})
+        return out
+
+    @app.get("/api/insights")
+    async def insights_json():
+        """Insights for the native app. Chart series and form values are numbers; the lines the page
+        shows come formatted."""
+        now = today()
+        d = await insights_data(now)
+        nw, flow, cats, inv = d["nw"], d["flow"], d["cats"], d["inv"]
+        today_s = now.isoformat()
+        tiles = [{"tone": n["tone"], "badge": n["badge"], "label": n["label"], "value": n["value"], "detail": n["detail"],
+                  "text": bool(n.get("text")),
+                  "color": hex_color(cats[n["cat"]]["color"]) if n.get("cat") in cats else None, "search": n.get("href")}
+                 for n in observations(flow, cats, now)]
+        def cat_rows(m):
+            rows = []
+            for cid, v in m["cats"].items():
+                c = cats.get(int(cid)) if cid != "None" else None
+                rows.append({"id": int(cid) if c else None, "name": c["name"] if c else "Other",
+                             "color": hex_color(c["color"] if c else None), "value": v, "search": search_path(m["m"], cid)})
+            return sorted(rows, key=lambda r: -r["value"])
+        months = [{"m": m["m"], "label": month_short(m["m"]), "income": m["income"], "spending": m["spending"],
+                   "saving": m["saving"], "debt": m["debt"], "kept": m["kept"], "rate": m["rate"],
+                   "search": search_path(m["m"], None), "categories": cat_rows(m)} for m in flow[-12:]]
+        tracked = {a["id"] for a in inv["accounts"]}
+        return {
+            "today": today_s, "tiles": tiles,
+            "networth": {
+                "now": nw["now"], "points": [{"m": p["m"], "net": p["net"], "assets": p["assets"], "debts": p["debts"]}
+                                             for p in nw["points"]],
+                "accounts": networth_accounts_json(nw, d["balances"], tracked),
+                "excluded": [{"id": a["id"], "name": a["name"]} for a in nw["excluded"]],
+                "has_ynab": any(a["source"] == "ynab" for a in nw["accounts"]),
+            },
+            "investments": investments_json(inv, today_s, d["balances"]),
+            "limits": limits_json(d["limits"], d["loan_bills"]),
+            "loans": loans_json(d["loans"]),
+            "loan_bills": [{"id": b["id"], "name": b["name"]} for b in d["loan_bills"]],
+            "months": months,
+            "manual_kinds": [{"id": k, "label": label + (" (debt)" if k in MANUAL_DEBTS else "")}
+                             for k, label in MANUAL_KINDS.items()],
+        }
+
     @app.get("/api/insights/spending", response_class=HTMLResponse)
-    async def month_spending(request: Request, m: str):
+    async def month_spending(request: Request, m: str, format: str = ""):
         """Every transaction counted as spending in a month, largest first, as editable rows."""
         try:
             first = date.fromisoformat(m + "-01")
@@ -1528,8 +1781,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         last = first.replace(day=calendar.monthrange(first.year, first.month)[1])
         rows = resolve(db, list_transactions(db, where="t.date >= ? AND t.date <= ?",
                                              params=(first.isoformat(), last.isoformat()), limit=0))
-        macro = templates.env.get_template("_txn.html").make_module({}).txn_row
         items = spending_rows(db, rows)
+        if format == "json":  # the native app
+            return JSONResponse({"items": [txn_json(t, dated=True) for t in items]})
+        macro = templates.env.get_template("_txn.html").make_module({}).txn_row
         return HTMLResponse("".join(str(macro(t, dated=True)) for t in items))
 
     @app.post("/api/accounts/{account_id}/net-worth")
