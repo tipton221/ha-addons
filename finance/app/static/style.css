@@ -1017,3 +1017,6 @@ details.sched-panel > summary { display: grid; grid-template-columns: auto 1fr a
   .transit-list .grow strong { font-size: 0.95rem; line-height: 1.3; }
 }
 .transit-panel > summary:has(.sched-title.alone) .sched-total { grid-row: 1 / span 2; }
+
+/* Accounts footer: an update being installed on the server */
+.update-busy { color: var(--blue); }

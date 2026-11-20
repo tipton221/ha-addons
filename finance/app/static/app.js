@@ -1517,3 +1517,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const fn = pages[document.body.dataset.page];
   if (fn) fn();
 });
+
+// Accounts: while the server installs an update, check every few seconds and reload once it's done.
+// (While the new version starts, the server is briefly unreachable; those checks just fail.)
+document.addEventListener("DOMContentLoaded", () => {
+  const line = document.getElementById("server-update");
+  if (!line || line.dataset.state !== "updating") return;
+  const timer = setInterval(async () => {
+    try {
+      const r = await fetch("/api/server-update", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const info = await r.json();
+      if (info.state && info.state !== "updating") { clearInterval(timer); reloadHere(); }
+    } catch { /* restarting */ }
+  }, 5000);
+});

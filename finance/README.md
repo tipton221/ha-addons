@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.17:
+
+- Standalone server: checks for updates every minute, and the bottom of Accounts shows the running version, an update being installed (the page reloads when it's done), or one that didn't install.
+
 Version 2.2.16:
 
 - For the native app's own tab bar: inside the app, opening a page no longer jumps to the Inbox (each tab opens its own page), and the page reports the Inbox and Accounts counts separately.

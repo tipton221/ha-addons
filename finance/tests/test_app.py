@@ -2071,3 +2071,21 @@ def test_apns_register_and_combined_test_push(tmp_path, monkeypatch):
         assert c.post("/api/apns/unregister", json={"token": "ab" * 32}, headers=H).status_code == 200
     with db.connect() as conn:
         assert not conn.execute("SELECT 1 FROM apns_devices").fetchone()
+
+
+def test_server_update_line(tmp_path, monkeypatch):
+    """The standalone server's update status shows at the bottom of Accounts; nothing without it."""
+    db, app = client_with(tmp_path, monkeypatch, [], [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        assert 'id="server-update"' not in c.get("/accounts").text
+        assert c.get("/api/server-update").json() == {}
+        (tmp_path / "update.json").write_text(json.dumps({
+            "state": "updating", "version": "2.2.16", "rev": "aaaaaaa", "at": "2026-11-20T03:00:00+00:00",
+            "target_version": "2.2.17", "target_rev": "bbbbbbb"}))
+        page = c.get("/accounts").text
+        assert 'data-state="updating"' in page and "installing 2.2.17 (bbbbbbb)" in page and "7:00 PM" in page
+        (tmp_path / "update.json").write_text(json.dumps({
+            "state": "current", "version": "2.2.17", "rev": "bbbbbbb", "at": "2026-11-20T03:05:00+00:00"}))
+        assert c.get("/api/server-update").json()["state"] == "current"
+        assert "Version 2.2.17 (bbbbbbb), installed" in c.get("/accounts").text

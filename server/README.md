@@ -18,7 +18,7 @@ The script installs Docker and git, clones this repository to `/opt/finance-serv
 
 ## Updates
 
-A systemd timer (`finance-update.timer`) runs `update.sh` every 15 minutes. When the `main` branch has a new commit, it builds that version and swaps the container. It also keeps `update.sh`, `status.sh`, and `restore.sh` in `/opt/finance-server` current. Only one update runs at a time. If the build fails, or the new container doesn't finish starting within about a minute, the previous version keeps running and that commit isn't tried again until there is a newer one. To retry by hand: `/opt/finance-server/update.sh force`.
+A systemd timer (`finance-update.timer`) runs `update.sh` every minute (a quick look at GitHub when nothing changed). When the `main` branch has a new commit, it builds that version and swaps the container. It also keeps `update.sh`, `status.sh`, and `restore.sh` in `/opt/finance-server` current. Only one update runs at a time. If the build fails, or the new container doesn't finish starting within about a minute, the previous version keeps running and that commit isn't tried again until there is a newer one. To retry by hand: `/opt/finance-server/update.sh force`. Each run writes `data/update.json` (the running version, and any update in progress or failed), which the app shows at the bottom of Accounts.
 
 ## Moving an existing app here
 
