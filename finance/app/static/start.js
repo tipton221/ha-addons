@@ -2,6 +2,8 @@
 // and so is a reload the app does itself after a save (it sets finance-keep first).
 // Loaded without defer from the head of each tab page, so it runs before anything is drawn.
 (() => {
+  // The native app has its own tab bar, with one page per tab: each tab opens its own page.
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.finance) return;
   let fresh = false;
   try {
     fresh = !sessionStorage.getItem("finance-open");
