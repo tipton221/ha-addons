@@ -2156,3 +2156,46 @@ def test_sidebar_summary_for_the_mac_app(tmp_path, monkeypatch):
         assert d["left"]["label"].startswith("Left through ") and d["left"]["amount"].startswith(("$", "-$"))
         assert d["synced_at"] is None
         assert d["accounts"] == [{"id": "c1", "name": "Acme Checking", "balance": "$1,234.50", "type": "depository"}]
+
+
+def test_inbox_json_matches_the_page(tmp_path, monkeypatch):
+    import re
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    app = signed_in_client(tmp_path, monkeypatch)
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()  # the app's "today" is Pacific
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance) "
+                     "VALUES ('c1','plaid','i1','Acme Checking','depository',500)")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance) "
+                     "VALUES ('k1','plaid','i1','Acme Card','credit',40)")
+        rows = [("t1", "c1", 0, 0, 12.5, "Corner Bakery"), ("t2", "k1", 1, 1, 30.0, "Fuel Stop"),
+                ("t3", "c1", 2, 1, -200.0, "Payroll Inc"), ("t4", "k1", 0, 1, 8.25, "Tea House")]
+        for tid, acct, days, reviewed, amount, name in rows:
+            conn.execute("INSERT INTO transactions (source, id, account_id, date, name, amount, reviewed, pending) "
+                         "VALUES ('plaid', ?, ?, ?, ?, ?, ?, ?)",
+                         (tid, acct, (today - timedelta(days=days)).isoformat(), name, amount, reviewed,
+                          1 if tid == "t4" else 0))
+    with TestClient(app) as c:
+        assert c.get("/api/inbox").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/inbox").json()
+        page = c.get("/").text
+        review_html = re.findall(r'data-id="([^"]+)"', page.split('id="inbox"')[1].split("</ul>")[0])
+        all_html = re.findall(r'data-id="([^"]+)"', page.split('id="all"')[1])
+        assert [t["id"] for t in d["to_review"]] == review_html == ["t1"]
+        assert [t["id"] for g in d["groups"] for t in g["items"]] == all_html == ["t4", "t2", "t3"]
+        assert d["groups"][0]["label"] == "Today" and d["next"] is None
+        t3 = next(t for g in d["groups"] for t in g["items"] if t["id"] == "t3")
+        assert t3["amount"] == "$200.00" and t3["inflow"] is True
+        assert d["to_review"][0]["amount"] == "-$12.50" and d["to_review"][0]["date_label"]
+        assert d["summary"]["label"].startswith("Left through ") and d["pending_count"] == 1
+        assert {a["id"] for a in d["accounts"]} == {"c1", "k1"}
+        assert d["groups"][0]["items"][0]["category"]["color"].startswith("#")
+        # Filters and the next-page form.
+        assert [t["id"] for g in c.get("/api/inbox?account=k1").json()["groups"] for t in g["items"]] == ["t4", "t2"]
+        assert [t["id"] for g in c.get("/api/inbox?pending=1").json()["groups"] for t in g["items"]] == ["t4"]
+        nxt = c.get(f"/api/inbox?before={today.isoformat()}:999999").json()
+        assert set(nxt) == {"groups", "next"}
+        assert c.get("/api/inbox?before=nope").status_code == 400
