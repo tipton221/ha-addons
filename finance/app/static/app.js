@@ -1338,12 +1338,15 @@ document.addEventListener("change", (ev) => {
 const nativeApp = () => !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.finance);
 
 function appBadge() {
-  const n = ["tab-badge", "tab-badge-accounts"].reduce((sum, id) => {
+  const count = (id) => {
     const el = document.getElementById(id);
-    return sum + (el && !el.hidden ? Number(el.textContent) || 0 : 0);
-  }, 0);
+    return el && !el.hidden ? Number(el.textContent) || 0 : 0;
+  };
+  const inbox = count("tab-badge"), accounts = count("tab-badge-accounts");
+  const n = inbox + accounts;
   if (nativeApp()) {
-    window.webkit.messageHandlers.finance.postMessage({ badge: n });
+    // The app sets its icon badge and, on iPhone, the badges on its own tab bar.
+    window.webkit.messageHandlers.finance.postMessage({ badge: n, inbox, accounts });
     if (!n) nativeAllClear();
     return;
   }

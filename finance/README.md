@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.16:
+
+- For the native app's own tab bar: inside the app, opening a page no longer jumps to the Inbox (each tab opens its own page), and the page reports the Inbox and Accounts counts separately.
+
 Version 2.2.15:
 
 - Push notifications for the native app through Apple (APNs): the app registers its device, and every notification (new transactions, broken connections, the test, "All caught up") goes to both Web Push and app devices. The key file is `apns.p8` in the data folder; option `apns_key_id`.
