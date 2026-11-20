@@ -2139,3 +2139,20 @@ def test_signin_code_on_login_page_and_needs_app_header(tmp_path, monkeypatch):
     with TestClient(app) as c:
         assert "Use a sign-in code" in c.get("/login").text
         assert c.post("/api/signin-code/use", json={"code": "ABCD-EFGH"}).status_code == 403
+
+
+def test_sidebar_summary_for_the_mac_app(tmp_path, monkeypatch):
+    app = signed_in_client(tmp_path, monkeypatch)
+    with Database(tmp_path / "finance.db").connect() as conn:
+        conn.execute("INSERT INTO plaid_items (item_id, access_token, institution) VALUES ('i1','t','Acme')")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance) "
+                     "VALUES ('c1','plaid','i1','Acme Checking','depository',1234.5)")
+        conn.execute("INSERT INTO accounts (account_id, source, item_id, name, type, current_balance, visibility) "
+                     "VALUES ('c2','plaid','i1','Old Savings','depository',0,'archived')")
+    with TestClient(app) as c:
+        assert c.get("/api/sidebar").status_code == 401
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/sidebar").json()
+        assert d["left"]["label"].startswith("Left through ") and d["left"]["amount"].startswith(("$", "-$"))
+        assert d["synced_at"] is None
+        assert d["accounts"] == [{"id": "c1", "name": "Acme Checking", "balance": "$1,234.50", "type": "depository"}]

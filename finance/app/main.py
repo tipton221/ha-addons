@@ -460,6 +460,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "pending_count": pending_count,
         })
 
+    @app.get("/api/sidebar")
+    async def sidebar():
+        """What the Mac app's sidebar shows: the Inbox summary, the last sync, and the everyday
+        accounts with their balances. Amounts come formatted, so the app shows them as they are."""
+        cov = coverage(db, schedule(), today())
+        synced = db.get_kv("last_sync_at")
+        return {
+            "left": {"label": f"Left through {shortdate(cov['payday'].isoformat())}", "amount": money(cov["left"]),
+                     "ok": bool(cov["ok"])},
+            "synced_at": datetime.fromisoformat(synced).timestamp() if synced else None,
+            "accounts": [{"id": a["account_id"], "name": a["pill"], "balance": money(a["current_balance"]),
+                          "type": a.get("type") or ""}
+                         for a in plaid_accounts() if a["visibility"] == "everyday"],
+        }
+
     @app.get("/api/transactions/page", response_class=HTMLResponse)
     async def more_transactions(request: Request, before: str, account: str = "", pending: int = 0):
         try:
