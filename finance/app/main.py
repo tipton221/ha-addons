@@ -14,7 +14,7 @@ import re
 import secrets
 import sqlite3
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -50,6 +50,7 @@ log = logging.getLogger("finance")
 
 HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
+BADGE_CHECK_SECONDS = 10  # how often the app badge is compared with the count of things to review
 AASA_PATH = "/.well-known/apple-app-site-association"
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/sw.js", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify", "/api/signin-code/use"}
@@ -157,7 +158,23 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if not message:
             return 0
         db.set_kv("push_last_badge", str(message["badge"]))
+        db.set_kv("apns_badge", str(message["badge"]))  # the notification sets the app's badge
         return await notify(message)
+
+    async def badge_loop():
+        """Keep the app's badge the same on every device, as Parcel does: when the count of things
+        to review or fix changes (reviewed on one device, a connection fixed), set it everywhere,
+        and at zero clear the notifications shown."""
+        while True:
+            await asyncio.sleep(BADGE_CHECK_SECONDS)
+            try:
+                n = inbox_count() + account_issues()
+                if str(n) != (db.get_kv("apns_badge") or "0"):
+                    db.set_kv("apns_badge", str(n))
+                    await apns.badge(db, n)
+                    await apns.refresh(db, {"badge": n, "clear": n == 0})
+            except Exception:
+                log.exception("Badge update failed")
 
     def ynab_names_ready() -> bool:
         with db.connect() as conn:
@@ -177,9 +194,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
     async def lifespan(_app: FastAPI):
         if not settings.cf_access_enabled:
             log.warning("Cloudflare Access JWT check is OFF. Set cf_access_team_domain and cf_access_aud.")
-        task = asyncio.create_task(sync_loop()) if background_sync else None
+        tasks = [asyncio.create_task(sync_loop()), asyncio.create_task(badge_loop())] if background_sync else []
         yield
-        if task:
+        for task in tasks:
             task.cancel()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -534,7 +551,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                          for a in c["accounts"] if a["visibility"] != "archived" or a["account_id"] == c["selected"]],
             "account": c["selected"], "pending_only": c["pending_only"], "pending_count": c["pending_count"],
             "groups": groups_json(c["groups"]), "next": c["more"],
+            "posted": [txn_json(t, dated=True) for t in just_posted()],
         }
+
+    def just_posted() -> list[dict]:
+        """Pending charges that posted in the last week since the Inbox's Just posted list was last
+        dismissed, newest first. Ones back in To review (a much larger amount) are listed there."""
+        since = max((datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds"),
+                    db.get_kv("posted_seen_at") or "")
+        return resolve(db, list_transactions(db, where="t.posted_at > ? AND t.reviewed = 1", params=(since,), limit=50))
+
+    @app.post("/api/posted/seen")
+    async def posted_seen():
+        """The Inbox's Just posted list was dismissed."""
+        db.set_kv("posted_seen_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        return {"ok": True}
 
     @app.get("/api/sidebar")
     async def sidebar():
@@ -2202,6 +2233,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         db.set_kv("push_clear_others", "1" if (await request.json()).get("clear_others") else "0")
         return {"ok": True}
 
+    @app.post("/api/push/opened")
+    async def push_opened(request: Request):
+        """The app's notification was opened (or the app opened with it showing) on one device:
+        clear it from the others."""
+        token = str((await request.json()).get("token") or "").strip().lower()
+        return {"sent": await apns.refresh(db, {"clear": True}, skip=token)}
+
     @app.post("/api/push/all-clear")
     async def push_all_clear(request: Request):
         """Sent by a device that just reached zero: if the others were last told about something,
@@ -2213,8 +2251,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if inbox_count() + account_issues():
             return {"sent": 0}
         db.set_kv("push_last_badge", "0")
-        sent = await notify({"title": "All caught up", "body": "Nothing to review or fix.", "badge": 0,
-                             "url": "/", "quiet": True}, skip=endpoint)
+        # Web Push only: the app's devices clear themselves (badge_loop).
+        sent = await push_send(db, {"title": "All caught up", "body": "Nothing to review or fix.", "badge": 0,
+                                    "url": "/", "quiet": True}, push_subject(), skip=endpoint)
         return {"sent": sent}
 
     @app.post("/api/push/test")

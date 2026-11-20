@@ -43,6 +43,12 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.31:
+
+- A pending charge that posts keeps what was done to it (review, note, one-off name and category, bill, tip) even when the bank doesn't tell Plaid which posted charge replaced it: the pending one is kept for two weeks after it's removed and matched to a posted charge on the same account with the same amount (or more, up to a tip), dated from 3 days before to 14 days after.
+- `posted` in `GET /api/inbox`: charges that posted in the last week (once reviewed), until dismissed with `POST /api/posted/seen`.
+- Native app notifications work like one app across devices: when the count of things to review or fix changes, every device's badge is set (a badge-only push), and at zero a silent push clears the notifications shown. `POST /api/push/opened` clears a notification from the other devices when it's opened on one. The "All caught up" notification is now for Web Push only.
+
 Version 2.2.30:
 
 - Removed what only the native app used before its screens went native: Accounts starting Plaid from `?link=` (the app uses `/link`) and Bills opening a filled-in form from `?from_source=&from_id=` (the app's Bills does that itself).

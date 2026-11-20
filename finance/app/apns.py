@@ -64,6 +64,26 @@ class APNs:
 
     async def send(self, db: Database, message: dict, skip: str = "",
                    client: httpx.AsyncClient | None = None) -> int:
+        """A notification to every registered device (but skip). One collapse ID makes a newer one
+        replace the last. Returns how many Apple accepted."""
+        quiet = bool(message.get("quiet"))
+        return await self._post(db, self.payload(message), "alert", "5" if quiet else "10", "finance", skip, client)
+
+    async def badge(self, db: Database, count: int, client: httpx.AsyncClient | None = None) -> int:
+        """Set the icon badge on every device, with nothing shown. The system sets it even while
+        the app isn't running."""
+        return await self._post(db, {"aps": {"badge": max(0, int(count))}}, "alert", "5", None, "", client)
+
+    async def refresh(self, db: Database, info: dict, skip: str = "",
+                      client: httpx.AsyncClient | None = None) -> int:
+        """A silent push the app handles in the background: {"badge": n} and {"clear": true} (remove
+        the Finance notifications shown). Apple delivers these as it sees fit (a few an hour, not to
+        an app that was force-quit), so the app also catches up whenever it opens."""
+        return await self._post(db, {"aps": {"content-available": 1}, "finance": info}, "background", "5", None,
+                                skip, client)
+
+    async def _post(self, db: Database, payload: dict, push_type: str, priority: str, collapse: str | None,
+                    skip: str, client: httpx.AsyncClient | None) -> int:
         """Send to every registered device (but skip). Returns how many Apple accepted; devices Apple
         says are gone are dropped."""
         if not self.configured:
@@ -72,8 +92,11 @@ class APNs:
             devices = [dict(r) for r in conn.execute("SELECT token, env FROM apns_devices WHERE token != ?", (skip,))]
         if not devices:
             return 0
-        body = json.dumps(self.payload(message)).encode()
-        quiet = bool(message.get("quiet"))
+        body = json.dumps(payload).encode()
+        headers = {"apns-topic": self.bundle_id, "apns-push-type": push_type, "apns-priority": priority,
+                   "apns-expiration": str(int(time.time()) + 86400)}
+        if collapse:
+            headers["apns-collapse-id"] = collapse
         sent = 0
         own = client is None
         client = client or httpx.AsyncClient(http2=True, timeout=15)
@@ -81,14 +104,8 @@ class APNs:
             for d in devices:
                 host = HOSTS.get(d["env"], HOSTS["production"])
                 try:
-                    r = await client.post(f"{host}/3/device/{d['token']}", content=body, headers={
-                        "authorization": f"bearer {self.auth_token()}",
-                        "apns-topic": self.bundle_id,
-                        "apns-push-type": "alert",
-                        "apns-priority": "5" if quiet else "10",
-                        "apns-collapse-id": "finance",
-                        "apns-expiration": str(int(time.time()) + 86400),
-                    })
+                    r = await client.post(f"{host}/3/device/{d['token']}", content=body,
+                                          headers={"authorization": f"bearer {self.auth_token()}", **headers})
                 except httpx.HTTPError as e:
                     log.warning("APNs request failed: %s", e)
                     continue

@@ -226,6 +226,24 @@ CREATE TABLE IF NOT EXISTS manual_balances (
     PRIMARY KEY (account_id, day)
 );
 
+-- Pending charges Plaid removed without saying which posted charge replaced them (some banks
+-- don't), kept a while so the posted one can still be matched and keep what was done to it.
+CREATE TABLE IF NOT EXISTS pending_gone (
+    id              TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    merchant        TEXT,
+    amount          REAL NOT NULL,
+    reviewed        INTEGER NOT NULL,
+    note            TEXT,
+    category_id     INTEGER,
+    name_override   TEXT,
+    bill_id         INTEGER,
+    tip             REAL,
+    gone_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Which YNAB accounts track the same card or bank account as a Plaid account.
 -- More than one is allowed, e.g. when a card was converted and YNAB kept the old account.
 CREATE TABLE IF NOT EXISTS account_links (
@@ -271,6 +289,7 @@ class Database:
                 ("name_override", "TEXT"),   # one-off name for this transaction only
                 ("bill_id", "INTEGER"),      # NULL: matched by rule; 0: not a bill; >0: this bill
                 ("tip", "REAL"),             # tip entered by hand (part of the amount); NULL: automatic; 0: no tip
+                ("posted_at", "TEXT"),       # when this posted charge replaced its pending one (UTC)
             ],
             "loans": [
                 ("original", "REAL"),        # amount borrowed, for the paid-off progress bar
