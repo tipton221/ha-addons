@@ -137,6 +137,8 @@ h2 { font-size: 1.3rem; font-weight: 700; margin: 0; }
 /* The iPhone and Mac apps show their own tab bar or sidebar and mark the page native-tabs. (They
    can't add a style of their own: the page's content security policy blocks it.) */
 html.native-tabs .tabbar { display: none; }
+/* The Mac app's sidebar has its own sync button, so the Inbox's is hidden there. */
+html.native-sidebar #sync { display: none; }
 
 @media (max-width: 640px) {
   .tabbar {
