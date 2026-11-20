@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
 from .db import Database
-from .ledger import pair_transfers
+from .ledger import normalize, pair_transfers
 from .plaid import Plaid, PlaidError
 
 log = logging.getLogger("finance.sync")
@@ -62,24 +62,68 @@ ON CONFLICT(source, id) DO UPDATE SET
 
 
 RECHECK_CHANGE = 0.30   # a posted charge this much above its pending amount goes back to the inbox
+CARRIED = "reviewed, note, category_id, name_override, bill_id, tip"
+MATCH_DAYS_BEFORE = 3   # a posted charge can be dated this many days before its pending one
+MATCH_DAYS_AFTER = 14   # or this many after
+KEEP_GONE_DAYS = 14     # how long a removed pending charge waits to be matched
 
 
-def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: float) -> None:
-    """When a pending charge posts, keep what the user did to it (review, note, one-off category)
-    and remember the pending amount, so a tip or final total can be shown."""
-    row = conn.execute("SELECT amount, reviewed, note, category_id, name_override, bill_id, tip FROM transactions "
-                       "WHERE source='plaid' AND id=?", (pending_id,)).fetchone()
-    if not row:
-        return
+def _carry(conn, row, posted_id: str, posted_amount: float, pending_id: str) -> None:
+    """Give the posted charge what was done to its pending one (review, note, one-off name and
+    category, bill, tip) and remember the pending amount, so a tip or final total can be shown."""
     reviewed = row["reviewed"]
     if row["amount"] > 0 and posted_amount - row["amount"] > RECHECK_CHANGE * row["amount"]:
         reviewed = 0  # far more than a tip: worth a second look
     conn.execute(
         "UPDATE transactions SET reviewed = MAX(reviewed, ?), note = COALESCE(note, ?), "
         "category_id = COALESCE(category_id, ?), name_override = COALESCE(name_override, ?), "
-        "bill_id = COALESCE(bill_id, ?), tip = COALESCE(tip, ?), pending_amount = ? WHERE source='plaid' AND id=?",
+        "bill_id = COALESCE(bill_id, ?), tip = COALESCE(tip, ?), pending_amount = ?, "
+        "pending_id = COALESCE(pending_id, ?), posted_at = COALESCE(posted_at, ?) WHERE source='plaid' AND id=?",
         (reviewed, row["note"], row["category_id"], row["name_override"], row["bill_id"], row["tip"],
-         row["amount"] if abs(row["amount"] - posted_amount) >= 0.005 else None, posted_id))
+         row["amount"] if abs(row["amount"] - posted_amount) >= 0.005 else None, pending_id,
+         datetime.now(timezone.utc).isoformat(timespec="seconds"), posted_id))
+
+
+def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: float) -> bool:
+    """When a pending charge posts and Plaid links the two, keep what was done to the pending one."""
+    row = conn.execute(f"SELECT amount, {CARRIED} FROM transactions WHERE source='plaid' AND id=?",
+                       (pending_id,)).fetchone()
+    if not row:
+        return False
+    _carry(conn, row, posted_id, posted_amount, pending_id)
+    return True
+
+
+def _words(t) -> set[str]:
+    return {w for w in normalize(t["merchant"] or t["name"] or "").split() if len(w) > 2}
+
+
+def match_gone(conn) -> int:
+    """Some banks don't tell Plaid which posted charge replaced a pending one, so it's removed with
+    no link and what was done to it would be lost. Match each such pending charge to a posted one
+    on the same account: the same amount (or more, up to a tip), dated from a few days before to two
+    weeks after, not already matched; the closest amount, then a shared word in the name, then the
+    nearest date wins. Returns how many were matched."""
+    conn.execute(f"DELETE FROM pending_gone WHERE gone_at < datetime('now', '-{KEEP_GONE_DAYS} days')")
+    matched = 0
+    for g in conn.execute("SELECT * FROM pending_gone ORDER BY date").fetchall():
+        d = date.fromisoformat(g["date"])
+        lo, hi = sorted((g["amount"], g["amount"] * (1 + RECHECK_CHANGE)))
+        candidates = conn.execute(
+            "SELECT id, name, merchant, amount, date FROM transactions WHERE source='plaid' AND pending=0 "
+            "AND account_id=? AND pending_id IS NULL AND posted_at IS NULL AND date BETWEEN ? AND ? "
+            "AND amount BETWEEN ? AND ?",
+            (g["account_id"], (d - timedelta(days=MATCH_DAYS_BEFORE)).isoformat(),
+             (d + timedelta(days=MATCH_DAYS_AFTER)).isoformat(), lo - 0.005, hi + 0.005)).fetchall()
+        if not candidates:
+            continue
+        words = _words(g)
+        best = min(candidates, key=lambda c: (round(abs(c["amount"] - g["amount"]), 2), not (words & _words(c)),
+                                              abs((date.fromisoformat(c["date"]) - d).days)))
+        _carry(conn, g, best["id"], best["amount"], g["id"])
+        conn.execute("DELETE FROM pending_gone WHERE id=?", (g["id"],))
+        matched += 1
+    return matched
 
 
 async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
@@ -110,14 +154,22 @@ async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
         raise RuntimeError("transactions sync kept changing during pagination")
 
     with db.connect() as conn:
+        linked = set()
         for t in added + modified:
             conn.execute(UPSERT, _txn_row(t))
             # When a pending charge posts, Plaid sends the posted one with a
             # link back to the pending one, and removes the pending one.
-            if t.get("pending_transaction_id"):
-                carry_from_pending(conn, t["pending_transaction_id"], t["transaction_id"], t["amount"])
+            if t.get("pending_transaction_id") and carry_from_pending(
+                    conn, t["pending_transaction_id"], t["transaction_id"], t["amount"]):
+                linked.add(t["pending_transaction_id"])
         for tid in removed:
+            if tid not in linked:
+                # Removed with no posted charge pointing to it: keep it a while to match by hand.
+                conn.execute(f"INSERT OR REPLACE INTO pending_gone (id, account_id, date, name, merchant, amount, {CARRIED}) "
+                             f"SELECT id, account_id, date, name, merchant, amount, {CARRIED} FROM transactions "
+                             "WHERE source='plaid' AND id=? AND pending=1", (tid,))
             conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=?", (tid,))
+        match_gone(conn)
         conn.execute(
             "UPDATE plaid_items SET cursor=?, update_status=?, status='ok', error_code=NULL, "
             "last_sync_at=? WHERE item_id=?",

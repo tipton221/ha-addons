@@ -2345,3 +2345,85 @@ def test_insights_json_for_the_native_app(tmp_path, monkeypatch):
         assert {"id": "loan", "label": "Loan (debt)"} in d["manual_kinds"]
         items = c.get("/api/insights/spending?m=2026-10&format=json").json()["items"]
         assert [t["name"] for t in items] == ["Toy Town", "Toy Town"] and items[0]["date_label"] == "Oct 4"
+
+
+def test_posted_charge_matched_without_a_link_keeps_edits(tmp_path):
+    """Some banks don't say which posted charge replaced a pending one. The pending one is kept
+    when removed and matched on account, amount (up to a tip), and date, so its one-off name,
+    category, note, and review carry over; a far-off amount or another account doesn't match."""
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    plaid = FakePlaid([page(added=[txn("p1", 20.0, pending=True), txn("p2", 9.0, pending=True)], cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET name_override='Lunch with Sam', note='split', category_id=3, "
+                     "reviewed=1 WHERE id='p1'")
+        conn.execute("UPDATE transactions SET name_override='Snacks' WHERE id='p2'")
+    # Both post without a link. p1's posted charge has a tip; p2's is far more than a tip.
+    plaid.pages = [page(added=[txn("t1", 23.5), txn("t2", 30.0)], removed=["p1", "p2"], cursor="c2")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        rows = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM transactions")}
+        gone = [r["id"] for r in conn.execute("SELECT id FROM pending_gone")]
+    assert set(rows) == {"t1", "t2"}
+    t1 = rows["t1"]
+    assert (t1["name_override"], t1["note"], t1["category_id"], t1["reviewed"]) == ("Lunch with Sam", "split", 3, 1)
+    assert t1["pending_id"] == "p1" and t1["pending_amount"] == 20.0 and t1["posted_at"]
+    assert rows["t2"]["name_override"] is None and gone == ["p2"]   # kept a while in case its charge comes later
+    # A linked pending charge carries over too, and is marked as posted.
+    plaid.pages = [page(added=[txn("p3", 5.0, pending=True)], cursor="c3")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET name_override='Coffee' WHERE id='p3'")
+    plaid.pages = [page(added=[txn("t3", 5.0, pending_id="p3")], removed=["p3"], cursor="c4")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        t3 = dict(conn.execute("SELECT * FROM transactions WHERE id='t3'").fetchone())
+        gone = [r["id"] for r in conn.execute("SELECT id FROM pending_gone")]
+    assert t3["name_override"] == "Coffee" and t3["posted_at"] and t3["pending_amount"] is None and "p3" not in gone
+
+
+def test_just_posted_list_and_dismiss(tmp_path, monkeypatch):
+    rows = [("t1", "card", "2026-11-10", "CORNER BAKERY", "Corner Bakery", 14.8, 0, "FOOD_AND_DRINK", "X", 1),
+            ("t2", "card", "2026-11-10", "FUEL STOP", "Fuel Stop", 40.0, 0, "TRANSPORTATION", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET posted_at=datetime('now'), pending_amount=12.5 WHERE id='t1'")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        posted = c.get("/api/inbox").json()["posted"]
+        assert [t["id"] for t in posted] == ["t1"]
+        assert "+$2.30" in (posted[0]["tip"] or posted[0]["change"] or "")  # a restaurant's is a tip
+        assert c.post("/api/posted/seen", json={}, headers=H).status_code == 200
+        assert c.get("/api/inbox").json()["posted"] == []
+
+
+def test_apns_badge_and_silent_refresh(tmp_path):
+    """The badge-only push and the silent push the app handles in the background."""
+    import httpx as _httpx
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from app.apns import APNs
+    key = ec.generate_private_key(ec.SECP256R1())
+    p8 = tmp_path / "apns.p8"
+    p8.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                     serialization.NoEncryption()))
+    apns = APNs(p8, "KEY1234567", "TEAM123456.com.example.finance")
+    db = Database(tmp_path / "f.db")
+    with db.connect() as conn:
+        conn.executemany("INSERT INTO apns_devices (token, env) VALUES (?, 'production')", [("aa" * 32,), ("bb" * 32,)])
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path.rsplit("/", 1)[1], request.headers["apns-push-type"],
+                     request.headers.get("apns-collapse-id"), json.loads(request.content)))
+        return _httpx.Response(200)
+
+    client = _httpx.AsyncClient(transport=_httpx.MockTransport(handler))
+    assert asyncio.run(apns.badge(db, 4, client=client)) == 2
+    assert all(t == "alert" and c is None and body == {"aps": {"badge": 4}} for _, t, c, body in seen)
+    seen.clear()
+    assert asyncio.run(apns.refresh(db, {"clear": True}, skip="aa" * 32, client=client)) == 1
+    (tok, kind, collapse, body), = seen
+    assert tok == "bb" * 32 and kind == "background" and collapse is None
+    assert body == {"aps": {"content-available": 1}, "finance": {"clear": True}}
