@@ -183,4 +183,10 @@
 </section>
 
 <p class="muted small center">{{ total }} transactions stored · <a href="#" id="logout">Sign out</a></p>
+{% if server_update %}{% set u = server_update %}
+<p class="muted small center" id="server-update" data-state="{{ u.state }}">
+  {% if u.state == "updating" %}Version {{ u.version }} · <span class="update-busy">installing {{ u.target_version }} ({{ u.target_rev }}), started {{ u.at | local }}</span>. The page reloads when it's ready.
+  {% elif u.state == "failed" %}Version {{ u.version }} ({{ u.rev }}) · {{ u.target_version }} ({{ u.target_rev }}) didn't install, so this version keeps running.
+  {% else %}Version {{ u.version }} ({{ u.rev }}), installed {{ u.at | local }}{% endif %}
+</p>{% endif %}
 {% endblock %}

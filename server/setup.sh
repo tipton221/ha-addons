@@ -5,7 +5,7 @@
 #
 # It installs Docker, builds the same container the Home Assistant add-on uses, asks for the app's
 # options (secrets are typed, never shown), and starts it. No ports are opened: the container's
-# bundled Cloudflare Tunnel is the only way in. A timer then checks every 15 minutes for a newer
+# bundled Cloudflare Tunnel is the only way in. A timer then checks every minute for a newer
 # version on the main branch and rebuilds; a failed build or start keeps the running version.
 # Running it again keeps the existing data and asks whether to replace the options.
 set -euo pipefail
@@ -113,10 +113,11 @@ ExecStart=$BASE/update.sh
 UNIT
 cat > /etc/systemd/system/finance-update.timer <<'UNIT'
 [Unit]
-Description=Check for Finance server updates every 15 minutes
+Description=Check for Finance server updates every minute
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=15min
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
 [Install]
 WantedBy=timers.target
 UNIT

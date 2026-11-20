@@ -711,8 +711,21 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "accounts": plaid_accounts(), "total": total, "ynab": ynab_status,
             "push_clear_others": db.get_kv("push_clear_others") == "1",
             "categories": categories(db), "colors": COLORS, "rules": merchant_rule_list(),
-            "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS,
+            "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS, "server_update": server_update(),
         })
+
+    def server_update() -> dict | None:
+        """On the standalone server: the running version and any update in progress, as the updater
+        last wrote them (data/update.json). None under Home Assistant."""
+        try:
+            info = json.loads((settings.data_dir / "update.json").read_text())
+        except (OSError, ValueError):
+            return None
+        return info if isinstance(info, dict) and info.get("state") else None
+
+    @app.get("/api/server-update")
+    async def server_update_status():
+        return server_update() or {}
 
     def merchant_rule_list() -> list[dict]:
         """Merchant renames and categories, with how many transactions each covers."""
