@@ -147,6 +147,8 @@ html.native-tabs body[data-page="link"]::before, html.native-tabs body[data-page
 html.native-tabs body[data-page="link"] .wrap { display: grid; place-items: center; min-height: 100vh; }
 html.native-tabs body[data-page="link"] .card { width: auto; max-width: 320px; margin: 0; padding: 14px 18px; }
 html.native-tabs body[data-page="link"] h1 { display: none; }
+/* Cleared once Plaid starts: no empty box under Plaid's own loading spinner. */
+html.native-tabs body[data-page="link"] .card:has(#msg:empty) { display: none; }
 
 @media (max-width: 640px) {
   .tabbar {
