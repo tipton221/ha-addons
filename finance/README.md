@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.36:
+
+- The native app's Plaid page hides its message card while the card is empty, so no blank box shows under Plaid's loading spinner.
+
 Version 2.2.35:
 
 - Plaid webhooks: Plaid posts to `/plaid/webhook` when it has new data, and the server syncs about 10 seconds later (one sync covers a burst). The path skips the login, so each message must carry Plaid's signature (the `Plaid-Verification` JWT, checked with Plaid's key, under five minutes old, over this exact body), and only a known connection starts a sync. New connections get the webhook address from Link and existing ones through `/item/webhook/update`. With an https `public_url`, the scheduled sync runs hourly as a backup. Behind Cloudflare Access, the path needs a bypass, like `/.well-known/apple-app-site-association`.
