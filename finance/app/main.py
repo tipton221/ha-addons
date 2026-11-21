@@ -43,6 +43,7 @@ from .ledger import (COLORS, categories, colors_css, group_by_date, list_transac
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
 from .sync import refresh_accounts, sync_all, sync_ynab
 from .ynab_names import apply_ynab_names
+from .webhooks import Verifier
 from .ynab import YNAB
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -52,6 +53,8 @@ HERE = Path(__file__).parent
 PACIFIC = ZoneInfo("America/Los_Angeles")
 BADGE_CHECK_SECONDS = 10  # how often the app badge is compared with the count of things to review
 AASA_PATH = "/.well-known/apple-app-site-association"
+WEBHOOK_PATH = "/plaid/webhook"
+WEBHOOK_DELAY = 10   # seconds: a burst of webhooks (one per connection or product) runs one sync
 PUBLIC_PATHS = {"/favicon.ico", "/manifest.json", "/sw.js", "/login", "/setup", "/api/auth/options", "/api/auth/verify",
                 "/api/register/options", "/api/register/verify", "/api/signin-code/use"}
 
@@ -106,10 +109,29 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             conn.execute("UPDATE transactions SET reviewed=1 WHERE date < date('now', '-7 day')")
         db.set_kv("inbox_initialized", "1")
 
+    async def ensure_webhooks() -> None:
+        """Give every connection the webhook address (new ones get it from Link). Failures only log:
+        the scheduled sync still runs."""
+        url = settings.plaid_webhook_url
+        if plaid is None or not url:
+            return
+        with db.connect() as conn:
+            items = [dict(r) for r in conn.execute(
+                "SELECT item_id, access_token FROM plaid_items WHERE webhook IS NULL OR webhook != ?", (url,))]
+        for item in items:
+            try:
+                await plaid.set_webhook(item["access_token"], url)
+            except Exception as e:
+                log.warning("Couldn't set the webhook for a connection: %s", e)
+                continue
+            with db.connect() as conn:
+                conn.execute("UPDATE plaid_items SET webhook=? WHERE item_id=?", (url, item["item_id"]))
+
     async def run_sync() -> dict:
         results: dict = {}
         async with sync_lock:
             if plaid is not None:
+                await ensure_webhooks()
                 results["plaid"] = await sync_all(db, plaid)
                 if db.get_kv("bills_detected") != "1":
                     results["bills_added"] = save_detected(db, detect(db, datetime.now(PACIFIC).date()))
@@ -188,7 +210,36 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 await run_sync()
             except Exception:
                 log.exception("Scheduled sync failed")
-            await asyncio.sleep(settings.sync_interval_hours * 3600)
+            # With webhooks, Plaid says when there's new data; this is the hourly backup.
+            hours = 1 if settings.plaid_webhook_url else settings.sync_interval_hours
+            await asyncio.sleep(hours * 3600)
+
+    verifier = Verifier(plaid) if plaid is not None else None
+    webhook_task: asyncio.Task | None = None
+
+    async def plaid_webhook(request: Request) -> Response:
+        """Plaid has new data (or news about a connection): sync soon. One sync covers a burst."""
+        nonlocal webhook_task
+        body = await request.body()
+        if verifier is None or not await verifier.verify(request.headers.get("plaid-verification"), body):
+            return JSONResponse({"error": "not verified"}, status_code=401)
+        try:
+            item_id = str(json.loads(body).get("item_id") or "")
+        except ValueError:
+            return JSONResponse({"error": "bad body"}, status_code=400)
+        with db.connect() as conn:
+            known = conn.execute("SELECT 1 FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        if known:
+            db.set_kv("plaid_webhook_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            if webhook_task is None or webhook_task.done():
+                async def later():
+                    await asyncio.sleep(WEBHOOK_DELAY)
+                    try:
+                        await run_sync()
+                    except Exception:
+                        log.exception("Sync after a webhook failed")
+                webhook_task = asyncio.create_task(later())
+        return JSONResponse({"ok": True})
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -263,6 +314,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
                 return Response("Not found", status_code=404)
             return JSONResponse({"webcredentials": {"apps": [settings.apple_app_id]}},
                                 headers={"Cache-Control": "max-age=3600"})
+        # Plaid's webhooks come from Plaid, without a Cloudflare login or a session; each is
+        # checked against Plaid's signature instead (Cloudflare Access needs a bypass for this path).
+        if request.url.path == WEBHOOK_PATH and request.method == "POST":
+            return await plaid_webhook(request)
         # Layer 1: Cloudflare Access.
         token = request.headers.get("cf-access-jwt-assertion") or request.cookies.get("CF_Authorization")
         if not await run_in_threadpool(cf_access.verify, token):
@@ -856,6 +911,15 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "kind_labels": KIND_LABELS, "kind_pills": KIND_PILLS, "server_update": server_update(),
         })
 
+    def plaid_updates_line() -> str | None:
+        """How new Plaid data arrives, for Accounts › Connections."""
+        if plaid is None or not settings.plaid_webhook_url:
+            return None
+        at = db.get_kv("plaid_webhook_at")
+        if at:
+            return f"Plaid tells the app when it has new transactions (last {templates.env.filters['local'](at)}), and it checks every hour too."
+        return "Plaid tells the app when it has new transactions (none received yet), and it checks every hour too."
+
     @app.get("/api/accounts")
     async def accounts_json():
         """The Accounts page for the native app: accounts, bank connections, categories, renamed
@@ -927,6 +991,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         return {
             "banners": banners, "plaid_ready": plaid is not None,
             "accounts": accounts, "connections": connections, "ynab": ynab_line,
+            "plaid_updates": plaid_updates_line(),
             "categories": [{"id": c["id"], "name": c["name"], "color": hex_color(c.get("color")),
                             "color_name": valid_color(c.get("color")),
                             "kind": c.get("kind") if c.get("kind") in KIND_PILLS else "spending",
