@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.37:
+
+- The native app's Plaid page shows nothing of its own while Plaid opens (no "Opening Plaid" note), only an error if one happens, and closes as soon as Plaid succeeds.
+
 Version 2.2.36:
 
 - The native app's Plaid page hides its message card while the card is empty, so no blank box shows under Plaid's loading spinner.

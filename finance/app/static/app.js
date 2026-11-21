@@ -129,15 +129,18 @@ async function usePasskey() {
 const LINK_KEY = "finance_plaid_link";
 
 // After Plaid finishes: in the native app's sheet, tell the app (it closes the sheet and reloads);
-// otherwise go back to Accounts. The delay leaves the message on screen for a moment.
+// otherwise go back to Accounts. The delay leaves the message on screen for a moment; the native
+// app's /link page shows only errors, so after a success it closes at once.
 function finishLink(delay) {
+  const quiet = nativeApp() && document.body.dataset.page === "link" &&
+                !document.getElementById("msg")?.classList.contains("error");
   setTimeout(() => {
     if (nativeApp() && ["link", "oauth"].includes(document.body.dataset.page)) {
       window.webkit.messageHandlers.finance.postMessage({ link: "done" });
     } else {
       location.href = "/accounts";
     }
-  }, delay);
+  }, quiet ? 0 : delay);
 }
 
 function plaidHandler(token, extra) {
