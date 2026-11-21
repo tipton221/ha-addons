@@ -2427,3 +2427,59 @@ def test_apns_badge_and_silent_refresh(tmp_path):
     (tok, kind, collapse, body), = seen
     assert tok == "bb" * 32 and kind == "background" and collapse is None
     assert body == {"aps": {"content-available": 1}, "finance": {"clear": True}}
+
+
+def test_plaid_webhook_verified_then_sync(tmp_path, monkeypatch):
+    """Plaid's webhook skips the login but must carry Plaid's signature over this exact body,
+    under five minutes old; a verified one for a known connection starts a sync, and every
+    connection is given the webhook address."""
+    import hashlib
+    import time as _time
+    import jwt as _jwt
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from jwt.algorithms import ECAlgorithm
+    import app.main as main_mod
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(key.public_key()))
+    jwk.update({"kid": "k1", "alg": "ES256", "use": "sig", "created_at": 1, "expired_at": None})
+    hooks = []
+
+    class HookPlaid(FakePlaid):
+        async def webhook_key(self, key_id):
+            if key_id != "k1":
+                raise PlaidError(400, {"error_code": "INVALID_WEBHOOK_VERIFICATION_KEY_ID"})
+            return jwk
+
+        async def set_webhook(self, access_token, url):
+            hooks.append((access_token, url))
+
+    def signed(body: bytes, kid="k1", age=0, digest=None):
+        claims = {"iat": int(_time.time()) - age,
+                  "request_body_sha256": digest or hashlib.sha256(body).hexdigest()}
+        return _jwt.encode(claims, key, algorithm="ES256", headers={"kid": kid})
+
+    monkeypatch.setattr(main_mod, "WEBHOOK_DELAY", 0)
+    settings = make_settings(tmp_path, monkeypatch, public_url="https://finance.example.com",
+                             plaid_client_id="cid", plaid_secret="sec")
+    db = Database(tmp_path / "finance.db")
+    seed(db, [], accounts=[])  # connection i1
+    fake = HookPlaid([page(cursor="c1"), page(cursor="c2")])
+    app = create_app(settings, plaid=fake, background_sync=False)
+    body = json.dumps({"webhook_type": "TRANSACTIONS", "webhook_code": "SYNC_UPDATES_AVAILABLE",
+                       "item_id": "i1"}).encode()
+    with TestClient(app) as c:
+        post = lambda b, token: c.post("/plaid/webhook", content=b, headers={"Plaid-Verification": token} if token else {})
+        assert post(body, None).status_code == 401
+        assert post(body, signed(body, kid="nope")).status_code == 401
+        assert post(body, signed(body, age=600)).status_code == 401                 # too old
+        assert post(body, signed(b"something else")).status_code == 401            # not this body
+        assert post(body, signed(body)).status_code == 200
+        for _ in range(100):                                                         # the sync runs in the background
+            if fake.cursors:
+                break
+            _time.sleep(0.02)
+        assert fake.cursors and hooks == [("t", "https://finance.example.com/plaid/webhook")]
+        c.cookies.set("finance_session", "tok")
+        assert "last" in c.get("/api/accounts").json()["plaid_updates"]
+    assert settings.plaid_webhook_url == "https://finance.example.com/plaid/webhook"

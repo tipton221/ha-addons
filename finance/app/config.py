@@ -48,6 +48,13 @@ class Settings:
         return bool(self.plaid_client_id and self.plaid_secret)
 
     @property
+    def plaid_webhook_url(self) -> str | None:
+        """Where Plaid tells the server about new data (needs an https web address)."""
+        if self.public_url.startswith("https://"):
+            return self.public_url.rstrip("/") + "/plaid/webhook"
+        return None
+
+    @property
     def oauth_redirect_uri(self) -> str | None:
         # Plaid only accepts HTTPS redirect URIs registered in its dashboard.
         if self.public_url.startswith("https://"):

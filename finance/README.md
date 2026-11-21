@@ -43,6 +43,11 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.35:
+
+- Plaid webhooks: Plaid posts to `/plaid/webhook` when it has new data, and the server syncs about 10 seconds later (one sync covers a burst). The path skips the login, so each message must carry Plaid's signature (the `Plaid-Verification` JWT, checked with Plaid's key, under five minutes old, over this exact body), and only a known connection starts a sync. New connections get the webhook address from Link and existing ones through `/item/webhook/update`. With an https `public_url`, the scheduled sync runs hourly as a backup. Behind Cloudflare Access, the path needs a bypass, like `/.well-known/apple-app-site-association`.
+- `plaid_updates` in `GET /api/accounts`: how new Plaid data arrives, with the last webhook.
+
 Version 2.2.31:
 
 - A pending charge that posts keeps what was done to it (review, note, one-off name and category, bill, tip) even when the bank doesn't tell Plaid which posted charge replaced it: the pending one is kept for two weeks after it's removed and matched to a posted charge on the same account with the same amount (or more, up to a tip), dated from 3 days before to 14 days after.

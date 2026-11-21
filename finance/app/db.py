@@ -298,6 +298,7 @@ class Database:
                 ("products", "TEXT"),        # NULL: transactions; 'investments' for an investments-only connection
                 ("investments", "TEXT"),     # NULL: not added; 'on'; 'consent' (needs Plaid consent); 'unsupported'
                 ("investments_synced", "TEXT"),  # first full investment history pulled
+                ("webhook", "TEXT"),         # the webhook address Plaid was given for this connection
             ],
             "manual_balances": [
                 ("flow", "REAL"),            # money put in (+) or taken out (-) since the previous entry

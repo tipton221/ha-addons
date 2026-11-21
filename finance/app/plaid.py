@@ -62,7 +62,16 @@ class Plaid:
             body["transactions"] = {"days_requested": 730}
         if self.settings.oauth_redirect_uri:
             body["redirect_uri"] = self.settings.oauth_redirect_uri
+        if self.settings.plaid_webhook_url and not access_token:
+            body["webhook"] = self.settings.plaid_webhook_url  # a new connection; existing ones: set_webhook
         return (await self._post("/link/token/create", body))["link_token"]
+
+    async def set_webhook(self, access_token: str, url: str) -> None:
+        await self._post("/item/webhook/update", {"access_token": access_token, "webhook": url})
+
+    async def webhook_key(self, key_id: str) -> dict:
+        """The public key that signs Plaid's webhooks with this key ID."""
+        return (await self._post("/webhook_verification_key/get", {"key_id": key_id}))["key"]
 
     async def exchange(self, public_token: str) -> tuple[str, str]:
         data = await self._post("/item/public_token/exchange", {"public_token": public_token})
