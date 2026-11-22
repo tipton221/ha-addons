@@ -101,6 +101,20 @@ class Sessions:
             ).fetchone()
         return bool(row) and row["expires_at"] > _now().isoformat()
 
+    def renew(self, token: str | None) -> bool:
+        """Push a valid session's end out to a full length again, at most once a day, so the passkey
+        is asked for only after that long without opening the app. True when renewed."""
+        if not token:
+            return False
+        full = timedelta(hours=self.settings.session_hours)
+        now = _now()
+        with self.db.connect() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET expires_at = ? WHERE token_hash = ? AND expires_at > ? AND expires_at < ?",
+                ((now + full).isoformat(), _hash(token), now.isoformat(),
+                 (now + full - timedelta(days=1)).isoformat()))
+            return cur.rowcount > 0
+
     def revoke(self, token: str | None) -> None:
         if token:
             with self.db.connect() as conn:

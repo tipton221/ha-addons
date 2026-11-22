@@ -2483,3 +2483,66 @@ def test_plaid_webhook_verified_then_sync(tmp_path, monkeypatch):
         c.cookies.set("finance_session", "tok")
         assert "last" in c.get("/api/accounts").json()["plaid_updates"]
     assert settings.plaid_webhook_url == "https://finance.example.com/plaid/webhook"
+
+
+def test_merchant_rule_follows_a_pending_charge_that_posts_under_another_description(tmp_path):
+    """A pending charge with a merchant name posts with only the bank's description: a rule set for
+    all of the pending merchant is copied to the posted description, unless that one has its own."""
+    from app.ledger import merchant_key, resolve, set_merchant_rule
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    pend = txn("p1", 20.0, pending=True) | {"name": "Lot B Garage", "merchant_name": "Lot B Garage"}
+    plaid = FakePlaid([page(added=[pend], cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET note='visit' WHERE id='p1'")
+        cat = conn.execute("INSERT INTO categories (name) VALUES ('Parking')").lastrowid
+    set_merchant_rule(db, "lot b garage", display_name="City Parking", category_id=cat)
+    posted = txn("t1", 20.0, pending_id="p1") | {"name": "LOT B GARAGE SPRINGFIELD IL", "merchant_name": None}
+    plaid.pages = [page(added=[posted], removed=["p1"], cursor="c2")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        t1 = dict(conn.execute("SELECT * FROM transactions WHERE id='t1'").fetchone())
+        rules = {r["merchant_key"]: (r["display_name"], r["category_id"])
+                 for r in conn.execute("SELECT * FROM merchant_rules")}
+    assert t1["note"] == "visit" and merchant_key(t1) == "lot b garage springfield il"
+    assert rules["lot b garage springfield il"] == ("City Parking", cat)
+    assert resolve(db, [t1])[0]["display_name"] == "City Parking"
+    # A rule already set for the posted description is left alone.
+    with db.connect() as conn:
+        conn.execute("UPDATE merchant_rules SET display_name='Garage' WHERE merchant_key='lot b garage springfield il'")
+    plaid.pages = [page(added=[pend | {"transaction_id": "p2"}], cursor="c3")]
+    asyncio.run(sync_all(db, plaid))
+    plaid.pages = [page(added=[posted | {"transaction_id": "t2", "pending_transaction_id": "p2"}],
+                        removed=["p2"], cursor="c4")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        name = conn.execute("SELECT display_name FROM merchant_rules WHERE merchant_key='lot b garage springfield il'"
+                            ).fetchone()[0]
+    assert name == "Garage"
+
+
+def test_session_renews_with_use(tmp_path, monkeypatch):
+    """A sign-in lasts session_days (default 30) and starts over with use, at most once a day; the
+    cookie outlives it, so the server's record decides."""
+    from datetime import datetime, timedelta, timezone
+    settings = make_settings(tmp_path, monkeypatch)
+    assert settings.session_hours == 30 * 24
+    db = Database(tmp_path / "finance.db")
+    soon = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO sessions VALUES (?, ?)", (__import__("hashlib").sha256(b"tok").hexdigest(), soon))
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.get("/api/inbox").status_code == 200
+        with db.connect() as conn:
+            first = conn.execute("SELECT expires_at FROM sessions").fetchone()[0]
+        assert datetime.fromisoformat(first) > datetime.now(timezone.utc) + timedelta(days=29)
+        c.get("/api/inbox")
+        with db.connect() as conn:
+            assert conn.execute("SELECT expires_at FROM sessions").fetchone()[0] == first  # once a day at most
+    with db.connect() as conn:
+        conn.execute("UPDATE sessions SET expires_at=?", ((datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),))
+    with TestClient(create_app(settings, background_sync=False)) as c:
+        c.cookies.set("finance_session", "tok")
+        assert c.get("/api/inbox").status_code == 401  # an ended sign-in isn't brought back
