@@ -2181,6 +2181,8 @@ def test_inbox_json_matches_the_page(tmp_path, monkeypatch):
                          "VALUES ('plaid', ?, ?, ?, ?, ?, ?, ?)",
                          (tid, acct, (today - timedelta(days=days)).isoformat(), name, amount, reviewed,
                           1 if tid == "t4" else 0))
+        conn.execute("INSERT INTO bills (name, match, amount, cadence, next_due_override) VALUES "
+                     "('Lakeside Rent', 'lakeside rent', 3000, 'monthly', ?)", ((today + timedelta(days=3)).isoformat(),))
     with TestClient(app) as c:
         assert c.get("/api/inbox").status_code == 401
         c.cookies.set("finance_session", "tok")
@@ -2191,6 +2193,7 @@ def test_inbox_json_matches_the_page(tmp_path, monkeypatch):
         assert [t["id"] for t in d["to_review"]] == review_html == ["t1"]
         assert [t["id"] for g in d["groups"] for t in g["items"]] == all_html == ["t4", "t2", "t3"]
         assert d["groups"][0]["label"] == "Today" and d["next"] is None
+        assert d["scheduled"]["next"].startswith("Next ") and d["scheduled"]["next"].endswith(" · $3,000.00 · Lakeside Rent")
         t3 = next(t for g in d["groups"] for t in g["items"] if t["id"] == "t3")
         assert t3["amount"] == "$200.00" and t3["inflow"] is True
         assert d["to_review"][0]["amount"] == "-$12.50" and d["to_review"][0]["date_label"]

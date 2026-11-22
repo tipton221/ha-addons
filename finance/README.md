@@ -43,6 +43,10 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.39:
+
+- The native Inbox's Scheduled line includes the next bill's amount: "Next Nov 23 · $13.99 · Streaming Plus" (with ≈ for a bill that varies).
+
 Version 2.2.38:
 
 - Passkey sign-ins last 30 days by default (the `session_days` option, replacing `session_hours`), and using the app starts the 30 days over (at most once a day), so the passkey is asked for only after a month without opening it.
