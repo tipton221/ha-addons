@@ -90,7 +90,8 @@ opts |= {
     "apple_app_id": e["APPLE"].strip(), "apns_key_id": e["APNS_KEY"].strip(),
 }
 opts.setdefault("sync_interval_hours", 1)
-opts.setdefault("session_hours", 24)
+opts.pop("session_hours", None)
+opts.setdefault("session_days", 30)
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w") as f:
     json.dump(opts, f, indent=2)

@@ -331,11 +331,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
 
         # Layer 2: app session (passkey).
         if not (path.startswith("/static/") or path in PUBLIC_PATHS):
-            if not sessions.valid(request.cookies.get(SESSION_COOKIE)):
+            session = request.cookies.get(SESSION_COOKIE)
+            if not sessions.valid(session):
                 if path.startswith("/api/"):
                     return JSONResponse({"error": "login required"}, status_code=401)
                 target = "/setup" if passkeys.count() == 0 else "/login"
                 return RedirectResponse(target, status_code=303)
+            sessions.renew(session)
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = csp(request.state.nonce)
@@ -343,6 +345,10 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    # The session cookie outlives any session: the server decides when a sign-in ends (it renews with
+    # use), and the native app's requests can't refresh a cookie, so its expiry must not end it first.
+    SESSION_COOKIE_AGE = 400 * 86400
 
     def set_cookie(resp: Response, name: str, value: str, max_age: int) -> None:
         resp.set_cookie(name, value, max_age=max_age, httponly=True,
@@ -392,7 +398,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             raise HTTPException(400, f"Passkey not accepted: {e}")
         resp = JSONResponse({"ok": True})
         if not signed_in:
-            set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
+            set_cookie(resp, SESSION_COOKIE, sessions.create(), SESSION_COOKIE_AGE)
         return resp
 
     @app.post("/api/auth/options")
@@ -416,7 +422,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         if not ok:
             raise HTTPException(401, "Passkey not recognized")
         resp = JSONResponse({"ok": True})
-        set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
+        set_cookie(resp, SESSION_COOKIE, sessions.create(), SESSION_COOKIE_AGE)
         return resp
 
     @app.post("/api/signin-code")
@@ -434,7 +440,7 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             raise HTTPException(401, "That code didn't work. Codes last five minutes and work once; make a new one on a signed-in device.")
         log.info("Signed in with a one-time code")
         resp = JSONResponse({"ok": True})
-        set_cookie(resp, SESSION_COOKIE, sessions.create(), settings.session_hours * 3600)
+        set_cookie(resp, SESSION_COOKIE, sessions.create(), SESSION_COOKIE_AGE)
         return resp
 
     @app.post("/api/backup")

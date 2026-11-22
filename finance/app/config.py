@@ -83,7 +83,8 @@ def load_settings() -> Settings:
         plaid_secret=s("plaid_secret"),
         ynab_token=s("ynab_token"),
         sync_interval_hours=int(opts.get("sync_interval_hours") or 4),
-        session_hours=int(opts.get("session_hours") or 24),
+        # session_days replaced session_hours in 2.2.38; an old saved session_hours is ignored.
+        session_hours=int(opts.get("session_days") or 30) * 24,
         apple_app_id=s("apple_app_id"),
         apns_key_id=s("apns_key_id"),
     )

@@ -17,7 +17,7 @@ It runs a small web app (FastAPI, SQLite) and a bundled `cloudflared` connector 
 | `plaid_client_id`, `plaid_secret` | From the Plaid dashboard, Build > Keys |
 | `ynab_token` | YNAB personal access token (YNAB Account Settings > Developer Settings) |
 | `sync_interval_hours` | How often to pull from Plaid (default 4) |
-| `session_hours` | How long a passkey sign-in lasts (default 24) |
+| `session_days` | How long a passkey sign-in lasts without opening the app (default 30); each day of use starts it over |
 
 ## Login layers
 
@@ -42,6 +42,11 @@ FINANCE_DATA_DIR=/tmp/fin .venv/bin/uvicorn app.main:create_app --factory --port
 Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions need the HTTPS address, because Plaid only redirects to registered HTTPS URIs.
 
 ## Status
+
+Version 2.2.38:
+
+- Passkey sign-ins last 30 days by default (the `session_days` option, replacing `session_hours`), and using the app starts the 30 days over (at most once a day), so the passkey is asked for only after a month without opening it.
+- A name or category set for all of a merchant on a pending charge now also covers the posted charge when the bank describes it differently once it posts (for example, a merchant name while pending and only the bank description after): the rule is copied to the posted description, so later charges follow it too.
 
 Version 2.2.37:
 

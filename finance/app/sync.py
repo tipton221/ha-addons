@@ -82,11 +82,29 @@ def _carry(conn, row, posted_id: str, posted_amount: float, pending_id: str) -> 
         (reviewed, row["note"], row["category_id"], row["name_override"], row["bill_id"], row["tip"],
          row["amount"] if abs(row["amount"] - posted_amount) >= 0.005 else None, pending_id,
          datetime.now(timezone.utc).isoformat(timespec="seconds"), posted_id))
+    _carry_rule(conn, row, posted_id)
+
+
+def _carry_rule(conn, row, posted_id: str) -> None:
+    """A merchant-wide name or category set on the pending charge also covers the posted one when the
+    bank describes it differently once it posts (a pending "Coffee Cart" that posts as "COFFEE CART
+    SPRINGFIELD IL", with no merchant name): the rule is copied to the posted charge's merchant, so
+    later charges described that way follow it too. A rule already set for that merchant wins."""
+    old = normalize(row["merchant"] or row["name"] or "")
+    posted = conn.execute("SELECT merchant, name FROM transactions WHERE source='plaid' AND id=?",
+                          (posted_id,)).fetchone()
+    new = normalize(posted["merchant"] or posted["name"] or "") if posted else ""
+    if not old or not new or old == new:
+        return
+    rule = conn.execute("SELECT display_name, category_id FROM merchant_rules WHERE merchant_key=?", (old,)).fetchone()
+    if rule and (rule["display_name"] or rule["category_id"] is not None):
+        conn.execute("INSERT OR IGNORE INTO merchant_rules (merchant_key, display_name, category_id) VALUES (?, ?, ?)",
+                     (new, rule["display_name"], rule["category_id"]))
 
 
 def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: float) -> bool:
     """When a pending charge posts and Plaid links the two, keep what was done to the pending one."""
-    row = conn.execute(f"SELECT amount, {CARRIED} FROM transactions WHERE source='plaid' AND id=?",
+    row = conn.execute(f"SELECT amount, name, merchant, {CARRIED} FROM transactions WHERE source='plaid' AND id=?",
                        (pending_id,)).fetchone()
     if not row:
         return False
