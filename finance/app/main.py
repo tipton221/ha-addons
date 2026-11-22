@@ -605,7 +605,9 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "synced_at": datetime.fromisoformat(synced).timestamp() if synced else None,
             "to_review": [txn_json(t, dated=True) for t in c["inbox"]],
             "scheduled": {
-                "count": len(up), "next": f"Next {shortdate(up[-1]['next_due'].isoformat())} · {up[-1]['name']}",
+                # "Next <date> · <amount> · <name>"; the iPhone app puts the name on its own line.
+                "count": len(up), "next": (f"Next {shortdate(up[-1]['next_due'].isoformat())} · "
+                                           f"{'≈ ' if up[-1].get('varies') else ''}{money(up[-1]['amount'])} · {up[-1]['name']}"),
                 "out": f"-{money(c['upcoming_out'])}", "in": f"+{money(c['upcoming_in'])}" if c["upcoming_in"] else None,
             } if up else None,
             "accounts": [{"id": a["account_id"], "name": a["pill"], "label": a["label"], "visibility": a["visibility"]}
