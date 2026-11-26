@@ -2549,3 +2549,105 @@ def test_session_renews_with_use(tmp_path, monkeypatch):
     with TestClient(create_app(settings, background_sync=False)) as c:
         c.cookies.set("finance_session", "tok")
         assert c.get("/api/inbox").status_code == 401  # an ended sign-in isn't brought back
+
+
+def test_linked_pending_is_merged_even_when_plaid_keeps_it(tmp_path):
+    """Some banks have Plaid send the posted charge (linked to its pending one) before removing the
+    pending one. It's merged right away, a later update of it doesn't bring it back, and its
+    eventual removal leaves nothing to match elsewhere."""
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    plaid = FakePlaid([page(added=[txn("p1", -150.0, pending=True)], cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET note='return' WHERE id='p1'")
+    plaid.pages = [page(added=[txn("t1", -150.0, pending_id="p1")], cursor="c2")]  # no removal yet
+    asyncio.run(sync_all(db, plaid))
+    plaid.pages = [page(modified=[txn("p1", -150.0, pending=True)], cursor="c3")]
+    asyncio.run(sync_all(db, plaid))
+    plaid.pages = [page(removed=["p1"], cursor="c4")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        rows = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM transactions")}
+        gone = conn.execute("SELECT COUNT(*) FROM pending_gone").fetchone()[0]
+    assert set(rows) == {"t1"} and rows["t1"]["note"] == "return" and gone == 0
+
+
+def test_pending_already_linked_is_dropped_on_sync(tmp_path):
+    """A pending charge left behind before this fix, whose posted charge already names it, goes on
+    the next sync."""
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    plaid = FakePlaid([page(added=[txn("p1", 9.0, pending=True), txn("t1", 9.0)], cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET pending_id='p1' WHERE id='t1'")
+    plaid.pages = [page(cursor="c2")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        assert [r["id"] for r in conn.execute("SELECT id FROM transactions")] == ["t1"]
+
+
+def test_match_pending_to_posted_by_hand(tmp_path, monkeypatch):
+    rows = [("p1", "card", "2026-11-10", "LAKE FURNITURE", "Lake Furniture", -300.0, 1, "GENERAL_MERCHANDISE", "X", 1),
+            ("t1", "card", "2026-11-12", "LAKE FURNITURE CO", "Lake Furniture", -300.0, 0, "GENERAL_MERCHANDISE", "X", 0),
+            ("t2", "card", "2026-11-12", "LAKE FURNITURE CO", "Lake Furniture", 300.0, 0, "GENERAL_MERCHANDISE", "X", 0),
+            ("t3", "card", "2026-10-01", "LAKE FURNITURE CO", "Lake Furniture", -300.0, 0, "GENERAL_MERCHANDISE", "X", 0)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with db.connect() as conn:
+        conn.execute("UPDATE transactions SET note='return' WHERE id='p1'")
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        d = c.get("/api/transactions/plaid/p1").json()
+        assert [m["id"] for m in d["posted_matches"]] == ["t1"]  # not a charge, not a month earlier
+        assert c.post("/api/transactions/plaid/p1/posted-as", json={"posted_id": "t2"}, headers=H).status_code == 400
+        assert c.post("/api/transactions/plaid/p1/posted-as", json={"posted_id": "t1"}, headers=H).status_code == 200
+        assert c.get("/api/transactions/plaid/t1").json()["note"] == "return"
+        assert c.get("/api/transactions/plaid/p1").status_code == 404
+    with db.connect() as conn:
+        assert conn.execute("SELECT posted_id FROM pending_merged WHERE id='p1'").fetchone()[0] == "t1"
+
+
+def test_merchant_rename_keeps_unchecked_rows(tmp_path, monkeypatch):
+    """Plaid gave one merchant name to two kinds of charges. The doubtful ones open unchecked, from
+    either side, and unchecked ones keep their name and category."""
+    rows = [("g1", "card", "2026-11-20", "ZIPFUEL 4411 CAT", "ZipFuel", 30.0, 0, "TRANSPORTATION", "X", 1),
+            ("g2", "card", "2026-11-01", "ZIPFUEL 5520 CAT", "ZipFuel", 28.0, 0, "TRANSPORTATION", "X", 1),
+            ("r1", "card", "2026-10-01", "ZPS*HOMEPAY RENT", "ZipFuel", 1800.0, 0, "RENT_AND_UTILITIES", "X", 1),
+            ("r2", "card", "2026-09-01", "ZPS*HOMEPAY RENT", "ZipFuel", 1800.0, 0, "RENT_AND_UTILITIES", "X", 1)]
+    db, app = client_with(tmp_path, monkeypatch, rows, [("card", "Card A", "credit", 0, None)])
+    with TestClient(app) as c:
+        c.cookies.set("finance_session", "tok")
+        cats = {x["name"]: x["id"] for x in c.get("/api/categories").json()["categories"]}
+        likely = {r["id"]: r["likely"] for r in c.get("/api/transactions/plaid/g1").json()["merchant_rows"]}
+        assert likely == {"g2": True, "r1": False, "r2": False}
+        likely = {r["id"]: r["likely"] for r in c.get("/api/transactions/plaid/r1").json()["merchant_rows"]}
+        assert likely == {"g1": False, "g2": False, "r2": True}
+        # Rent was renamed for the whole merchant earlier; now the fuel charges get their own name.
+        c.post("/api/transactions/plaid/r1", json={"display_name": "Homepay Rent", "category_id": cats["Rent"],
+               "scope": "merchant"}, headers=H)
+        assert c.post("/api/transactions/plaid/g1", json={"display_name": "Corner Fuel", "category_id": cats["Transportation"],
+                      "scope": "merchant", "keep": ["r1", "r2", "unknown"]}, headers=H).status_code == 200
+        got = {t: c.get(f"/api/transactions/plaid/{t}").json() for t in ("g1", "g2", "r1", "r2")}
+        assert [got[t]["display_name"] for t in ("g1", "g2", "r1", "r2")] == ["Corner Fuel", "Corner Fuel",
+                                                                               "Homepay Rent", "Homepay Rent"]
+        assert got["r1"]["category_id"] == cats["Rent"] and got["g2"]["category_id"] == cats["Transportation"]
+        # A later fuel charge follows the merchant-wide choice.
+        seed(db, [("g3", "card", "2026-11-25", "ZIPFUEL 4411 CAT", "ZipFuel", 31.0, 1, "TRANSPORTATION", "X", 0)])
+        assert c.get("/api/transactions/plaid/g3").json()["display_name"] == "Corner Fuel"
+
+
+def test_loose_match_does_not_copy_a_rule_to_an_unrelated_merchant(tmp_path):
+    from app.ledger import set_merchant_rule
+    db = Database(tmp_path / "f.db")
+    seed_item(db)
+    plaid = FakePlaid([page(added=[txn("p1", 20.0, pending=True) | {"name": "Lot B Garage", "merchant_name": "Lot B Garage"}],
+                            cursor="c1")])
+    asyncio.run(sync_all(db, plaid))
+    set_merchant_rule(db, "lot b garage", display_name="City Parking")
+    # Removed with no link; the only posted charge nearby is another merchant.
+    plaid.pages = [page(added=[txn("t1", 20.0) | {"name": "Pine Bakery", "merchant_name": "Pine Bakery"}],
+                        removed=["p1"], cursor="c2")]
+    asyncio.run(sync_all(db, plaid))
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM merchant_rules WHERE merchant_key='pine bakery'").fetchone()[0] == 0

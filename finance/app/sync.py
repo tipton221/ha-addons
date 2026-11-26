@@ -94,7 +94,9 @@ def _carry_rule(conn, row, posted_id: str) -> None:
     posted = conn.execute("SELECT merchant, name FROM transactions WHERE source='plaid' AND id=?",
                           (posted_id,)).fetchone()
     new = normalize(posted["merchant"] or posted["name"] or "") if posted else ""
-    if not old or not new or old == new:
+    # Only the same merchant described another way (a shared word), never an unrelated merchant
+    # a loose match landed on.
+    if not old or not new or old == new or not set(old.split()) & set(new.split()):
         return
     rule = conn.execute("SELECT display_name, category_id FROM merchant_rules WHERE merchant_key=?", (old,)).fetchone()
     if rule and (rule["display_name"] or rule["category_id"] is not None):
@@ -110,6 +112,48 @@ def carry_from_pending(conn, pending_id: str, posted_id: str, posted_amount: flo
         return False
     _carry(conn, row, posted_id, posted_amount, pending_id)
     return True
+
+
+def merge_pending(conn, pending_id: str, posted_id: str) -> None:
+    """The pending charge is the posted one: keep what was done to it on the posted charge, then
+    drop it, remembering its id so a later sync that still lists it as pending doesn't bring it back."""
+    row = conn.execute(f"SELECT amount, name, merchant, {CARRIED} FROM transactions WHERE source='plaid' AND id=?",
+                       (pending_id,)).fetchone()
+    posted = conn.execute("SELECT amount FROM transactions WHERE source='plaid' AND id=?", (posted_id,)).fetchone()
+    if row and posted:
+        _carry(conn, row, posted_id, posted["amount"], pending_id)
+    conn.execute("INSERT OR REPLACE INTO pending_merged (id, posted_id) VALUES (?, ?)", (pending_id, posted_id))
+    conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=? AND pending=1", (pending_id,))
+
+
+def drop_linked_pending(conn) -> int:
+    """Pending charges a posted charge already names as its pending one, when the bank hasn't had
+    Plaid remove them yet. What was done to them was carried over when the posted one arrived."""
+    rows = conn.execute("SELECT p.id, t.id AS posted_id FROM transactions p JOIN transactions t "
+                        "ON t.source='plaid' AND t.pending=0 AND t.pending_id = p.id "
+                        "WHERE p.source='plaid' AND p.pending=1").fetchall()
+    for r in rows:
+        conn.execute("INSERT OR REPLACE INTO pending_merged (id, posted_id) VALUES (?, ?)", (r["id"], r["posted_id"]))
+        conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=?", (r["id"],))
+    return len(rows)
+
+
+def posted_candidates(conn, pending_id: str, limit: int = 8) -> list[dict]:
+    """Posted charges a pending one may have become, for matching by hand: the same account and
+    direction, an amount within 30 percent, dated from 3 days before to 14 days after, not already
+    matched to another pending charge. Closest amount, then nearest date, first."""
+    p = conn.execute("SELECT * FROM transactions WHERE source='plaid' AND id=? AND pending=1", (pending_id,)).fetchone()
+    if not p:
+        return []
+    d, a = date.fromisoformat(p["date"]), abs(p["amount"])
+    rows = conn.execute(
+        "SELECT * FROM transactions WHERE source='plaid' AND pending=0 AND account_id=? AND pending_id IS NULL "
+        "AND date BETWEEN ? AND ? AND amount * ? > 0 AND ABS(amount) BETWEEN ? AND ?",
+        (p["account_id"], (d - timedelta(days=MATCH_DAYS_BEFORE)).isoformat(),
+         (d + timedelta(days=MATCH_DAYS_AFTER)).isoformat(), p["amount"], a * 0.7 - 0.005, a * 1.3 + 0.005)).fetchall()
+    rows = sorted((dict(r) for r in rows), key=lambda r: (round(abs(abs(r["amount"]) - a), 2),
+                                                          abs((date.fromisoformat(r["date"]) - d).days)))
+    return rows[:limit]
 
 
 def _words(t) -> set[str]:
@@ -173,13 +217,20 @@ async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
 
     with db.connect() as conn:
         linked = set()
+        merged = {r["id"] for r in conn.execute("SELECT id FROM pending_merged")}
         for t in added + modified:
+            if t.get("pending") and t["transaction_id"] in merged:
+                continue  # already merged into its posted charge
             conn.execute(UPSERT, _txn_row(t))
             # When a pending charge posts, Plaid sends the posted one with a
-            # link back to the pending one, and removes the pending one.
-            if t.get("pending_transaction_id") and carry_from_pending(
-                    conn, t["pending_transaction_id"], t["transaction_id"], t["amount"]):
-                linked.add(t["pending_transaction_id"])
+            # link back to the pending one, and removes the pending one (some
+            # banks only later: until then it's merged here so it isn't counted twice).
+            pid = t.get("pending_transaction_id")
+            if pid and carry_from_pending(conn, pid, t["transaction_id"], t["amount"]):
+                linked.add(pid)
+                conn.execute("INSERT OR REPLACE INTO pending_merged (id, posted_id) VALUES (?, ?)",
+                             (pid, t["transaction_id"]))
+                conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=? AND pending=1", (pid,))
         for tid in removed:
             if tid not in linked:
                 # Removed with no posted charge pointing to it: keep it a while to match by hand.
@@ -187,7 +238,9 @@ async def sync_item(db: Database, plaid: Plaid, item: dict) -> dict:
                              f"SELECT id, account_id, date, name, merchant, amount, {CARRIED} FROM transactions "
                              "WHERE source='plaid' AND id=? AND pending=1", (tid,))
             conn.execute("DELETE FROM transactions WHERE source='plaid' AND id=?", (tid,))
+        drop_linked_pending(conn)
         match_gone(conn)
+        conn.execute("DELETE FROM pending_merged WHERE merged_at < datetime('now', '-60 days')")
         conn.execute(
             "UPDATE plaid_items SET cursor=?, update_status=?, status='ok', error_code=NULL, "
             "last_sync_at=? WHERE item_id=?",
