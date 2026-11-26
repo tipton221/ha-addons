@@ -41,7 +41,7 @@ from .insights import (KIND_LABELS, KIND_PILLS, KINDS, MANUAL_DEBTS, MANUAL_KIND
                        spending_rows)
 from .ledger import (COLORS, categories, colors_css, group_by_date, list_transactions, merchant_key, pair_transfers, resolve,
                      seed_categories, set_merchant_rule, valid_color, TRANSFER_CATEGORY)
-from .sync import refresh_accounts, sync_all, sync_ynab
+from .sync import merge_pending, posted_candidates, refresh_accounts, sync_all, sync_ynab
 from .ynab_names import apply_ynab_names
 from .webhooks import Verifier
 from .ynab import YNAB
@@ -705,7 +705,63 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             "bills": bill_choices(t["amount"] < 0),
             "merchant_count": len(keys.get(t["merchant_key"], [])),
             "similar": similar_merchants(t["merchant_key"], keys),
+            "merchant_rows": merchant_rows(t),
+            "posted_matches": posted_matches(t) if t["pending"] else [],
         }
+
+    MERCHANT_ROWS_MAX = 300
+
+    def merchant_rows(t: dict) -> list[dict]:
+        """The other transactions "All from this merchant" would change (newest first, up to 300;
+        older ones beyond that are always included), each with "likely": false when it probably
+        isn't the same merchant. Plaid sometimes gives one merchant name to unrelated charges, so a
+        row is doubted when its bank description starts differently from this one's and only one of
+        the two descriptions mentions the merchant's name."""
+        key = t["merchant_key"]
+        with db.connect() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT rowid, id, merchant, name FROM transactions WHERE source='plaid' AND id != ?", (t["id"],))]
+        ids = [r["id"] for r in rows if merchant_key(r) == key]
+        if not ids:
+            return []
+        found = resolve(db, list_transactions(db, where=f"t.source = 'plaid' AND t.id IN ({','.join('?' * len(ids))})",
+                                              params=tuple(ids), limit=MERCHANT_ROWS_MAX))
+
+        def words(text):
+            return normalize(text or "").split()
+
+        def mentions(r):
+            m = words(r.get("merchant"))
+            return bool(m) and set(m) <= set(words(r["name"]))
+
+        mine_first, mine_mentions = (words(t["name"]) or [""])[0], mentions(t)
+        out = []
+        for r in found:
+            first = (words(r["name"]) or [""])[0]
+            doubt = bool(r.get("merchant")) and first != mine_first and mentions(r) != mine_mentions
+            out.append({"id": r["id"], "date": r["date"], "amount": money(-r["amount"]), "bank": r["name"],
+                        "name": r["display_name"], "category": (r["category_info"] or {}).get("name"),
+                        "likely": not doubt})
+        return out
+
+    def posted_matches(t: dict) -> list[dict]:
+        """Posted charges this pending one may have become, to match by hand."""
+        with db.connect() as conn:
+            rows = posted_candidates(conn, t["id"])
+        return [{"id": r["id"], "date": r["date"], "amount": money(-r["amount"]), "name": r["display_name"],
+                 "bank": r["name"]} for r in resolve(db, rows)] if rows else []
+
+    @app.post("/api/transactions/plaid/{tid}/posted-as")
+    async def pending_posted_as(tid: str, request: Request):
+        """Match a pending charge to the posted charge it became: its name, category, note, review,
+        bill, and tip move to the posted one, and the pending one goes away."""
+        body = await request.json()
+        posted_id = str(body.get("posted_id") or "")
+        with db.connect() as conn:
+            if posted_id not in {r["id"] for r in posted_candidates(conn, tid, limit=50)}:
+                raise HTTPException(400, "That posted charge can't be matched to this pending one")
+            merge_pending(conn, tid, posted_id)
+        return {"ok": True}
 
     # Prefixes that say how someone paid, not who they paid, so they do not make merchants "similar".
     GENERIC_FIRST_WORDS = {"transfer", "sq", "tst", "pos", "paypal", "debit", "purchase", "check", "online",
@@ -816,7 +872,16 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
         t = find_txn(source, tid)
         body = await request.json()
         scope = "this" if body.get("scope") == "this" else "merchant"
-        # Similar merchant keys the user chose to include (checked against the real list).
+        # Transactions of this merchant the user unchecked: they keep their current name and
+        # category, pinned as one-off choices once the merchant-wide ones are applied.
+        keep = []
+        if scope == "merchant" and body.get("keep"):
+            wanted = {str(k) for k in body["keep"]}
+            keep = [(r["id"], r["display_name"], (r["category_info"] or {}).get("id"))
+                    for r in resolve(db, list_transactions(
+                        db, where=f"t.source = 'plaid' AND t.id IN ({','.join('?' * len(wanted))})",
+                        params=tuple(wanted), limit=len(wanted)))
+                    if r["merchant_key"] == t["merchant_key"] and r["id"] != t["id"]]
         also = []
         if scope == "merchant" and body.get("similar"):
             allowed = {s["key"] for s in similar_merchants(t["merchant_key"], merchant_keys())}
@@ -866,6 +931,13 @@ def create_app(settings: Settings | None = None, plaid: Plaid | None = None,
             note = str(body["note"] or "").strip()[:500] or None
             with db.connect() as conn:
                 conn.execute("UPDATE transactions SET note=? WHERE source=? AND id=?", (note, source, tid))
+        if keep:
+            with db.connect() as conn:
+                for kid, kname, kcat in keep:
+                    if "display_name" in body:
+                        conn.execute("UPDATE transactions SET name_override=? WHERE source='plaid' AND id=?", (kname, kid))
+                    if "category_id" in body:
+                        conn.execute("UPDATE transactions SET category_id=? WHERE source='plaid' AND id=?", (kcat, kid))
         return {"ok": True}
 
     def clear_name_overrides(key: str) -> None:

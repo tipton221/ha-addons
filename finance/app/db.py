@@ -226,6 +226,14 @@ CREATE TABLE IF NOT EXISTS manual_balances (
     PRIMARY KEY (account_id, day)
 );
 
+-- Pending charges already merged into their posted charge (Plaid linked them, or matched by hand)
+-- while Plaid still lists them as pending: kept so a later sync doesn't bring them back.
+CREATE TABLE IF NOT EXISTS pending_merged (
+    id              TEXT PRIMARY KEY,
+    posted_id       TEXT NOT NULL,
+    merged_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Pending charges Plaid removed without saying which posted charge replaced them (some banks
 -- don't), kept a while so the posted one can still be matched and keep what was done to it.
 CREATE TABLE IF NOT EXISTS pending_gone (

@@ -43,6 +43,13 @@ Passkeys work on `http://localhost` for local testing. Plaid OAuth institutions 
 
 ## Status
 
+Version 2.2.40:
+
+- A pending charge whose posted charge Plaid has already linked to it is merged at once, even when the bank has Plaid keep listing it as pending for a while, so the two aren't counted twice; a later sync doesn't bring it back. Pending charges left over from before are cleared on the next sync.
+- Match a pending charge to its posted charge by hand (`posted_matches` in a pending transaction's details, `POST /api/transactions/plaid/{id}/posted-as`): what was done to it moves to the posted charge and it goes away. Candidates are on the same account and in the same direction, within 30 percent of the amount, from 3 days before to 14 days after.
+- "All from this merchant" can leave out transactions: the details list the merchant's other transactions (`merchant_rows`, newest 300), with `likely: false` on ones that probably aren't the same merchant (the bank description starts differently and only one of the two mentions the merchant's name, as when Plaid gives a payment service's charges a store's name). Ids sent as `keep` keep their current name and category as one-off choices. An edit without `keep` works as before.
+- A merchant-wide rule follows a pending charge to its posted description only when the two share a word, so a loose match can't rename an unrelated merchant.
+
 Version 2.2.39:
 
 - The native Inbox's Scheduled line includes the next bill's amount: "Next Nov 23 · $13.99 · Streaming Plus" (with ≈ for a bill that varies).
